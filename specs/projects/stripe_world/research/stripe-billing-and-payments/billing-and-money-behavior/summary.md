@@ -176,49 +176,68 @@ and is not worth full-fidelity modeling against the project's 40-60-tool budget.
 
 ## Open Questions / Gaps
 
-Aggregated from the per-file gap lists (see each file's "Gaps"/"Open Questions" section for full detail
-and recommended settling method — mostly "read the blocked docs page directly once egress allows it" or
-"a recorded API trace against test mode"):
+**Update 2026-09-18**: nine items from this list (the `unpaid`→`active` recovery question, the
+`subscription_cycle` lead time, the proration rounding rule's core independent-vs-net question, the
+ninth hard-decline code, the `unpaid`-outcome draft-vs-closed contradiction, `dispute.status=prevented`'s
+definition, the dispute `balance_transaction.type`, and dispute fee refundability) were closed or
+substantially refined by a follow-up pass using a newly-connected Tavily MCP server that reaches
+`docs.stripe.com` directly. Full detail in **[gap-closure-2026-09-18.md](./gap-closure-2026-09-18.md)**.
+They have been removed from the list below; what remains genuinely open:
 
-- Does `subscription.status=unpaid` recover to `active` automatically once invoices are paid, or does it
-  require an explicit call?
-- Exact lead time before a subscription's period boundary at which the `subscription_cycle` invoice is
-  created.
-- Exact rounding rule for proration line-item cent amounts (round-half-up inferred, not confirmed), and
-  whether credit/debit lines round independently or net-then-round.
-- Exact behavior of a pure quantity-only change (whole-item reproration vs. delta-only) — inferred by
-  analogy, not directly documented.
-- The ninth hard-decline retry-gating code (only 8 of 9 recovered).
-- Contradiction between two sources on `unpaid`-outcome invoice status (`draft` vs. spec's "immediately
-  automatically closed" wording).
-- `dispute.status=prevented` — trigger and fund-movement semantics not corroborated at all this pass.
-- Exact `balance_transaction.type` used for dispute withdrawal/reinstatement (inferred as `adjustment`).
-- Dispute fee amount/refundability on a win — not verified this session.
+- Exact tie-break rounding convention for proration line-item amounts at an exact `x.xx5` cent boundary
+  (round-half-up is a low-risk assumption; the general nearest-cent, independent-per-line rule itself is
+  now confirmed — see `gap-closure-2026-09-18.md` item 1). Also unconfirmed: whether the
+  independently-rounded-then-summed behavior holds identically under `billing_mode=flexible` (directly
+  confirmed only for `billing_mode=classic`).
+- Exact behavior of a pure quantity-only change lacks an isolated numeric worked example (the underlying
+  mechanism — whole-configuration reproration, not delta-only — is now directly confirmed to be the same
+  as for price changes; see `gap-closure-2026-09-18.md` item 3).
+- Exact `proration_behavior`/param semantics on the subscription **delete** (immediate cancel) endpoint
+  specifically — not targeted by either pass; low risk, confirm against `spec3.json` paths directly if
+  it matters for the schema subtopic.
+- Whether an RDR/Ethoca-resolved dispute (as opposed to a fully CE3.0-blocked one) creates a `Dispute`
+  API object with `status=prevented` and a corresponding `balance_transaction`, or no object at all —
+  `gap-closure-2026-09-18.md` item 7 narrowed this considerably but didn't fully close it. Recommend
+  modeling a `prevented` dispute with `balance_transactions=[]` as the safe default.
+- No confirmation of whether the dunning retry schedule (count/window) is API-inspectable/settable per
+  subscription, or purely a Dashboard-level account setting.
 - Real-world settlement delay (`available_on` offset) varies by country; no single spec constant exists.
 - `credit_note.type=mixed` and `subscription_schedule.end_behavior` values `none`/`renew` — present in
   closed enums but undocumented in the property text found this pass.
 - Whether Stripe's own MCP server/agent-toolkit exposes subscription-schedule tools (cross-subtopic
   dependency with subtopic 5, would strengthen the inclusion case if true).
 
-None of these gaps block writing a functional spec — each has either a stated best inference or an
-explicit "treat as configurable/undecided until a trace confirms it" recommendation. The one gap worth
-escalating to the manager/synthesis step specifically is the **proration rounding rule**, since the
-research plan calls it out as "the single thing most likely to be got wrong downstream" and it genuinely
-could not be pinned to a directly-quoted source in this session.
+None of these remaining gaps block writing a functional spec — each has either a stated best inference or
+an explicit "treat as configurable/undecided until a trace confirms it" recommendation. The proration
+rounding rule — previously the single gap most worth escalating, since the research plan called it out as
+"the single thing most likely to be got wrong downstream" — is now settled for its load-bearing question
+(independent-per-line, nearest-cent, not net-then-round); only a narrow tie-break-convention detail
+remains genuinely undocumented.
 
 ## Sources
 
-All per-claim sources are cited inline in the six detail files. At the aggregate level:
+All per-claim sources are cited inline in the detail files, including the new
+`gap-closure-2026-09-18.md`. At the aggregate level:
 
 - `research/stripe-openapi/spec3.json` (API version `2026-08-26.dahlia`, fetched 2026-09-18) — used
   directly via short Python scripts for every enum and every field `description` quoted as
   "spec3.json, verbatim" throughout. This was the single strongest and most-used source in this
-  subtopic, more so than initially expected, because Stripe embeds substantial docs prose directly into
-  the OpenAPI spec's `description` fields.
-- `WebSearch` tool results, 2026-09-18 — used for everything not present in the spec (proration worked
-  examples, dunning configuration, dispute-lifecycle narrative, payout/settlement timing, credit-note
-  and subscription-schedule usage guidance). Direct fetch of `docs.stripe.com`/`stripe.com` was blocked
-  for the entire session (organization egress policy) — confirmed via `WebFetch` errors and direct
+  subtopic's original pass, more so than initially expected, because Stripe embeds substantial docs
+  prose directly into the OpenAPI spec's `description` fields.
+- **`tavily_extract` (Tavily MCP), 2026-09-18** — used in the gap-closure pass to directly fetch and read
+  `docs.stripe.com` pages in full, now that this domain is reachable through this tool (it was blocked
+  for the entire original pass). This is the strongest prose-doc source tier available to this lane —
+  full verbatim page content, not a search snippet. Pages read directly: `billing/subscriptions/prorations`,
+  `billing/subscriptions/change-price`, `billing/subscriptions/quantities`,
+  `billing/scripts/prorations`, `billing/scripts/stripe-authored/proration`,
+  `billing/revenue-recovery/smart-retries`, `billing/invoices/subscription`,
+  `billing/subscriptions/overview`, `disputes/how-disputes-work`, `disputes/get-started/prevention`,
+  `disputes`, `api/disputes/object`, `disputes/responding`, `reports/balance-transaction-types`. See
+  `gap-closure-2026-09-18.md` for exact quotes attributed to each.
+- `WebSearch` tool results, 2026-09-18 (original pass) — used for everything not present in the spec and
+  not re-verified in the gap-closure pass (e.g. general dunning/ML-model commentary, some
+  payout/settlement-timing narrative). Direct fetch of `docs.stripe.com`/`stripe.com` was blocked for the
+  entire original-pass session (organization egress policy) — confirmed via `WebFetch` errors and direct
   `curl` CONNECT-403s against multiple paths and mirrors, documented at the top of every detail file.
 - No repository source code (`stripe-python`, `stripe-mock`) was needed for this subtopic beyond
   confirming it existed on disk; the money-behavior questions here are prose/spec questions, not
