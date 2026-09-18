@@ -420,3 +420,8 @@ reward functions.
 | `components/fixtures.md` | Timeline simulation, per-fixture composition, bulk vs through-the-tools |
 | `components/conformance.md` | Cassette format, recorder, replayer, the allow-list |
 | `components/evals.md` | The eval tasks and their SQL reward functions |
+
+Resource slices do **not** each get a component design. They follow one recipe, documented in
+[`implementation_plan.md`](implementation_plan.md), over the `ResourceSpec` engine in
+`components/dispatcher.md` and the per-table DDL in `components/data_model.md`. A design doc per
+resource would be twenty-odd copies of the same document.
