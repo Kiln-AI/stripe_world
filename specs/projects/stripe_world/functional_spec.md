@@ -1,5 +1,5 @@
 ---
-status: draft
+status: complete
 ---
 
 # Functional Spec: StripeAPI — a Seahaven world
@@ -38,8 +38,8 @@ than production would defeat the point.
 
 | Tool | Purpose |
 |---|---|
-| `stripe_api_search(query)` | Find Stripe API **methods** by keyword |
-| `stripe_api_details(method, path)` | Parameter detail for one API method |
+| `stripe_api_search(query)` | Find Stripe API **methods** by keyword — routed operations only |
+| `stripe_api_details(method, path)` | Parameter detail for one API method — routed operations only |
 | `stripe_api_read(path, params=None)` | Read data with any Stripe API `GET` method |
 | `stripe_api_write(method, path, params=None, idempotency_key=None)` | Write data with any Stripe API `POST` or `DELETE` method |
 | `get_stripe_account_info()` | The account object. **P2** — see §2.6 |
@@ -70,11 +70,11 @@ Three reasons, in order of weight:
 
 Parameters are JSON objects. Stripe's nested parameter conventions are expressed naturally —
 `{"metadata": {"order": "6735"}}`, `{"expand": ["customer"]}`, `{"items": [{"price": "price_123"}]}`
-— and the router applies the same semantics Stripe's form syntax would.
+— and the router consumes them directly.
 
-**Form encoding does not appear on the agent surface at all.** It exists in exactly one place: the
-conformance recorder (§12), which must speak real `application/x-www-form-urlencoded` to the real
-API. That is the only place it is needed and the only place it lives.
+**This project contains no form encoding anywhere.** Not on the agent surface, and not in the
+conformance recorder: the recorder talks to the real API through `stripe-python`, which does its own
+encoding. No form encoder is written, tested or maintained in this repository.
 
 `idempotency_key` is a named parameter on `stripe_api_write`, promoted so it is visible in the tool
 schema — idempotency is a headline eval and an agent that cannot see the parameter cannot be graded
@@ -134,8 +134,15 @@ committed and already the conformance source of truth:
 - `stripe_api_details` returns the parameter schema for an operation — a direct read of the spec.
 - `stripe_api_search` is keyword matching over path, `operationId`, summary and description.
 
-Building them from the spec has an advantage over copying: the discovery layer and the conformance
-harness are then generated from the same artifact and cannot drift from each other.
+**Both are filtered by the routing table (§3), automatically.** Discovery serves exactly the
+operations this world actually implements: an endpoint that is not routed is not searchable and has
+no details to return. The filter is derived from the routing table rather than maintained beside it,
+so an operation cannot be advertised and unimplemented, or implemented and undiscoverable. When
+search lands (§3.3) its seven endpoints become discoverable by the same mechanism, with no separate
+change to the discovery layer.
+
+Building from the spec rather than copying has a further advantage: the discovery layer and the
+conformance harness are generated from the same artifact and cannot drift from each other.
 
 ## 3. Scope: the routing table
 
@@ -477,6 +484,8 @@ ids, timestamps and change logs.
 Record against real test mode, replay in CI, diff against a declared allow-list.
 
 - **CI never needs a key and never makes a network call.** Only re-recording does.
+- **The recorder speaks to the real API through `stripe-python`** (MIT), so request encoding is the
+  SDK's problem, not this repository's. See §2.2.
 - **Cassettes are committed, redacted** — no keys, no real emails, no account identifiers.
 - **Every permitted difference is declared once, with a reason** — ids, timestamps,
   `request_log_url`, livemode flags, idempotency-key retention, the served-version echo. Anything
