@@ -15,16 +15,14 @@ Its purpose is rollouts: thousands of them, in parallel, each forked from a know
 milliseconds, each with every changed row recoverable afterwards. Evals grade on final state, not on
 transcripts, which is what makes a double-charge or a misapplied refund visible at all.
 
-- **World name / package:** `stripeapi` (displayed as *StripeAPI*), matching Seahaven's convention of
-  a lowercase single-token package, as `projecttracker` does. The package is deliberately not named
-  `stripe`, which would shadow the real `stripe` PyPI distribution in any environment that installs
-  both.
+- **World name:** `stripeapi`. **Python distribution:** `seahaven-stripe-world`.
 - **Pinned API version:** `2026-08-26.dahlia` — the `info.version` of the `spec3.json` snapshot in
   `research/` (see `research/MANIFEST.md`). Every object shape, every fixture and every conformance
   cassette is that version. There is no version negotiation.
-- **Not affiliated with Stripe.** The README carries an explicit non-affiliation line. Stripe's field
-  names, enum values, error codes and id prefixes are reused as functional API vocabulary under the
-  MIT licence the source material carries (see
+- **Not affiliated with Stripe.** The README carries an explicit non-affiliation statement. The name
+  is descriptive of what the world implements. Stripe's field names, enum values, error codes and id
+  prefixes are reused as functional API vocabulary under the MIT licence the source material carries
+  (see
   [`agent-surfaces-and-licensing`](research/stripe-billing-and-payments/agent-surfaces-and-licensing/summary.md)).
 
 All non-obvious behavior below is sourced from the research phase. The cross-subtopic summary is
@@ -117,8 +115,9 @@ outages. The error-handler middleware maps everything else to the Stripe envelop
 
 ## 3. Scope: the routing table
 
-The world routes **148 operations**. That number is exactly `spec3.json`'s 187 operations under the
-resource roots in `project_overview.md` §4, minus the 39 legacy, sub-resource and `search` operations
+The world routes **148 operations**, with the 7 `search` endpoints held for a final, gated phase
+(§3.3) that would bring it to 155. 148 is exactly `spec3.json`'s 187 operations under the resource
+roots in `project_overview.md` §4, minus the 39 legacy, sub-resource and `search` operations
 enumerated in
 [`minimum-closed-set-and-tool-budget.md`](research/stripe-billing-and-payments/api-surface-and-object-graph/minimum-closed-set-and-tool-budget.md).
 
@@ -140,8 +139,8 @@ overview's scope statement did not cover them:
 | `customer_cash_balance_transactions`, `cash_balance`, `funding_instructions` | A separate Stripe product. Named in neither the overview's In nor Out list; ruled out. |
 | `tax_ids` | Adjacent to Stripe Tax, which is out. |
 | `products/features` | Entitlements, not billing core. |
-| All four `search` endpoints, `balance/history` | Query-language surface, not billing behavior. |
-| `test_helpers/*`, including test clocks | See §5. |
+| `balance/history` | Deprecated alias for `/v1/balance_transactions`. |
+| `test_helpers/*` | See §5. |
 
 `customer_balance_transactions` is an **addition** to the overview's literal resource list:
 `invoice.starting_balance` and `invoice.ending_balance` have no meaning without the ledger behind
@@ -151,7 +150,32 @@ overview's scope statement did not cover them:
 the lifecycle needs rather than full parity with the subscription schema. It is the only way to
 express "declare a future change now", which `subscriptions.update` cannot express at all.
 
-### 3.3 Objects, and how they are stored
+### 3.3 Search: held for a final, gated phase
+
+The 7 search endpoints — `charges`, `customers`, `invoices`, `payment_intents`, `prices`, `products`,
+`subscriptions` — are in scope but **deliberately last**, and **implementation stops for an explicit
+go-ahead before it starts**.
+
+They are not a list endpoint with an index behind them. `query` is a required parameter carrying its
+own grammar: a clause is `field` `operator` `value`, combined with `AND` / `OR` and `-` negation,
+with `metadata['key']:'value'` addressing; three field types with different legal operators — `token`
+(exact, case-insensitive), `string` (exact and substring), `numeric` (exact, `>`, `<`) — where an
+unsupported operator on a field is an error; quoting rules with backslash escapes; and a
+**per-resource allowlist of queryable fields**, seven of them, which must be extracted into a
+committed file and used as the validation set the way the event-type set is.
+
+Search also uses a **second pagination model**: `page` / `next_page` rather than `starting_after`,
+with `total_count` accurate only to 10,000.
+
+SQLite FTS5 is available and ProjectTracker already proves the external-content-plus-triggers pattern
+in-framework. Stripe's documented `string` semantics — a match "contains all of the words from the
+query in the same order" — sit close to FTS5 phrase matching, so the index is the easy half. The
+parser, the seven allowlists and the second paginator are the work.
+
+One fidelity note for the allow-list: real Stripe search is documented as lagging writes. This world
+is exact. That is a declared difference, not an accident.
+
+### 3.4 Objects, and how they are stored
 
 Roughly 17–19 tables. Four objects in the closed set are deliberately *not* tables:
 
@@ -196,32 +220,19 @@ These apply to every routed resource and are the substance of "faithful".
 - **`metadata`** on every object that carries it in the spec, with Stripe's key/value limits and
   deletion semantics.
 
-## 5. Time: one instant
+## 5. Time
 
-**The world holds a single frozen `now`. There are no test clocks and time does not advance.**
+Every call within an instance sees the same `now`, taken from `ctx.clock`. Nothing reads a wall clock.
 
-Seahaven has no clock-advance mechanism, and "exactly one `now` per instance" is structural — it
-appears in the fixture sidecar, the state-document envelope and the composition model, not as a
-convention but as an invariant. Building a Stripe-shaped `test_clock` would require a new framework
-primitive. That is out of scope for this project and is logged as a Missing-capability finding
-(`SEAHAVEN_FINDINGS.md`, Entry 3) rather than worked around.
+Fixtures are generated across simulated history and frozen at that instant, so a fixture carries
+subscriptions at every stage of their lifecycle, invoices at several dunning attempt counts, disputes
+at several stages, and a populated balance ledger with realistic `available_on` spread.
 
-What this means concretely:
+Time-dependent computation is unaffected. Proration on a mid-cycle change is computed from period
+boundaries relative to `now`; finalizing a draft invoice, paying an open one, refunding, retrying a
+failed payment, cancelling at period end and applying a coupon all behave as they do on the real API.
 
-- `POST /v1/test_helpers/test_clocks` and every other `test_helpers` path is **not routed** and returns
-  the standard 404. The `AGENTS.md` and README state the one-instant model plainly so no one mistakes
-  it for a bug.
-- **Time-dependent *computation* still works and is where the interest lives.** Proration on a
-  mid-cycle upgrade is computed from period boundaries relative to the frozen `now` and is fully
-  exercised. So are: finalizing a draft invoice, paying an open one, refunding, retrying a failed
-  payment, cancelling at period end, applying a coupon, issuing a credit note.
-- **Time-dependent *progression* is baked into fixtures instead.** The generator simulates months of
-  virtual history and freezes at `now`, so a fixture contains subscriptions in every status, invoices
-  at several dunning attempt counts, disputes at several stages, and a populated balance ledger. The
-  richness that would have come from advancing a clock comes from the starting state.
-- **What is genuinely lost:** watching a renewal happen, or a dunning schedule play out, inside a
-  single rollout. Nothing auto-advances; no background job fires. An eval that needs "and then two
-  weeks pass" is not expressible in this world today.
+`test_helpers/*` paths are not routed.
 
 ## 6. Cross-cutting behavior
 
@@ -490,7 +501,6 @@ the agent walked past the first page.
 
 Everything the overview's §10 lists, plus:
 
-- Test clocks and any advancing of time (§5).
 - Webhook delivery over HTTP. Events are queryable state only (§6.6).
 - Multi-version response shapes (§6.5).
 - The endpoints in §3.2.
