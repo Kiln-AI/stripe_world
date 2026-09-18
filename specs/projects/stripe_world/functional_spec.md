@@ -30,88 +30,112 @@ All non-obvious behavior below is sourced from the research phase. The cross-sub
 per-behavior citations point into its lane documents. Claims sourced from web search rather than a
 primary document are labelled there, and that labelling is load-bearing — see §12.
 
-## 2. The agent surface: one tool
+## 2. The agent surface
 
-The world exposes **exactly one tool**. Everything an agent can do, it does through:
+The world exposes the tool shape Stripe's own MCP server uses, because that is the shape an agent
+integrating Stripe is actually given today. Training and evaluating in a gym of a different shape
+than production would defeat the point.
 
-```python
-call_stripe(
-    method: str,                      # "GET" | "POST" | "DELETE"
-    path: str,                        # "/v1/customers", "/v1/charges/ch_.../refund", with query string
-    body: dict | str | None = None,   # JSON object, or a raw form-encoded string
-    idempotency_key: str | None = None,
-    stripe_version: str | None = None,
-) -> dict                             # {"status": int, "body": {...}}
-```
+| Tool | Purpose |
+|---|---|
+| `stripe_api_search(query)` | Find Stripe API **methods** by keyword |
+| `stripe_api_details(method, path)` | Parameter detail for one API method |
+| `stripe_api_read(path, params=None)` | Read data with any Stripe API `GET` method |
+| `stripe_api_write(method, path, params=None, idempotency_key=None)` | Write data with any Stripe API `POST` or `DELETE` method |
+| `get_stripe_account_info()` | The account object. **P2** — see §2.6 |
 
-### 2.1 Why one tool
+Dropped from Stripe's list as out of billing scope: `stripe_analytics`, `get_balance_summary`,
+`stripe_report`, `search_stripe_documentation`, `stripe_implementation_planner`,
+`send_stripe_mcp_feedback`.
 
-Stripe is the best-known REST API in the training corpus. An agent already knows that customers live
-at `/v1/customers` and that you refund a charge by posting to `/v1/refunds`. A one-tool-per-operation
-surface would replace that pretrained knowledge with a bespoke tool list the agent has to be taught,
-and would make the world's realism depend on our naming rather than Stripe's.
+**`stripe_api_search` searches the API method catalogue, not Stripe objects.** It has nothing to do
+with the `/v1/*/search` endpoints in §3.3. The names are Stripe's; the collision is theirs, and
+keeping both names as they are is part of being the same shape.
 
-It is also what Stripe itself ships. The **live** Stripe MCP server exposes 11 tools, four of which
-are generic — `stripe_api_search`, `stripe_api_details`, `stripe_api_read`, `stripe_api_write`. An
-earlier reading of a vendored DXT manifest suggested 23 curated one-tool-per-operation tools with no
-generic escape hatch; that manifest was stale, and the correction is recorded in
-[`agent-surfaces-and-licensing/gap-closure-2026-09-18.md`](research/stripe-billing-and-payments/agent-surfaces-and-licensing/gap-closure-2026-09-18.md).
-A single generic entry point is therefore closer to the surface production agents are given today,
-not a departure from it.
+### 2.1 Why this shape
 
-The practical consequence is that endpoint *discovery* is not a tool-schema problem. The tool's
-docstring carries a compact index of every routable path (§3), and the world answers an unrecognised
-path exactly as Stripe does — a 404 with `invalid_request_error` / `resource_missing` — so an agent
-that guesses wrong gets a realistic correction rather than a framework error.
+Three reasons, in order of weight:
 
-### 2.2 Parameters
+1. **It is what an agent integrating Stripe is given.** A gym should have the shape of production.
+2. **The discovery layer is the interesting part.** `stripe_api_search` and `stripe_api_details` are
+   how Stripe makes a large API usable without putting it all in the context window — their own
+   words: this "makes much of the API available through MCP without increasing the context window
+   unnecessarily". Discovery is a runtime lookup rather than a payload, so the tool docstrings do not
+   have to carry 148 endpoint signatures. It also means this world does not need a hand-written skill
+   teaching an agent how to call it.
+3. **Parameters are JSON.** The agent never form-encodes anything, which removes the largest piece of
+   HTTP-shape trivia from the graded surface without removing any Stripe behavior.
 
-**`method`** — `GET`, `POST` or `DELETE`. Stripe v1 uses no others. Any other verb is a `400`
-`invalid_request_error`.
+### 2.2 Parameters and bodies
 
-**`path`** — the request path, with an optional query string. `GET` list filters and `expand[]` may be
-supplied in the query string, in `body`, or both; Stripe accepts both and so do we. The leading `/v1`
-is required; a path without it is a 404, as on the real API.
+Parameters are JSON objects. Stripe's nested parameter conventions are expressed naturally —
+`{"metadata": {"order": "6735"}}`, `{"expand": ["customer"]}`, `{"items": [{"price": "price_123"}]}`
+— and the router applies the same semantics Stripe's form syntax would.
 
-**`body`** — accepted in **either** of two forms, detected by type:
+**Form encoding does not appear on the agent surface at all.** It exists in exactly one place: the
+conformance recorder (§12), which must speak real `application/x-www-form-urlencoded` to the real
+API. That is the only place it is needed and the only place it lives.
 
-| Form | Example | Notes |
-|---|---|---|
-| JSON object | `{"amount": 2000, "currency": "usd", "metadata": {"order": "6735"}}` | Encoded internally to Stripe's form syntax before dispatch, including `metadata[order]`, `expand[]`, `items[0][price]` |
-| Raw form string | `"amount=2000&currency=usd&metadata[order]=6735"` | Parsed with Stripe's bracket rules, exactly as the wire carries it |
+`idempotency_key` is a named parameter on `stripe_api_write`, promoted so it is visible in the tool
+schema — idempotency is a headline eval and an agent that cannot see the parameter cannot be graded
+on using it. `GET` requests take no idempotency key, which is why it appears only on write.
 
-Both are first-class. The JSON form is the ergonomic path; the raw form is the faithful one and lets a
-scenario test whether an agent can construct a real Stripe request body. Encoding and decoding go
-through one shared implementation so the two forms cannot drift apart, and a malformed raw body
-produces the same `invalid_request_error` the real API would. Which form a call used is recorded in
-the change log so evals and cassette diffs can tell them apart.
-
-**`idempotency_key`** — the `Idempotency-Key` header, promoted to a named parameter so it is visible
-in the tool schema. Idempotency is a headline eval, and an agent that cannot see the parameter cannot
-be graded on using it. Semantics in §6.1.
-
-**`stripe_version`** — the `Stripe-Version` header. Accepted for fidelity and echoed back, but the
-world serves exactly one version; §6.5 defines what happens when a different one is sent.
-
-No generic `headers` argument. The two headers that carry behavior are named; the rest
-(`Authorization`, `Content-Type`, `User-Agent`) carry none here, and a generic dict would invite
-agents to set headers that silently do nothing.
+The served API version is fixed (§6.5) and is not an agent-facing parameter.
 
 ### 2.3 Return value
 
-```python
-{"status": 402, "body": {"error": {"type": "card_error", "code": "card_declined", ...}}}
-```
+Every tool returns `{"status": int, "body": {...}}`.
 
-The HTTP status is returned alongside the body rather than raised, because Stripe's status codes
-carry meaning an agent is supposed to react to — `402` card decline is a different situation from
-`400` bad request, and both are ordinary outcomes an agent must handle rather than exceptions. Errors
-come back in Stripe's error envelope (§6.4) with the matching status.
+The HTTP status is returned rather than raised, because Stripe's status codes carry meaning an agent
+must react to — a `402` card decline is an ordinary outcome, not an exception. Errors come back in
+Stripe's error envelope (§6.4) with the matching status.
 
-Seahaven's declared-error mechanism is still used, for the class of failures that are *not* Stripe
-responses: a malformed `method`, an unparseable body, a call that violates the tool's own contract.
-Those are framework-level authoring errors and should look like framework errors, not like Stripe
-outages. The error-handler middleware maps everything else to the Stripe envelope.
+Seahaven's declared-error mechanism is reserved for failures that are *not* Stripe responses: an
+unusable `method`, a malformed parameter object, a call that violates a tool's own contract. Those
+are authoring errors and should look like framework errors rather than Stripe outages.
+
+### 2.4 Read versus write
+
+The split is Stripe's, and it is useful beyond fidelity: it mirrors how the real server gates
+capability by Restricted API Key scope, and it gives us a read-only mode for evals that should not be
+able to move money. `stripe_api_read` accepts `GET` only; `stripe_api_write` accepts `POST` and
+`DELETE`, which are the only write verbs Stripe v1 uses. A write verb sent to the read tool, or a
+`GET` sent to the write tool, is refused the way the real API refuses a wrong method.
+
+### 2.5 The engine underneath
+
+All four tools are thin faces over one dispatcher: method + path + params → routed operation. That
+dispatcher is the whole world; the tools are its presentation.
+
+A consequence worth recording: a single generic `call_stripe(method, path, body)` tool is a few lines
+over the same dispatcher. It is **not registered by default** — it is not the shape Stripe ships —
+but it is available for a harness that wants the raw-HTTP surface instead, and costs nothing to keep
+working.
+
+### 2.6 `get_stripe_account_info` — P2
+
+Returns the account object. The account is static within an instance: a fixture-defined default,
+overridable by parameters at instance reset. It is scheduled **second-last, immediately before
+search** (§3.3), and may be cut if it turns out to pull in more of the Account object than billing
+needs.
+
+### 2.7 Is Stripe's implementation reusable?
+
+**No, and it is not needed.**
+
+`@stripe/mcp`, the npm package in `stripe/agent-toolkit`, is a 114-line stdio-to-HTTP proxy that
+forwards every message to `https://mcp.stripe.com`. It defines no tools. The implementations of
+`stripe_api_search` and `stripe_api_details` are server-side at Stripe and are not published. The
+repository is MIT, so anything *in* it is reusable — the thing we wanted simply is not in it.
+
+It is also not needed, because both tools are straightforward over `spec3.json`, which is already
+committed and already the conformance source of truth:
+
+- `stripe_api_details` returns the parameter schema for an operation — a direct read of the spec.
+- `stripe_api_search` is keyword matching over path, `operationId`, summary and description.
+
+Building them from the spec has an advantage over copying: the discovery layer and the conformance
+harness are then generated from the same artifact and cannot drift from each other.
 
 ## 3. Scope: the routing table
 
@@ -298,10 +322,10 @@ using bracket notation for nested and array parameters.
 
 ### 6.5 Versioning
 
-One version is served: `2026-08-26.dahlia`. The real API does return a `stripe-version` response
-header, so this world does too. A request carrying a *different* `stripe_version` is answered in the
-served version with the mismatch recorded in the change log — the world does not transform shapes
-across versions and does not pretend to. An eval that cares can assert on the record.
+One version is served: `2026-08-26.dahlia`. The real API returns a `stripe-version` response header,
+so this world does too. The version is not an agent-facing parameter (§2.2): the world does not
+transform shapes across versions and does not pretend to. The conformance recorder pins the same
+version on every recorded request.
 
 Stripe's codenames cover a run of monthly backward-compatible releases until the next breaking major
 release, so `dahlia` names a series rather than a single day's shape. Handling of a *malformed*
@@ -484,8 +508,8 @@ currently assumes; the rest are fidelity coverage.
 ## 13. Evals
 
 Ten to twenty committed eval tasks, each with a natural-language task, a starting fixture, and a SQL
-reward function that reads final state. Because grading is on state rather than tool calls, the
-single-tool surface costs nothing here.
+reward function that reads final state. Grading is on state rather than on tool calls, so the shape
+of the tool surface does not constrain what an eval can measure.
 
 The headline is **double-charge on retry**: the agent is asked to complete a payment, the first
 attempt appears to fail ambiguously, and the grader asserts exactly one charge exists against the
