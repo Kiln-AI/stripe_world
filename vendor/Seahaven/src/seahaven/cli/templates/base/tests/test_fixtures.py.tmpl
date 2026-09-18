@@ -1,0 +1,70 @@
+"""The recipe in `fixtures_src/generate.py`, exercised before it has made anything.
+
+A fixture is bytes in the repository, and bytes whose recipe no longer runs are
+bytes nobody can change. This world has no fixture frozen yet -- that is its
+author's first `build` -- so what is asserted here is the recipe itself: that
+`build` runs end to end, and that it freezes into the world it is handed.
+
+`world=` is what makes that safe to test. A fixture lands in
+`world.fixtures_dir`, so a test builds through a *copy* of the world pointed at a
+temporary directory. Moving the imported world's directory instead would move it
+for everything else in the run, and `copy.copy(world)` is the supported way to
+say "this world, writing somewhere else".
+
+Add a case per fixture as you freeze them: the recipe is the only thing that can
+tell you a committed fixture's bytes are still the bytes it makes.
+"""
+
+import copy
+import importlib.util
+import sys
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+import seahaven
+
+# Named as a file and not imported as a module: `fixtures_src/` is authoring
+# source that lives beside the package rather than inside it, so there is no
+# import path to it that works from every rootdir.
+GENERATE = Path(__file__).resolve().parent.parent / "fixtures_src" / "generate.py"
+
+
+@pytest.fixture(scope="session")
+def generate() -> Any:
+    """`fixtures_src/generate.py`, imported by path, once for the session."""
+    spec = importlib.util.spec_from_file_location("_generate_loaded_by_path", GENERATE)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_recipe_freezes_the_empty_fixture(
+    generate: Any, world: seahaven.World, tmp_path: Path
+) -> None:
+    """`build` into a temporary directory: the whole recipe, and nothing committed."""
+    elsewhere = copy.copy(world)
+    elsewhere.fixtures_dir = tmp_path / "fixtures"
+    elsewhere.fixtures_dir.mkdir()
+
+    fixture = generate.build("empty", world=elsewhere)
+
+    assert fixture.id == "empty"
+    assert fixture.now == generate.NOW
+    assert fixture.description == generate.DESCRIPTIONS["empty"]
+    assert fixture.dir == tmp_path / "fixtures" / "empty"
+    assert [frozen.id for frozen in elsewhere.fixtures()] == ["empty"]
+    # The copy is what took the write: the imported world is where it was.
+    assert world.fixtures() == []
+
+
+def test_the_recipe_defaults_to_this_packages_world(generate: Any, world: seahaven.World) -> None:
+    """No `world=` means this package's, imported by name when a build asks for it.
+
+    The one line of the recipe that names the package, so the one line a rename
+    can leave pointing at a module that is not here any more.
+    """
+    assert generate._package_world() is world

@@ -1,0 +1,89 @@
+r"""How every fixture in `fixtures/` is made. Commit it, because it is the recipe.
+
+A fixture is a binary artifact, and a binary artifact with no source is one
+nobody can change. This module is that source: one function per fixture, each
+taking a live instance and filling it, which is exactly the shape the CLI calls:
+
+    uv run seahaven fixture freeze empty \
+        --now 2026-01-01T00:00:00.000Z \
+        --run fixtures_src.generate:empty \
+        --description "The schema with no rows. Start here to write a history."
+
+    uv run seahaven fixture fork empty small \
+        --run fixtures_src.generate:small \
+        --description "..."
+
+**Pass `--now` on every `freeze`, and the same one every time.** `freeze` starts
+from a blank instance, and a blank instance with no `--now` takes the wall clock,
+so leaving the flag off dates each fixture from the day it was built: a scenario
+written against one would then read differently from a scenario written against
+another, and `seahaven check` cannot tell you, because a wall-clock instant is a
+perfectly canonical timestamp. Choose the instant once, write it down here, and
+never move it -- it is baked into every sidecar. `fork` needs no `--now`: a fork
+inherits its parent's clock, which is the point of forking.
+
+`build` below is the same freeze without the flags: it carries `NOW` and the
+description for you, which is what makes it the thing a test calls. Hand it
+`world=` and the fixture is frozen into *that* world's fixtures directory, so a
+test that rebuilds a fixture to compare it with the committed bytes builds into a
+temporary directory instead of moving the imported world's.
+
+Fill through the world's own tools, or through `inst.bulk()` for thousands of
+rows at a time. Nothing here reads the wall clock, and nothing here is random
+outside `ctx.ids`.
+"""
+
+import seahaven
+
+__all__ = ["build", "empty"]
+
+# The instant every fixture of this world is frozen at: the `--now` above, and
+# the one `build` passes. Chosen once and never moved.
+NOW = "2026-01-01T00:00:00.000Z"
+
+
+def empty(inst: seahaven.Instance) -> None:
+    """`empty`: the schema and nothing else.
+
+    Deliberately does no work. It exists so that the first fixture is made the
+    same way every later one is, and so the fixture others are forked from has a
+    source like the rest.
+    """
+
+
+# Every fixture this module can build, by id, and what each one tells whoever is
+# choosing between them. `seahaven fixture freeze --run` names one of these
+# functions directly; `build` looks both tables up.
+BUILDERS = {"empty": empty}
+DESCRIPTIONS = {"empty": "The schema with no rows. Start here to write a history."}
+
+
+def build(fixture_id: str, *, world: seahaven.World | None = None) -> seahaven.Fixture:
+    """Freeze `fixture_id` from a blank instance at `NOW`, and return it.
+
+    `world` is which world to freeze into, defaulting to this package's. It is
+    the seam a test needs: a fixture lands in `world.fixtures_dir`, so a test
+    that rebuilds one to compare it with the committed bytes hands in a world
+    pointed at a temporary directory rather than moving the imported world's --
+    which is a process-wide change that everything else in the run would see.
+
+    The instance is destroyed whether the build succeeds or not, and a failure
+    leaves no fixture directory behind: `freeze` publishes by rename.
+    """
+    into = world if world is not None else _package_world()
+    with into.instance(None, now=NOW) as inst:
+        BUILDERS[fixture_id](inst)
+        return inst.freeze(fixture_id, DESCRIPTIONS[fixture_id])
+
+
+def _package_world() -> seahaven.World:
+    """This world, imported when a build asks for it and not before.
+
+    `seahaven fixture freeze --run` imports this module for one function, and a
+    builder should not cost a world import until it is called. Spelled through
+    `world.py` rather than through the package attribute, which is a `World`
+    shadowing the module of that name.
+    """
+    from $package.world import world
+
+    return world

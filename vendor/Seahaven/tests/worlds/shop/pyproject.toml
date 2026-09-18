@@ -1,0 +1,6 @@
+# The middle world of the composite of `tests/worlds/README.md`: it adds
+# `payments` and hides it from the agent. Not built or installed.
+[project]
+name = "shop"
+version = "2.1.0"
+requires-python = ">=3.14"

@@ -1,0 +1,12 @@
+created_at: '2026-09-13T08:11:06.525Z'
+description: 'A twelve-person agency: three teams, nine projects including a finished
+  one, six hundred issues with a six-month history, comments, labels and an audit
+  trail. Good for cross-team queries, reporting, bulk operations and search.'
+file_sha256: 8ea226d7a1d92be8fa8fd62e270525700d74a6cb33521a8b4b062c2e982e1369
+format_version: 1
+id: agency
+now: '2026-06-01T09:00:00.000Z'
+parent_id: null
+schema_hash: eb3bc8f8a9033c1b633508c943d460c8eda52a2baa56b394120e3c7d8cbe33a9
+world: projecttracker
+world_version: 1.0.0

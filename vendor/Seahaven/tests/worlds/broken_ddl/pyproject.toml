@@ -1,0 +1,6 @@
+# A world whose schema SQLite refuses, so importing it raises and there is no
+# `World` to lint: `seahaven check` reports SH104 and no traceback.
+[project]
+name = "broken-ddl"
+version = "1.0.0"
+requires-python = ">=3.14"

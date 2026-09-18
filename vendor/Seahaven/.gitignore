@@ -1,0 +1,8 @@
+.specs_skill_state/
+reviews/
+dist/
+build/
+*.egg-info/
+__pycache__/
+*.py[cod]
+.venv/

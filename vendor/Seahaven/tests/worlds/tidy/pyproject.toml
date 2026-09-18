@@ -1,0 +1,6 @@
+# A world the lints find nothing in. Not built or installed: `seahaven`'s
+# discovery reads `[project] name` from here and imports `src/` off sys.path.
+[project]
+name = "tidy"
+version = "1.0.0"
+requires-python = ">=3.14"

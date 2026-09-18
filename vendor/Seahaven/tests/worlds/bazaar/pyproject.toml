@@ -1,0 +1,6 @@
+# The composition rules' positive fixture: a host that is wrong in every way
+# `seahaven check` knows how to say. Not built or installed.
+[project]
+name = "bazaar"
+version = "0.1.0"
+requires-python = ">=3.14"

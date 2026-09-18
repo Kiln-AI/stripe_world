@@ -1,0 +1,115 @@
+# uv's own build backend, because this is a uv project. `src/seahaven` is what it
+# packages -- `module-root` defaults to `src`, and the module is the project name
+# normalised -- and every file under that directory travels, not only the `.py`
+# ones, which is what carries `docs/` and `cli/templates/` into the wheel.
+[build-system]
+requires = ["uv_build>=0.8.17,<0.9.0"]
+build-backend = "uv_build"
+
+[project]
+name = "seahaven"
+version = "0.0.1"
+description = "A framework for building synthetic worlds/environments for AI agents. Useful for RL and evaluations."
+readme = "README.md"
+requires-python = ">=3.14"
+authors = [{ name = "Steve Cosman" }]
+keywords = ["ai", "agents", "rl", "evaluation", "environments", "simulation"]
+classifiers = [
+    "Development Status :: 1 - Planning",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+# Lower bounds are the versions this project is known to work on, not the
+# oldest that might: each is the release `uv.lock` resolves, verified green on
+# CPython 3.14.0 -- spelled as the lock spells it, except `apsw`, which the lock
+# holds as the equal `3.53.4.0`. Raise one when a newer version is verified; do
+# not lower one without running the suites against it.
+dependencies = [
+    "apsw>=3.53.4",
+    "pydantic>=2.13.5,<3",
+    "pyyaml>=6.0.3",
+]
+
+[project.optional-dependencies]
+serve = ["openenv>=0.5.0,<0.6"]
+
+[project.scripts]
+seahaven = "seahaven.cli:main"
+
+# Installing `seahaven` activates its pytest plugin: a world's tests use the
+# `world` and `instance` fixtures by name, with nothing in a `conftest.py`.
+[project.entry-points.pytest11]
+seahaven = "seahaven.pytest_plugin"
+
+[project.urls]
+Homepage = "https://github.com/Kiln-AI/Seahaven"
+
+[dependency-groups]
+# `projecttracker` is the reference world and `seahaven-xmlrpc` the example
+# extension, both in this repository and developed with the framework. They are
+# dev dependencies of `seahaven` and never runtime ones: the dependency runs the
+# other way, and Seahaven imports neither.
+dev = [
+    # `tests/state_v1.schema.json` is the published shape of the built-in state
+    # documents, and this is what asserts a document against it.
+    "jsonschema>=4",
+    "packaging>=24",
+    "projecttracker",
+    "pytest>=8",
+    "ruff>=0.14",
+    "seahaven-xmlrpc",
+    "ty>=0.0.1a21",
+]
+
+[tool.uv.workspace]
+members = ["worlds/*", "extensions/*"]
+
+[tool.uv.sources]
+projecttracker = { workspace = true }
+seahaven-xmlrpc = { workspace = true }
+
+[tool.ruff]
+line-length = 100
+src = [
+    "src",
+    "tests",
+    "scripts",
+    "bench",
+    "worlds/projecttracker/src",
+    "worlds/projecttracker/tests",
+    "extensions/seahaven-xmlrpc/src",
+    "extensions/seahaven-xmlrpc/tests",
+]
+# The specs are documents. Their code blocks are sketches, not code that runs.
+extend-exclude = ["specs"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.ty.src]
+include = ["src", "tests", "scripts", "worlds", "extensions", "bench"]
+
+# The composite worlds of `tests/worlds/README.md` are packages that import one
+# another, because that is how a host world reaches a world it adds. Nothing
+# installs them -- `tests/conftest.py` puts them on `sys.path` for the same
+# reason -- so ty is told where they are the same way.
+[tool.ty.environment]
+extra-paths = [
+    "tests/worlds/payments/src",
+    "tests/worlds/shop/src",
+    "tests/worlds/emporium/src",
+    "tests/worlds/ledger/src",
+    "tests/worlds/bazaar/src",
+    "tests/worlds/unsealed/src",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+# An exception on a thread a test started is otherwise a warning printed beside
+# a passing test, which is no way to test a lock.
+filterwarnings = ["error::pytest.PytestUnhandledThreadExceptionWarning"]
+# `slow` is the 500-session smoke test and anything else that is measured in
+# tens of seconds: always run in CI, deselectable with `-m "not slow"` locally.
+markers = ["slow: takes tens of seconds; deselect with -m 'not slow'"]

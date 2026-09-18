@@ -1,0 +1,9 @@
+"""This world's middleware. Importing the package registers every module in it.
+
+`seahaven check` (SH301) fails if a module in this directory is not imported
+here, so a middleware that exists but was never registered cannot go unnoticed.
+"""
+
+from projecttracker.middleware import error_handler
+
+__all__ = ["error_handler"]

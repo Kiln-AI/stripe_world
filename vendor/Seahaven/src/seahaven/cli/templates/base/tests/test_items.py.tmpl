@@ -1,0 +1,54 @@
+"""The scaffold's tests: one instance, two tools, and the promises the world makes.
+
+Nothing here calls a tool function directly. What is being tested is the tool --
+its argument model, its result, the transaction it runs in -- and all of that is
+the framework's work on the signature, which only a real call exercises.
+
+`instance` and `world` are Seahaven's own pytest fixtures: installing `seahaven`
+registers them, so there is nothing to add to a `conftest.py` and nothing of this
+world's to import. `@pytest.mark.seahaven(...)` says which fixture each test's
+instance starts from, and the instance is destroyed when the test ends.
+
+`fixture=None` is a blank instance: no fixture on disk, so this passes on a
+scaffold that has never frozen one. `now=` freezes its clock, so a timestamp is a
+value a test can name.
+"""
+
+import pytest
+
+import seahaven
+
+# A fixed instant, so every timestamp the world writes is a value a test can name.
+NOW = "2026-01-01T00:00:00.000Z"
+
+pytestmark = pytest.mark.seahaven(fixture=None, now=NOW)
+
+
+def test_an_item_can_be_created_and_read_back(instance: seahaven.Instance) -> None:
+    created = instance.call("create_item", name="First")
+    assert created["name"] == "First"
+    # The instance's clock, not the machine's.
+    assert created["created_at"] == NOW
+    assert instance.call("get_item", item_id=created["id"]) == created
+
+
+def test_an_item_that_does_not_exist_is_this_worlds_not_found(
+    instance: seahaven.Instance,
+) -> None:
+    with pytest.raises(seahaven.ToolError) as raised:
+        instance.call("get_item", item_id="nope")
+    assert raised.value.code == "NOT_FOUND"
+
+
+def test_the_same_seed_mints_the_same_ids(world: seahaven.World) -> None:
+    """Reproducibility, which is what `ctx.ids` is for: one seed, one run.
+
+    The `world` fixture rather than `instance`, because this needs two instances
+    of one seed and `instance` is one per test.
+    """
+
+    def first_id() -> str:
+        with world.instance(None, seed=1, now=NOW) as live:
+            return str(live.call("create_item", name="First")["id"])
+
+    assert first_id() == first_id()

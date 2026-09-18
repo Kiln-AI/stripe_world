@@ -1,0 +1,60 @@
+"""This world's error shapes: what it answers with when it refuses.
+
+A world declares the errors the real product returns as ordinary `ToolError`
+subclasses and raises them where they happen; nothing about them is registered
+on the `World`. Each class fixes its own code and message format here, so the
+wording is in one place and a tool module raises it by name.
+
+Replace these three with the product's own vocabulary as you build the world out.
+The framework's own codes (`invalid_arguments`, `db_error`, `unknown_tool`) reach
+an agent only if the error handler lets them, which is what the handler is for.
+"""
+
+from collections.abc import Sequence
+from typing import Any
+
+import seahaven
+
+__all__ = ["Internal", "InvalidInput", "NotFound"]
+
+
+class NotFound(seahaven.ToolError):
+    """A record the caller named does not exist."""
+
+    def __init__(self, kind: str, key: str) -> None:
+        super().__init__("NOT_FOUND", f"{kind} {key} not found", {"kind": kind, "key": key})
+
+
+class InvalidInput(seahaven.ToolError):
+    """An argument this product will not accept."""
+
+    def __init__(self, field: str, why: str) -> None:
+        super().__init__("INVALID_INPUT", f"{field}: {why}", {"field": field})
+
+    @classmethod
+    def from_violations(cls, violations: Sequence[dict[str, Any]]) -> "InvalidInput":
+        """One `INVALID_INPUT` carrying every violation the framework found.
+
+        The framework reports all of an argument model's failures at once so the
+        agent can fix them in one turn; restating them one per error would throw
+        that away.
+        """
+        if not violations:
+            return cls("arguments", "invalid")
+        first, *rest = violations
+        why = "; ".join(
+            [str(first.get("message", "invalid"))]
+            + [f"{v.get('path')}: {v.get('message')}" for v in rest]
+        )
+        return cls(str(first.get("path") or "arguments"), why)
+
+
+class Internal(seahaven.ToolError):
+    """Something failed in a way this product does not explain.
+
+    The default message is the whole of what an agent learns: an engine message
+    or a Python traceback is for this world's author and reaches the log instead.
+    """
+
+    def __init__(self, message: str = "Something went wrong") -> None:
+        super().__init__("INTERNAL", message)

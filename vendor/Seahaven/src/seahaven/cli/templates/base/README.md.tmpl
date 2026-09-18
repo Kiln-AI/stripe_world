@@ -1,0 +1,33 @@
+# $name
+
+A Seahaven world.
+
+## What it has
+
+| | |
+|---|---|
+| Schema | `items(id, name, created_at)` |
+| Tools | `create_item(name)`, `get_item(item_id)` |
+| Errors | `NOT_FOUND`, `INVALID_INPUT`, `INTERNAL` (`src/$package/errors.py`) |
+| Fixtures | none yet; freeze the first one with `seahaven fixture freeze` |
+
+## Using it
+
+```python
+import $package
+
+with $package.world.instance(None) as instance:
+    item = instance.call("create_item", name="First")
+    instance.call("get_item", item_id=item["id"])
+```
+
+Serve it over OpenEnv with `uv run seahaven serve`, and run its tests with
+`uv run pytest`.
+
+## Conventions
+
+- **Timestamps** are canonical UTC text with milliseconds and a trailing `Z`
+  (`2026-06-01T09:00:00.000Z`), written from `ctx.clock.iso()` and never from the wall clock.
+- **Ids** come from `ctx.ids.uuid()`, so a seed replays a run exactly.
+- **Error codes** are this product's; the framework's own codes never reach an agent, which is the
+  error handler's job.

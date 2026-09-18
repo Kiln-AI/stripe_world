@@ -1,0 +1,53 @@
+"""The app-wide error wrapper: nothing reaches the agent that this world did not choose.
+
+Registered first, so it is the outermost layer of the chain and sees every error
+every other layer and every tool raises. Its job is to leave the agent with this
+product's vocabulary and nothing else: framework errors are restated as this
+world's shapes, an unexpected Python exception becomes `INTERNAL`, and a
+`WorldBug` is re-raised untouched because it is the author's to see and turning
+it into a product error would hide it.
+
+A world with a SQL door (`seahaven.helpers.run_sql`) or a search tool over FTS5
+lets a `DbError` from those tools through instead, because the engine's own text
+is the answer there. Name them by tool here when you add them.
+"""
+
+import logging
+from typing import Any
+
+import seahaven
+from seahaven.world import Handler
+
+from $package.errors import Internal, InvalidInput
+from $package.world import world
+
+__all__ = ["error_handler"]
+
+_log = logging.getLogger("$package.errors")
+
+
+@world.middleware
+def error_handler(ctx: seahaven.Ctx, call: seahaven.Call, next_: Handler) -> Any:
+    """Map everything that escapes a tool into one of this world's error shapes."""
+    try:
+        return next_(ctx, call)
+    except seahaven.ArgumentError as error:
+        # Every violation in one error: the framework collected them all so the
+        # agent could fix them in one turn.
+        raise InvalidInput.from_violations(error.violations) from error
+    except seahaven.DbError as error:
+        # SQLite failed under a tool that writes its own SQL, so the SQL is this
+        # world's and the agent can do nothing with the engine's complaint. The
+        # author can: it goes to the log with the text and the traceback.
+        _log.error("%s: database error under %s", ctx.instance.id, call.name, exc_info=error)
+        raise Internal() from error
+    except seahaven.ToolError:
+        # This world's own shapes: written for the agent already.
+        raise
+    except seahaven.WorldBug:
+        # The author's, not the agent's. Loudly, and unchanged.
+        raise
+    except Exception as error:
+        # A bug in world code. The framework has already logged it with its
+        # traceback; the agent gets this product's wording for "we broke".
+        raise Internal() from error

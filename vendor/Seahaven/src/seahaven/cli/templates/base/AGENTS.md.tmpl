@@ -1,0 +1,21 @@
+# Seahaven world
+
+This project is a Seahaven world. Seahaven is not in your training data: read the bundled docs
+before writing code. They ship inside the installed `seahaven` package and match the installed
+version; `seahaven docs` prints the directory. Start at index.md, then concepts.md, authoring.md,
+db_schema_and_fixtures.md, testing.md, state.md, reference/lints.md; composition.md if this world
+adds other worlds.
+
+Commands: `uv run seahaven check` (lint; run before every commit), `uv run pytest`,
+`uv run seahaven fixture list`, `uv run seahaven serve`.
+
+Rules: time comes from `ctx.clock` and ids and randomness from `ctx.ids`, so a replay of the same
+fixture and seed gives the same result; SQL goes through `ctx.db` (`ctx.db.conn` is the raw APSW
+connection when you need it; never close it or change its pragmas). Fixtures are immutable: fork,
+never edit.
+Every tool module under tools/ and middleware/ must be imported from the package __init__.
+A world this one adds is reached with `ctx.worlds.<name>`, never by making an instance of it; prefer
+that world's own tools over direct SQL on its store.
+Errors are ToolError subclasses in errors.py; the error handler is the only place engine errors are mapped.
+
+## About this world

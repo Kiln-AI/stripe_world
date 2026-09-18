@@ -1,0 +1,7 @@
+# The leaf of the composite world of `tests/worlds/README.md`. Not built or
+# installed: `seahaven`'s discovery reads `[project] name` from here, and
+# `tests/conftest.py` puts `src/` on the path so a host world can import it.
+[project]
+name = "payments"
+version = "1.4.0"
+requires-python = ">=3.14"

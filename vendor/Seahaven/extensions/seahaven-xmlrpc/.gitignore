@@ -1,0 +1,5 @@
+.venv/
+__pycache__/
+*.pyc
+# Instance working directories: live state is never committed.
+work/

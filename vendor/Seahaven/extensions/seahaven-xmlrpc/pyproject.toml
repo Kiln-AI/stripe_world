@@ -1,0 +1,38 @@
+# uv's build backend, the framework's own. `src/seahaven_xmlrpc` is what it
+# packages: `module-root` defaults to `src`, and the module is the project name
+# normalised.
+[build-system]
+requires = ["uv_build>=0.8.17,<0.9.0"]
+build-backend = "uv_build"
+
+[project]
+name = "seahaven-xmlrpc"
+version = "1.0.0"
+description = "XML-RPC for Seahaven worlds: Seahaven's worked example of the extension contract."
+readme = "README.md"
+requires-python = ">=3.14"
+authors = [{ name = "Steve Cosman" }]
+# An extension depends on the framework and on nothing else; the world depends on
+# both, and Seahaven never imports an extension (`functional_spec.md` §21). An
+# extension written outside this repository pins a release (`seahaven~=X.Y`);
+# this one is developed with the framework in one tree, so it takes whatever
+# `seahaven` the workspace has.
+dependencies = ["seahaven"]
+
+[tool.uv.sources]
+seahaven = { workspace = true }
+
+# The extension is its own package with its own suite: `uv run pytest
+# extensions/seahaven-xmlrpc` from the repository root, or `uv run pytest` from
+# here. Having its own section is what makes this directory the rootdir of that
+# run, so its test modules are named independently of the framework's.
+#
+# The suite runs against `tracker_rpc`, a copy of ProjectTracker that lives under
+# `tests/`, so the world the plugin's fixtures act on is not the one the §2.2
+# convention would find from this rootdir -- this project's package is the
+# extension, which is not a world at all. `--seahaven-world` is the plugin's
+# override for exactly that, and `pythonpath` is what makes the copy importable.
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --seahaven-world tracker_rpc:world"
+pythonpath = ["tests"]

@@ -1,0 +1,5 @@
+# The world that does not resolve to a tree, for SH504. Not built or installed.
+[project]
+name = "unsealed"
+version = "0.1.0"
+requires-python = ">=3.14"

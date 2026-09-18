@@ -1,0 +1,6 @@
+# The host of the composite of `tests/worlds/README.md`: two payments accounts
+# and a shop that shares one of them. Not built or installed.
+[project]
+name = "emporium"
+version = "0.1.0"
+requires-python = ">=3.14"

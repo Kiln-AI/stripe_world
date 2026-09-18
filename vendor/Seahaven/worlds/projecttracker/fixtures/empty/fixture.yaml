@@ -1,0 +1,11 @@
+created_at: '2026-09-13T08:11:06.555Z'
+description: The tracker's schema with no rows. Start here to write a history, or
+  to test setup flows.
+file_sha256: 9b1b1007c338583f637e81d06211c3a1c42af74deeca1d2b3a91ecb5aac85e99
+format_version: 1
+id: empty
+now: '2026-06-01T09:00:00.000Z'
+parent_id: null
+schema_hash: eb3bc8f8a9033c1b633508c943d460c8eda52a2baa56b394120e3c7d8cbe33a9
+world: projecttracker
+world_version: 1.0.0

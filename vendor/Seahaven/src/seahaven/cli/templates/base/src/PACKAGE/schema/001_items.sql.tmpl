@@ -1,0 +1,12 @@
+-- $name's schema: raw SQLite DDL, applied to a blank instance in filename order.
+--
+-- Every table is STRICT with an explicit primary key, and every timestamp is
+-- canonical text (`2026-06-01T09:00:00.000Z`) written by the tool that makes the
+-- row, never by a DDL default: one format across every door, and no wall-clock
+-- expression anywhere in the schema. `seahaven check` enforces all three.
+
+CREATE TABLE items (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    created_at TEXT NOT NULL
+) STRICT;

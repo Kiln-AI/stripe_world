@@ -1,0 +1,7 @@
+# The leaf of the *wrong* composite of `tests/worlds/README.md`: two tools whose
+# descriptions name each other, which is what a host's prefix makes stale. Not
+# built or installed.
+[project]
+name = "ledger"
+version = "3.0.0"
+requires-python = ">=3.14"

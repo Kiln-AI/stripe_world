@@ -1,0 +1,40 @@
+"""`items`: the one resource this scaffold ships, and the shape to copy.
+
+One module per resource, not one per tool. A tool is a plain function whose first
+parameter is the instance context; the framework derives its argument model and
+its JSON schema from the signature, and the whole docstring is the description an
+agent reads.
+"""
+
+from typing import Any
+
+import seahaven
+
+from $package.errors import NotFound
+from $package.world import world
+
+__all__ = ["create_item", "get_item"]
+
+
+@world.tool
+def create_item(ctx: seahaven.Ctx, name: str) -> dict[str, Any]:
+    """Create an item and return it."""
+    # The instance's seeded id stream and its frozen clock: never uuid.uuid4()
+    # and never datetime.now(), so the same seed replays the same run.
+    item = {"id": ctx.ids.uuid(), "name": name, "created_at": ctx.clock.iso()}
+    ctx.db.execute(
+        "INSERT INTO items (id, name, created_at) VALUES (?, ?, ?)",
+        item["id"],
+        item["name"],
+        item["created_at"],
+    )
+    return item
+
+
+@world.tool
+def get_item(ctx: seahaven.Ctx, item_id: str) -> dict[str, Any]:
+    """Fetch one item by its id."""
+    row = ctx.db.one("SELECT id, name, created_at FROM items WHERE id = ?", item_id)
+    if row is None:
+        raise NotFound("item", item_id)
+    return row
