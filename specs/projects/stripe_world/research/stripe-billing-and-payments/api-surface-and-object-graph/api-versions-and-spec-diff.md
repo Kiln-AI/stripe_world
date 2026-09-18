@@ -1,5 +1,10 @@
 # API Versions, `Stripe-Version` Keying, and What `spec3.sdk.json` Adds
 
+> **2026-09-18 update:** `docs.stripe.com/api/versioning` is now directly fetched and confirms this
+> file's version-model claims verbatim, including resolving the codename-to-major-release mapping. See
+> [gap-closure-2026-09-18.md](./gap-closure-2026-09-18.md#8-docsstripecomapiversioning-cross-check)
+> item 8.
+
 ## How many distinct API versions does the repo publish?
 
 **One.** `spec3.json`'s `info.version` is a single string, `2026-08-26.dahlia`, and that is the only

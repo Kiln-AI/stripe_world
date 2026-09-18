@@ -94,6 +94,13 @@ create (payment required, payment_behavior=default_incomplete or allow_incomplet
                                                                 invoices generated)
 ```
 
+**Resolved 2026-09-18** — see `gap-closure-2026-09-18.md` item 6. A direct read of
+<https://docs.stripe.com/billing/subscriptions/overview> confirms auto-recovery: "To move the
+subscription to `active`, pay the most recent invoice before its due date." No separate
+`subscriptions.update` call is described or needed — paying the invoice is itself the trigger, same
+pattern confirmed one status earlier for `past_due`→`active` ("have your customer pay the most recent
+invoice. The subscription status becomes `active`...").
+
 `unpaid` is **not** terminal in the same hard sense as `canceled`/`incomplete_expired`: docs state you
 may "reopen and pay their closed invoices" after receiving updated payment info (spec3.json, verbatim,
 above), implying a path back — but the spec text does not say the *subscription* status itself
@@ -182,9 +189,10 @@ different:
 
 ## Gaps / open questions
 
-1. **Unpaid → active recovery path** — not settled from docs prose alone; see above. Would be settled
-   by a recorded API trace or (if reachable in a future session) a direct read of
-   <https://docs.stripe.com/billing/subscriptions/overview>.
+1. ~~**Unpaid → active recovery path**~~ — **closed 2026-09-18**, see `gap-closure-2026-09-18.md` item 6
+   and the "Resolved" note above. Direct read of
+   <https://docs.stripe.com/billing/subscriptions/overview> confirms auto-recovery on invoice payment,
+   no explicit subscription update call required.
 2. **`pending_if_incomplete` create-time rejection** — sourced from a WebSearch snippet quoting docs
    prose, not independently confirmed against `spec3.json`'s per-endpoint enum restriction. Low risk
    (docs are unambiguous) but flagged since I could not open-fetch the source page to double check

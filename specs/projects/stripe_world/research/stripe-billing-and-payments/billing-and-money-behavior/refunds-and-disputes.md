@@ -107,13 +107,16 @@ Via search, corroborating and disambiguating the bare enum:
   escalated it). An inquiry can presumably also escalate directly into a full chargeback (`needs_response`)
   before the 120-day window if the issuer decides to — not explicitly confirmed in sources gathered,
   flagged as inference.
-- **`prevented`**: present in the enum, not covered by any search result in this pass. Almost certainly
-  relates to Stripe's dispute-prevention products (e.g. Cardholder authentication / Verifi/Ethoca-style
-  compelling-evidence prevention, where the dispute is intercepted before it becomes a formal chargeback).
-  **Gap** — not corroborated from docs prose in this session; would need
-  <https://docs.stripe.com/disputes/how-disputes-work> (found but blocked from direct fetch) or
-  <https://docs.stripe.com/disputes/prevention> to confirm the exact trigger and whether funds move at
-  all in this state.
+- **`prevented`**: **Resolved 2026-09-18** — see `gap-closure-2026-09-18.md` item 7. Direct read of
+  <https://docs.stripe.com/api/disputes/object> confirms the definition verbatim: "A dispute that was
+  prevented from becoming a formal chargeback." Confirmed to relate to Stripe's dispute-prevention
+  products (Visa CE 3.0 via Order Insight, Verifi RDR, Ethoca Alerts) via
+  <https://docs.stripe.com/disputes/get-started/prevention>: a fully CE-3.0-blocked dispute is "never
+  filed" and incurs no dispute fee, implying no funds move and likely no `Dispute` object at all for that
+  specific path. Whether an RDR/Ethoca-resolved dispute (which charges "a fee per dispute") creates a
+  `Dispute` object with `status=prevented` and a matching `balance_transaction` is still not explicitly
+  stated anywhere found — **partially closed**, treat `balance_transactions=[]` as the safe default for a
+  `prevented` dispute in the mock.
 
 ### Reason enum (spec3.json, verbatim)
 
@@ -145,17 +148,26 @@ balance... these funds are held for the entire duration of the dispute." And on 
 issuer overturns the dispute in your favor, the issuer returns the debited chargeback amount to Stripe,
 and Stripe passes this amount back to you." This matches the `balance_transaction.type` enum pulled from
 `spec3.json` directly (see `balance-ledger-and-payouts.md`), which includes both `adjustment` (the
-generic dispute-debit type used historically) — **gap**: I did not find a dispute-specific
-`balance_transaction.type` value in the enum (no literal `dispute` or `chargeback` value is present in
-the 51-value enum captured — see the ledger doc for the full list); the withdrawal is most likely typed
-as `adjustment`, but this is inference from the enum's absence of anything more specific, not a
-confirmed mapping. **Settle with a recorded trace**: create a dispute in test mode, inspect the
-`balance_transaction.type` of the resulting withdrawal entry directly.
+generic dispute-debit type used historically) — the withdrawal is most likely typed as `adjustment`.
 
-Dispute **fees**: not covered in this pass's searches beyond passing mentions in result titles (a
-"Dispute fees FAQ" page was surfaced but not opened). Stripe is widely known to charge a dispute fee
-that may or may not be refunded on a win, depending on account/region — **gap, not verified this
-session**, flagged rather than stated from memory.
+**Resolved 2026-09-18** — see `gap-closure-2026-09-18.md` item 8. **`adjustment` is now directly
+confirmed**, not just inferred. <https://docs.stripe.com/reports/balance-transaction-types> states
+verbatim, under the `adjustment` type: "**Disputes**. When a customer disputes a charge, Stripe deducts
+the disputed amount from your balance. The deduction is represented as a Balance transaction with the
+type `adjustment`, where the source object is a dispute. **Dispute reversals**. When you win a dispute,
+the disputed amount is returned to your balance. The returned funds are represented as a Balance
+transaction with the type `adjustment`, where the source object is a dispute." Both halves of the
+lifecycle (withdrawal and reversal/reinstatement) confirmed as `adjustment`, distinguished by
+`description` and the `source` pointer, not by a separate `type` literal.
+
+Dispute **fees**: **Resolved 2026-09-18** — see `gap-closure-2026-09-18.md` item 9. Direct read of
+<https://docs.stripe.com/disputes/how-disputes-work>, "Dispute fees" section, confirms a two-fee
+structure: (1) the **dispute received fee**, charged the moment a dispute opens, is **never refunded**
+(outside Mexico, which is a named regional exception; SEPA/Cartes Bancaires businesses incur no such fee
+at all); (2) the **dispute countered fee**, charged only if the merchant contests the dispute, **is
+refunded if the merchant wins**, never if they lose. So "does a merchant get the fee back on a win" has a
+nuanced answer: only the countered fee, not the base received fee — verbatim: "Unless otherwise stated in
+your Stripe contract, we never return the dispute received fee."
 
 ### Evidence submission
 
@@ -180,11 +192,16 @@ shape, not further explored in this pass since evidence-field-level detail is ar
 
 ## Gaps
 
-1. `prevented` dispute status — trigger and fund-movement semantics not corroborated.
-2. Exact `balance_transaction.type` used for a dispute withdrawal/reinstatement pair — inferred as
-   `adjustment`, not confirmed.
-3. Dispute fee amount, currency handling, and whether it's refunded on a win — not verified this
-   session.
+**Update 2026-09-18**: items 1-3 below were closed or substantially refined this pass via direct
+`docs.stripe.com` reads — see `gap-closure-2026-09-18.md` items 7, 8, 9 and the inline "Resolved
+2026-09-18" notes above. Kept here for audit trail; item 1 has one residual open sub-question.
+
+1. `prevented` dispute status — **definition confirmed**; whether an RDR/Ethoca-resolved dispute creates
+   a `Dispute` object (vs. only CE3.0's fully-blocked "never filed" path) remains open.
+2. Exact `balance_transaction.type` used for a dispute withdrawal/reinstatement pair — **confirmed as
+   `adjustment`** for both halves, directly quoted from Stripe's balance-transaction-types reference page.
+3. Dispute fee amount, currency handling, and whether it's refunded on a win — **confirmed**: two
+   separate fees (received / countered) with different refundability rules; see gap-closure item 9.
 4. `evidence_details.due_by` deadline mechanics — not independently confirmed.
 5. Whether an inquiry (`warning_*`) can escalate directly to `needs_response` before the 120-day
    `warning_closed` timeout — inferred, not confirmed.

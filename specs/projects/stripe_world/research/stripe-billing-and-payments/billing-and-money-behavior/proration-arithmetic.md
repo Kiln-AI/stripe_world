@@ -56,6 +56,12 @@ phrased search queries, which is a meaningful corroboration signal for a search-
 
 ### Quantity changes
 
+**Update 2026-09-18**: refined, not fully closed — see `gap-closure-2026-09-18.md` item 3. A direct read
+confirms quantity changes are triggered by the identical "cost of the subscription before and after the
+change" mechanism as price changes (same page, same table, no separate formula for quantity), which is
+materially stronger evidence for whole-configuration reproration than the analogy this section
+originally relied on. Still no isolated numeric worked example for a pure quantity-only change.
+
 "Stripe also prorates when you make quantity changes" (via search) — same mechanics apply: the old
 `quantity × old effective price` for the unused portion is credited, the new `quantity × price` for the
 remaining portion is debited. I did not find a source spelling out whether a *quantity-only* change
@@ -85,7 +91,17 @@ start/end timestamps used in the calculation to a coarser interval — `hour`, `
 line items. This is opt-in scripting on top of the default second-level behavior, not a different
 built-in mode. `proration_date` (see below) is the general-purpose hook this customization is built on.
 
-## Rounding rule — NOT FULLY SETTLED, flagged explicitly
+## Rounding rule — RESOLVED for the core question, see `gap-closure-2026-09-18.md` item 1
+
+**Update 2026-09-18**: a direct read of the docs (blocked in the original pass, now reachable via
+Tavily) resolved the load-bearing part of this question with reproducible arithmetic from Stripe's own
+worked example. **Credit and debit proration line items are rounded independently, each to the nearest
+cent, and then summed — Stripe does not compute a net at higher precision and round once.** The exact
+tie-break rule for an `x.xx5` boundary is still not directly documented. Full evidence, quotes, and URLs
+in `gap-closure-2026-09-18.md` item 1. The rest of this section is preserved as originally written for
+historical/audit purposes; where it conflicts with the above, the gap-closure file is authoritative.
+
+### Original text (superseded on the independent-vs-net question, tie-break question still open)
 
 I could **not** find an explicit, docs-stated rounding rule for the final proration line-item amount
 (i.e., after multiplying the fractional-second proration factor by the price, which sub-cent value is
@@ -193,9 +209,19 @@ paid for through the period they're in.
 
 ## Open questions requiring a recorded API trace to settle
 
-1. Exact rounding rule for proration line-item amounts (round-half-up inferred from fee rounding, not
-   confirmed for prorations specifically).
-2. Whether credit/debit lines round independently or net-then-round.
-3. Exact behavior of a pure quantity change (whole-item reproration vs. delta-only).
+**Update 2026-09-18**: items 1 and 2 below are now closed for their core question, item 3 refined — see
+`gap-closure-2026-09-18.md` items 1 and 3.
+
+1. ~~Exact rounding rule for proration line-item amounts~~ — **closed for the general case**: rounds to
+   the nearest cent (confirmed with reproducible arithmetic from a docs worked example). The exact
+   `x.xx5`-tie-break convention specifically is still not documented anywhere found; round-half-up remains
+   an assumption for that narrow case only.
+2. ~~Whether credit/debit lines round independently or net-then-round~~ — **closed**: independently,
+   then summed. Directly proven via the `-667 + 333 = -334` arithmetic in
+   `gap-closure-2026-09-18.md` item 1. Confirmed for `billing_mode=classic`; assumed (not separately
+   confirmed) to also hold under `billing_mode=flexible`.
+3. Exact behavior of a pure quantity change (whole-item reproration vs. delta-only) — **refined, not
+   fully closed**: directly confirmed to use the same before/after-cost mechanism as price changes, but
+   still no isolated numeric worked example. Still benefits from a recorded API trace.
 4. Exact `proration_behavior`/param name and semantics on the subscription **delete** (immediate cancel)
-   endpoint specifically.
+   endpoint specifically. **Not targeted by this pass — still open.**

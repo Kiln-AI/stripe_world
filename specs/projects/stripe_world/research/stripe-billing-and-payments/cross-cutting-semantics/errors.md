@@ -1,5 +1,12 @@
 # The Error Envelope, `type`, `code`, `decline_code`, and HTTP Status Mapping
 
+> **2026-09-18 update:** the `decline_code` table below is **incomplete** — the authoritative
+> `docs.stripe.com/declines/codes` page (now directly fetched) lists **50** card decline codes, not the
+> ~43 captured here. See [gap-closure-2026-09-18.md](./gap-closure-2026-09-18.md#7-is-the-decline_code-table-in-errorsmd-complete-42-43-captured-vs-claimed-44)
+> for the full corrected table and the 7 missing codes. The bad-`expand[]`-path error text and the
+> `param` bracket-notation examples referenced below were also resolved with real wire-quoted evidence
+> in that pass — see items 4 and 6 there.
+
 ## The envelope shape — verbatim from `spec3.json`
 
 Every error response body is `{"error": <APIErrors object>}`. Confirmed directly:

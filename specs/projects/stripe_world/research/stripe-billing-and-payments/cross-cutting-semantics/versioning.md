@@ -1,5 +1,14 @@
 # API Versioning (`Stripe-Version`)
 
+> **2026-09-18 update:** the codename/major-release model is now confirmed directly from
+> `docs.stripe.com/api/versioning` prose, and it's now **confirmed** (not "not confirmed this session")
+> that the live API echoes a `Stripe-Version` response header — a real API response's header dump,
+> quoted in `stripe-node#1127`, includes `'stripe-version': '2020-08-27'`. What happens on a genuinely
+> malformed/unrecognized `Stripe-Version` value remains unanswered even in Stripe's own prose docs — this
+> was checked directly this pass, not just inferred to be inaccessible. See
+> [gap-closure-2026-09-18.md](./gap-closure-2026-09-18.md#5-unknowninvalid-stripe-version-handling-and-whether-responses-carry-a-version-header)
+> item 5.
+
 ## What the spec itself says about its own version
 `spec3.json`'s `info` block, read directly:
 ```json

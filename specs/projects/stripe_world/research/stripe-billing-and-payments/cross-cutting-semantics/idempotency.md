@@ -1,5 +1,11 @@
 # Idempotency Keys
 
+> **2026-09-18 update:** the ~24h retention claim below is now confirmed verbatim from
+> `docs.stripe.com/api/idempotent_requests`: "You can remove keys from the system automatically after
+> they're at least 24 hours old." See
+> [gap-closure-2026-09-18.md](./gap-closure-2026-09-18.md#1-idempotency-key-retention-wording-and-window)
+> item 1.
+
 ## What the header is and which methods honor it
 
 - Header name: `Idempotency-Key`. It is **not** part of the OpenAPI request schema at all — `grep`

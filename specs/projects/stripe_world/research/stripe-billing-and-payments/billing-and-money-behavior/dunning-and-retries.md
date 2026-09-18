@@ -51,6 +51,21 @@ even though the schedule keeps running and `invoice.attempt_count` keeps increme
 > is added. The schedule still runs and the attempt counter still climbs, but nothing reaches the
 > issuer."
 
+**Resolved 2026-09-18** — see `gap-closure-2026-09-18.md` item 4. A direct read of
+<https://docs.stripe.com/billing/revenue-recovery/smart-retries> gives the complete, Stripe-primary-sourced
+list of nine hard decline codes, verbatim:
+
+```
+incorrect_number, lost_card, pickup_card, stolen_card, revocation_of_authorization,
+revocation_of_all_authorizations, authentication_required, highest_risk_level, transaction_not_allowed
+```
+
+The ninth code is **`transaction_not_allowed`**. The original 8 codes below (recovered via third-party
+aggregator sites in the original pass) are confirmed correct and complete now that the 9th is known; the
+whole list should be treated as directly docs-sourced rather than third-party-aggregated going forward.
+
+<details><summary>Original text (superseded, kept for audit trail)</summary>
+
 Named hard-decline codes (via search, aggregated from secondary commentary — **not cross-checked
 against the `decline_code` enum in `spec3.json` in this pass; that full enum is subtopic 2's territory
 ("cross-cutting semantics" → error envelope) — treat this list as a good starting point, not
@@ -63,6 +78,8 @@ revocation_of_all_authorizations, authentication_required, highest_risk_level
 (only 8 named in the source text despite it saying "nine specific decline codes" — **one is missing
 from what I could retrieve; this list is incomplete**, flagged explicitly rather than guessing the
 ninth.)
+
+</details>
 
 This distinction matters for a faithful mock: `invoice.attempt_count` incrementing does **not** imply an
 actual network authorization attempt occurred when the payment method's last known decline code is one
@@ -105,6 +122,19 @@ happens next, one of:
    "closed") or `draft` (search wording)? Settle with a test-clock trace: force a subscription through
    full dunning exhaustion with `unpaid` configured, advance past the next cycle boundary, and read the
    new invoice's `status` directly.
+
+   **Update 2026-09-18** — see `gap-closure-2026-09-18.md` item 5. This contradiction is now confirmed
+   to be **real and persisting inside Stripe's own docs corpus**, not an artifact of search-snippet
+   imprecision: two separate `docs.stripe.com` pages, read directly, both say "draft" in nearly
+   identical language — this same page's own source
+   (<https://docs.stripe.com/billing/revenue-recovery/smart-retries>, table row verbatim: "Invoices
+   continue to be generated and stay in a draft state") and
+   <https://docs.stripe.com/billing/subscriptions/overview> ("The subscription continues to generate
+   invoices each billing period, which remain in `draft` status."). Weight of evidence (2 independent
+   direct reads) now favors **`draft`** as the correct implementation target — note also that "closed"
+   was never an actual `invoice.status` enum literal (the real enum is `draft, open, paid,
+   uncollectible, void`), so the spec's prose was always loose language rather than a literal status
+   name. **Recommendation flips from "unresolved, pick either" to "implement as `draft`-persisting."**
 3. **Leave the subscription `past_due`** — status stays `past_due` indefinitely. Per search: "Invoices
    continue to be generated and charge the customer based on retry settings" — i.e. this option keeps
    attempting future cycle invoices' own retry schedules too, it isn't a dead end.
@@ -134,10 +164,17 @@ transitions. Treat as **high-confidence inference**, not a directly-quoted fact.
 
 ## Summary of gaps
 
-1. Ninth hard decline code not recovered (only 8 of "nine specific decline codes" found).
-2. `unpaid`-outcome invoice status: `draft` (search) vs. effectively "closed"/void-like (spec3.json
-   wording) — contradiction not resolved.
+**Update 2026-09-18**: items 1 and 2 closed/refined this pass — see `gap-closure-2026-09-18.md` items 4
+and 5, and the inline "Resolved"/"Update" notes above.
+
+1. ~~Ninth hard decline code not recovered~~ — **closed**: `transaction_not_allowed`, confirmed directly
+   from <https://docs.stripe.com/billing/revenue-recovery/smart-retries>.
+2. `unpaid`-outcome invoice status: `draft` (now 2 independent direct docs reads) vs. "closed"/void-like
+   (spec3.json wording) — **contradiction confirmed as real and persisting**; weight of evidence now
+   favors implementing as `draft`. Not "resolved" in the sense of the docs agreeing with each other, but
+   resolved in the sense of having a confident implementation recommendation.
 3. No confirmation of whether retry schedule is API-inspectable/settable per subscription, or purely a
-   Dashboard-level account setting.
+   Dashboard-level account setting. **Still open** — not targeted by this pass.
 4. ML-model internals (training data size, architecture) are third-party claims, not Stripe's own
-   documentation, and are not load-bearing for implementation — included only as background color.
+   documentation, and are not load-bearing for implementation — included only as background color. **Still
+   open / low priority**, not targeted by this pass.

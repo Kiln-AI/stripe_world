@@ -1,5 +1,11 @@
 # The `expand[]` Parameter
 
+> **2026-09-18 update:** the bad/invalid expand-path question below is now **resolved** — it is a hard
+> 400 `invalid_request_error`, message "This property cannot be expanded (`<field>`)." (or "...because
+> it doesn't exist: `<field>`." for a genuinely nonexistent field), never silently ignored. See
+> [gap-closure-2026-09-18.md](./gap-closure-2026-09-18.md#4-badinvalid-expand-path--error-or-silent-ignore)
+> item 4 for real wire-quoted examples and sources.
+
 ## What's expandable, and how the schema encodes it
 `spec3.json` marks expandability at the **schema level**, not per-parameter: every object schema
 that has expandable fields carries an `x-stripeSpecFilename`-generator-produced

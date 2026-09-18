@@ -140,12 +140,21 @@ fixtures.** Reasons:
 
 Found on `payment_intent.managed_payments` and `setup_intent.managed_payments`. This is a
 single-property wrapper schema in `spec3.json` with no further documented shape visible at the survey
-depth used here — "SMOR" is not a product this subtopic could identify from the spec alone (it does
-not appear in project_overview.md's in/out lists, and web access to docs.stripe.com was blocked in
-this session — see Open Questions / Gaps in `summary.md`). **Ruling: null.** It's nullable, not
-required, and appears to be an emerging/preview feature (its narrow 1-property shape and lack of
-presence in `stripe-mock`'s older fixtures — see subtopic 4 — both suggest this); nulling it costs
-nothing and there's no basis in this subtopic's sources to model it.
+depth used here.
+
+> **2026-09-18 update:** "SMOR" is now identified — **Stripe Merchant Of Record** — tied to Stripe's
+> **Managed Payments** product (`docs.stripe.com/payments/managed-payments/how-it-works`, fetched
+> directly), where Stripe's acquiring affiliates become the merchant of record for a seller's digital-
+> goods transactions, handling global tax compliance. It does not appear in project_overview.md's
+> in/out lists, so it is still out of this project's declared scope. See
+> [gap-closure-2026-09-18.md](./gap-closure-2026-09-18.md#10-smor_resource_managed_payments--identified-low-stakes-timeboxed-as-instructed)
+> item 10.
+
+**Ruling: null** (unchanged). It's nullable, not required, and appears to be an emerging/preview
+feature (its narrow 1-property shape and lack of presence in `stripe-mock`'s older fixtures — see
+subtopic 4 — both suggest this); nulling it costs nothing, and while its product meaning is now known,
+Managed Payments itself is not in this project's declared scope, so there's still no basis to model it
+further.
 
 ## `customer.cash_balance` / `customer_cash_balance_transaction` (the Cash Balance product — distinct from `customer.balance` / `customer_balance_transaction`)
 

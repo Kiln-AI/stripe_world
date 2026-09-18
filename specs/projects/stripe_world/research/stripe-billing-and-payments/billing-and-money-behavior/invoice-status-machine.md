@@ -161,13 +161,12 @@ moves to `past_due` and dunning begins (see `dunning-and-retries.md`). For `coll
 send_invoice`, the invoice is emailed with `due_date` = creation time + `days_until_due`, and the
 subscription becomes `past_due` only once that due date passes unpaid.
 
-**Gap**: I could not pin down from search results alone the exact **lead time** before period-end at
-which the cycle invoice is created (i.e., is it created exactly at the period boundary, or up to N hours
-before, to allow finalization + collection before the boundary?). This matters for a faithful
-implementation's scheduler. Settle via <https://docs.stripe.com/billing/invoices/subscription> (blocked
-this session) or a test-clock trace advancing across a period boundary and reading `invoice.created` vs
-`subscription.current_period_end` (test-clock ownership is subtopic 4's territory, but this specific
-"how many hours before" fact belongs here).
+**Resolved 2026-09-18** — see `gap-closure-2026-09-18.md` item 2. A direct read of
+<https://docs.stripe.com/billing/invoices/subscription> (unreachable in the original pass, reachable now)
+confirms: "Stripe automatically creates an invoice for subscriptions at the end of each billing cycle. We
+finalize and send the invoice in one hour." There is **no lead time before** the boundary — invoice
+creation *is* the period-boundary event; the ~1-hour draft window (documented above) comes *after*
+creation, not before it.
 
 ## `collection_method` and `due_date`/`days_until_due` mechanics
 

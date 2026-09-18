@@ -19,6 +19,27 @@ null Connect fields" are `invoice.issuer` (Connect-shaped but non-nullable and r
 `{type: "self"}`) and `subscription`/`invoice`'s required `automatic_tax` object (model minimally as
 `{enabled: false}`).
 
+## Gap Closure (2026-09-18)
+
+A follow-up pass with working `docs.stripe.com` access (via Tavily MCP, `mcp__Tavily__tavily_extract`)
+closed all three items this lane had flagged as needing docs.stripe.com or a closed-set derivation.
+Full detail, verbatim quotes and URLs: [gap-closure-2026-09-18.md](./gap-closure-2026-09-18.md).
+
+- **Confirmed**: `docs.stripe.com/api/versioning` cross-checked directly against this lane's
+  version-model claims (single pinned snapshot, out-of-band `Stripe-Version` header, no version
+  branching in the schema) — all hold up, and Stripe's own prose resolves the one open question about
+  how the `dahlia`-style codename maps to a family of monthly releases under one breaking-change
+  boundary.
+- **Delivered**: the closed `event.type` list, written to
+  [event-types-closed-set.txt](./event-types-closed-set.txt) — **266 event-type strings**, merged from
+  `docs.stripe.com/api/events/types` (236, scoped to `/v1` resources) and `stripe-python`'s generated
+  `enabled_events` enum (265, includes 30 `treasury.*` events the fetched docs page appears to be
+  missing — flagged, not silently resolved).
+- **Identified** (low-stakes item, timeboxed): `smor_resource_managed_payments` = **Stripe Merchant Of
+  Record**, tied to Stripe's Managed Payments product. The `null` scope ruling in
+  `scope-boundary-edges.md` is unchanged (still out of this project's declared scope) — only the
+  "can't identify it" framing is corrected.
+
 ## Key Findings
 
 - **The named-resource operation count blows the tool budget by 3–4.7x before any cutting.** 187 raw
@@ -48,7 +69,12 @@ null Connect fields" are `invoice.issuer` (Connect-shaped but non-nullable and r
   OpenAPI document — versioning is entirely out-of-band HTTP-header behavior the schema doesn't
   describe. Practical consequence: **what's captured in `research/stripe-openapi/` right now is the
   only version obtainable from this source; pin it, there's no "go get v2025-01-01 later" option from
-  this repo.**
+  this repo.** **Now cross-checked directly against `docs.stripe.com/api/versioning`'s own prose
+  (2026-09-18): confirmed.** Stripe's own model is monthly, backward-compatible releases sharing one
+  codename (e.g. `dahlia`) until the next breaking major release (e.g. `Acacia` → `Basil` → `Clover` →
+  `Dahlia`) gets a new name — resolving this lane's earlier open question about exactly how the
+  codename maps to a release family. See
+  [gap-closure-2026-09-18.md](./gap-closure-2026-09-18.md#8-docsstripecomapiversioning-cross-check).
 - **Three similarly-named ledgers are easy to conflate and only one is in scope.** `balance_transaction`
   (platform funds), `customer_balance_transaction` (a customer's invoicing credit/debit balance —
   recommended addition to the closed set, needed for `invoice.starting_balance`/`ending_balance` and
@@ -84,8 +110,9 @@ null Connect fields" are `invoice.issuer` (Connect-shaped but non-nullable and r
   declared scope boundary, with a model/stub/null ruling and reason per edge, organized by the
   out-of-scope product it touches (Connect, Stripe Tax, Radar, Checkout, Financial
   Connections/Issuing/etc., legacy Sources API, `mandate`/`setup_attempt`, the payment-method-details
-  rail unions, an unidentified `smor_resource_managed_payments` preview field, Cash Balance, test
-  clocks). Ends with a single summary table. Read this when deciding exactly what a given field returns.
+  rail unions, the `smor_resource_managed_payments` preview field (identified 2026-09-18 as Stripe
+  Merchant Of Record / Managed Payments, still out of scope), Cash Balance, test clocks). Ends with a
+  single summary table. Read this when deciding exactly what a given field returns.
 - [api-versions-and-spec-diff.md](./api-versions-and-spec-diff.md) — how many API versions the repo
   publishes (one), how the spec is (not) keyed to `Stripe-Version` at the schema level, and the full
   `spec3.json` vs `spec3.sdk.json` diff (path-set subset relationship, the four SDK-only annotation
@@ -93,23 +120,28 @@ null Connect fields" are `invoice.issuer` (Connect-shaped but non-nullable and r
 
 ## Open Questions / Gaps
 
-- **`docs.stripe.com` was unreachable from this session** (`WebFetch` returned `EGRESS_BLOCKED` for
-  `docs.stripe.com/api/versioning`) — this subtopic's versioning findings are sourced from the
-  `stripe/openapi` repo's own README/releases and `stripe-mock`'s README instead, which corroborate
-  each other but weren't cross-checked against Stripe's own versioning-policy prose. If another
-  subtopic's session has working `docs.stripe.com` access, it's worth a quick cross-check.
-- **`smor_resource_managed_payments`** (on `payment_intent`/`setup_intent`) could not be identified —
-  no expansion of "SMOR" was findable from the spec alone, and it wasn't chased further on the web
-  since it was ruled `null` regardless (single optional field, no observable effect on in-scope
-  behavior). If it turns out to be something load-bearing, revisit.
+All three items this lane had flagged as blocked on `docs.stripe.com` access or needing a closed-set
+derivation were closed in a 2026-09-18 follow-up pass — see
+[gap-closure-2026-09-18.md](./gap-closure-2026-09-18.md) for full detail, quotes and sources:
+
+- ~~`docs.stripe.com` was unreachable from this session~~ — **closed**: now cross-checked directly
+  against `docs.stripe.com/api/versioning`'s own prose; this lane's versioning claims are confirmed.
+- ~~`smor_resource_managed_payments` could not be identified~~ — **closed**: identified as Stripe
+  Merchant Of Record / the Managed Payments product. The `null` scope ruling is unchanged.
+- ~~The full "all Stripe event `type` strings" list is not derivable from `spec3.json`~~ — **closed**:
+  a merged, 266-entry closed set from `docs.stripe.com/api/events/types` (236) and `stripe-python`'s
+  generated `enabled_events` enum (265) is now written to
+  [event-types-closed-set.txt](./event-types-closed-set.txt). One real discrepancy remains flagged
+  there (30 `treasury.*` events present in `stripe-python` but not rendered on the fetched docs page,
+  most likely gated/collapsed content rather than a real absence — Treasury isn't in this project's
+  declared scope regardless).
+
+**Still open, unrelated to this pass's assigned items:**
+
 - **Whether `stripe/openapi`'s git history goes back far enough to reconstruct an older pinned
   `Stripe-Version`** was not checked — only the currently-fetched snapshot was examined. Not needed
   for this project (project_overview.md §8 just needs *a* pinned version, and one is already captured),
   but worth knowing if a later need arises to compare against an older version's shape.
-- **The full "all Stripe event `type` strings" list** is not derivable from `spec3.json` — `event.type`
-  is a bare `string`, not an enum, by design. If the functional spec needs a closed event-type list for
-  this world to emit, it should come from `stripe-python`'s webhook-type constants or
-  docs.stripe.com/api/events/types, not from the OpenAPI spec.
 - Did not verify the exact honest tool count after full application of every cut recommended in
   `minimum-closed-set-and-tool-budget.md` — the ~60–75 estimate there is this subtopic's calculation
   from the raw counts, not a line-by-line enumerated final tool list (that's the functional spec's job,
@@ -133,3 +165,11 @@ null Connect fields" are `invoice.issuer` (Connect-shaped but non-nullable and r
 - [stripe/openapi releases](https://github.com/stripe/openapi/releases) — fetched via `WebFetch`,
   2026-09-18; authoritative for the release-tag numbering scheme and cadence observed (`v2500` down to
   `v2496`, all same-day, 2026-09-18).
+- **2026-09-18 gap-closure pass**: `mcp__Tavily__tavily_extract` direct reads of
+  `docs.stripe.com/api/versioning`, `docs.stripe.com/api/enums`, `docs.stripe.com/api/events/types`,
+  `docs.stripe.com/payments/managed-payments/how-it-works`, `docs.stripe.com/api/payment_intents/object`,
+  `docs.stripe.com/api/setup_intents/object` — `WebFetch` still cannot reach these domains in this
+  environment, but Tavily's extract tool can.
+  `research/repos/stripe-python/stripe/params/_webhook_endpoint_create_params.py` — local file, read
+  directly, for the independent `enabled_events` closed-enum cross-check. Full detail:
+  [gap-closure-2026-09-18.md](./gap-closure-2026-09-18.md).

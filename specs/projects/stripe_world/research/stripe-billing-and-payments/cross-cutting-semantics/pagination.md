@@ -1,5 +1,12 @@
 # Pagination (list endpoints) and Search (separate cursor mechanism)
 
+> **2026-09-18 update:** the ordering-guarantee sentence is now directly confirmed verbatim from
+> `docs.stripe.com/api/pagination` ("return objects in reverse chronological order"), and this file's
+> claim that search endpoints "do carry `total_count`" is **corrected** — `total_count` is opt-in via
+> `expand[]=total_count`, not returned by default. The deleted-object-id cursor question was checked
+> again directly against the full prose page and remains genuinely unanswered by Stripe's own docs. See
+> [gap-closure-2026-09-18.md](./gap-closure-2026-09-18.md#2-pagination-ordering-guarantee-sentence) items 2–3.
+
 There are **two distinct pagination mechanisms** in the API, confirmed from `spec3.json`, and they
 must not be conflated:
 
