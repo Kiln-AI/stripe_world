@@ -1,0 +1,208 @@
+---
+name: spec
+description: >
+  Commands: new_project, continue, implement, task, research (research a topic on the web), cr (code review), deep cr (multi-phase code review), design crit (multi-phase spec review), pr (address PR feedback), setup, or open guidance
+
+  Spec-driven development: process for planning, building, and reviewing
+  code projects using structured specifications. Guides users from project
+  idea through functional spec, architecture, phased implementation, and
+  code review — with human focused on decisions and AI agents handling
+  drafting and building.
+
+  Use when the user wants to: start a new project with specs, continue
+  speccing or implementing a project, implement a planned phase, run a
+  quick task without a full spec, research a topic on the web (standalone
+  or to inform a spec), review code against specs, or set up
+  spec-driven development in a repo.
+---
+
+# Spec-Driven Development
+
+A structured process for building software projects with specifications. You (the human) focus on decisions and review; AI agents handle drafting and building.
+
+## How It Works
+
+Every batch of work ("project") gets a spec folder under `/specs/projects/PROJECT_NAME/`. The skill guides you through:
+
+1. **Planning**: Project overview → functional spec → architecture → implementation plan
+2. **Building**: Implement phases autonomously, with code review built into each phase
+3. **Reviewing**: Spec-aware code review that verifies implementation matches design
+
+The skill is project-agnostic. It provides the process; your project-specific conventions (test commands, linting, style) come from your system prompt configuration.
+
+## If This Conversation Was Compacted
+
+The command references below hold the role definitions, process gates and prompt templates for each command. Compaction restores only this file — not them. **If this conversation has been compacted part-way through a command, re-read that command's reference file before your next action.**
+
+When compacting, preserve: this instruction, which `/spec` command is running, which phase and step it is on, and the handles of any sub-agents you hold — the coding agent's agent ID in particular, since you resume it for review feedback and commit.
+
+During `/spec implement`, `/spec task` and `/spec pr` you are a **manager**: you spawn and resume sub-agents, triage review findings, run git, and print progress blocks. You do not write code, run tests, review code, or commit. Every coding round — including one that addresses review feedback — is code-reviewed before commit.
+
+## Command Reference
+
+### `/spec setup`
+
+One-time (or incremental) setup for using the skill in a repo. Adds `.specs_skill_state/` to gitignore, creates `/specs/projects/` directories, detects monorepo layout, and checks for commonly-needed configuration.
+
+→ Read [setup command reference](references/cmd_setup.md)
+
+### `/spec new_project` or `/spec new`
+
+Create a new project from scratch. Walks through planning steps: project overview, functional spec, architecture (with optional component designs), and implementation plan. Sets this as your active project.
+
+→ Read [new project command reference](references/cmd_new_project.md)
+
+### `/spec continue` or `/spec cont`
+
+Resume work on the active project. Shows current state and routes to the next logical action — continue speccing, implement next phase, or review code.
+
+→ Read [continue command reference](references/cmd_continue.md)
+
+### `/spec implement` or `/spec impl`
+
+Implement the active project. Routes to phase-specific or full implementation. Use `/spec implement next` for one phase, `/spec implement all` for all remaining, or `/spec implement phase N` for a specific phase.
+
+→ Read [implement command reference](references/cmd_implement.md)
+
+### `/spec task`
+
+Implement a one-off task without a full spec. Describe what you want inline and get the same implement loop (coding agent, code review, commit) without planning artifacts.
+
+→ Read [task command reference](references/cmd_task.md)
+
+### `/spec research`
+
+Research a topic on the web. Splits the topic into subtopics, runs a research sub-agent on each, and writes a tree of research docs under a single summary. Requires web search and web fetch tools. Runs standalone, or embedded in `/spec new_project` when a spec depends on knowledge you don't have yet.
+
+→ Read [research command reference](references/cmd_research.md)
+
+### `/spec pr`
+
+Address review feedback from a GitHub pull request. Finds the PR for the current branch, fetches unresolved comments, spawns a coding agent to address them, runs the standard code review and triage, commits, pushes, and replies to each comment thread on GitHub.
+
+→ Read [PR feedback command reference](references/cmd_pr.md)
+
+### `/spec cr` or `/spec code_review`
+
+Structured, spec-aware code review. Reviews `git diff` by default, or a specified scope. Always runs as a sub-agent with clean context.
+
+→ Read [code review command reference](references/cmd_code_review.md)
+
+### `/spec deep cr` or `/spec deep review`
+
+Multi-phase agentic code review. Compares current branch against its fork point, designs review phases tailored to the diff, runs focused sub-agents per phase, and produces persistent review artifacts.
+
+→ Read [deep code review command reference](references/cmd_deep_code_review.md)
+
+### `/spec design crit` or `/spec crit`
+
+Multi-phase agentic review of spec/design documents. Identifies design concerns, runs focused sub-agents per concern area, produces persistent review artifacts, and offers an interactive resolution phase to triage and fix issues found.
+
+→ Read [design crit command reference](references/cmd_design_crit.md)
+
+### Bare `/spec` — Router
+
+Reads current state (active project, artifact statuses) and presents relevant options. Never requires routing — direct commands always work. Can also interpret open-ended requests.
+
+To check state: read `.specs_skill_state/current_project.md` and scan artifact frontmatter. Always show `/spec task` as an available option. If no project exists, suggest `new_project`, `task`, or `setup`. If project in progress, show state and suggest the next action.
+
+If the request is about learning or understanding something rather than building it — "what's the current state of the OpenEnv standard?", "how does Stripe's webhook retry work?", "which library should we use for Z?" — route to `/spec research`. Also suggest it when a user's project idea depends on an external standard, API, or library that neither of you can describe accurately from memory.
+
+**Not a command:** [shared/backlog_phase.md](references/shared/backlog_phase.md) — an interactive process for deciding a queue of open questions with the user. Written for the Backlog phase of `/spec implement`; reusable wherever a flow needs a batch of decisions.
+
+## Project Structure
+
+Every project lives under `/specs/projects/PROJECT_NAME/`:
+
+| File | Created During | Purpose |
+|------|---------------|---------|
+| `project_overview.md` | new_project Step 1 | Your description of what to build |
+| `functional_spec.md` | new_project Step 2 | Features, behaviors, edge cases, contracts |
+| `ui_design.md` | new_project Step 3 | UI structure, screens, navigation (conditional) |
+| `architecture.md` | new_project Step 4 | Technical design, deep enough for coding |
+| `/components/NAME.md` | new_project Step 5 | Per-component detailed design (conditional) |
+| `implementation_plan.md` | new_project Step 6 | Phased build order as checklist |
+| `/phase_plans/phase_N.md` | Implementation | Per-phase plan written by coding agent |
+| `backlog.md` | Implementation (conditional) | Issues in already-committed work, found during review; adds a final Backlog phase |
+| `/research/[topic]/` | Any planning step (conditional) | Web research informing the specs |
+
+## Research Folders
+
+Research output lives in a folder per topic, with a `summary.md` at its root linking to per-subtopic summaries, which link to deep docs:
+
+| Invocation | Working folder |
+|------------|-------------|
+| Standalone `/spec research [topic]` | `/specs/research/[topic]/` |
+| During `/spec new_project` | `/specs/projects/PROJECT_NAME/research/[topic]/` |
+
+Research folders have no frontmatter status and are outside the artifact dependency chain — they're inputs to speccing, not spec artifacts.
+
+## Artifact Conventions
+
+All spec files use YAML frontmatter with a `status` field:
+
+```yaml
+---
+status: draft
+---
+```
+
+Valid statuses: `draft`, `complete`.
+
+- Artifacts start as `draft` when created
+- Mark `complete` after user confirmation
+- If a completed artifact is edited, downstream artifacts cascade to `draft` (if they may be affected)
+
+Dependency chain: `project_overview → functional_spec → architecture → components → implementation_plan`
+
+Phase plans are outside the cascade — generated fresh during implementation.
+
+## Modes
+
+The skill operates in two modes:
+
+- **Project mode**: Full spec planning → phased implementation. Use for anything that benefits from upfront design — new features, complex changes, multi-phase work.
+- **Task mode**: Inline description → single-pass implementation. Use for well-understood, small-to-medium changes — bug fixes, small features, refactors.
+
+Both modes use the same implement loop (coding agent → code review → commit). Task mode skips the spec planning steps.
+
+## State Management
+
+The file `.specs_skill_state/current_project.md` (git-ignored) tracks your active work:
+
+```
+Current Project: /specs/projects/project_name
+```
+
+or for tasks:
+
+```
+Current Task: tasks/task-slug
+```
+
+Task files live at `.specs_skill_state/tasks/[slug].md`.
+
+This file is per-worktree (git-ignored), so you can have parallel worktrees with different active work.
+
+## Monorepo Support
+
+For monorepos (multiple sub-projects in one repo):
+
+- `/spec setup` discovers sub-projects by scanning for root markers (`pyproject.toml`, `package.json`, etc.)
+- Each sub-project gets its own `/specs/projects/` directory
+- `/specs/monorepo.md` at repo root describes the layout
+- Cross-project work lives at root `/specs/projects/`
+
+→ See `/spec setup` for discovery and setup.
+
+## Extensibility
+
+The skill provides the process. Project-specific details come from your environment:
+
+**From the skill:** The workflow, general guidance ("run automated checks"), persona-driven quality standards
+
+**From your system prompt:** Test commands, lint/format commands, code style, CR standards, project-specific constraints
+
+The skill references these generically: "run the project's automated checks" not "run `uv run ./checks.sh`."
+
+→ See `/spec setup` for help configuring external knowledge.
