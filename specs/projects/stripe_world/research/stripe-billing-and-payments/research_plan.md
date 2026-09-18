@@ -11,7 +11,10 @@ supply evidence for the three open questions in §12 (tool surface shape, naming
 
 ## Run
 
-- Model: Opus 5 for all subtopic agents and the summary agent (inherited; not the very-expensive tier).
+- Model: **Sonnet** for all 6 subtopic agents (user decision, 2026-09-18 — research fan-out is the
+  token-hungriest work in the skill and these lanes are mostly faithful extraction from primary
+  sources). The cross-subtopic summary agent runs on Opus 5: it reads only the six subtopic
+  summaries, so it is cheap, and it is the synthesis the functional spec is written from.
 - 6 subtopics, one sub-agent each, dispatched in parallel.
 - Subtopics 1–5 are web research (billable). Subtopic 6 is local-source research over
   `vendor/Seahaven` — no web spend.
