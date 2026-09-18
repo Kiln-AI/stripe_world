@@ -51,8 +51,15 @@ call_stripe(
 Stripe is the best-known REST API in the training corpus. An agent already knows that customers live
 at `/v1/customers` and that you refund a charge by posting to `/v1/refunds`. A one-tool-per-operation
 surface would replace that pretrained knowledge with a bespoke tool list the agent has to be taught,
-and would make the world's realism depend on our naming rather than Stripe's. The single tool is also
-what production agents increasingly use: the raw HTTP API.
+and would make the world's realism depend on our naming rather than Stripe's.
+
+It is also what Stripe itself ships. The **live** Stripe MCP server exposes 11 tools, four of which
+are generic — `stripe_api_search`, `stripe_api_details`, `stripe_api_read`, `stripe_api_write`. An
+earlier reading of a vendored DXT manifest suggested 23 curated one-tool-per-operation tools with no
+generic escape hatch; that manifest was stale, and the correction is recorded in
+[`agent-surfaces-and-licensing/gap-closure-2026-09-18.md`](research/stripe-billing-and-payments/agent-surfaces-and-licensing/gap-closure-2026-09-18.md).
+A single generic entry point is therefore closer to the surface production agents are given today,
+not a departure from it.
 
 The practical consequence is that endpoint *discovery* is not a tool-schema problem. The tool's
 docstring carries a compact index of every routable path (§3), and the world answers an unrecognised
@@ -231,16 +238,24 @@ Non-negotiable for fidelity, and mostly not in the OpenAPI schema. Details and c
   single-threaded world this is unreachable in normal operation but is modelled so the error exists.
 - Errors are cached the way Stripe caches them.
 - `request.idempotency_key` is echoed on responses.
-- Retention is time-boxed on the real API (~24h). With one frozen instant, keys never expire within a
-  rollout; the retention window is recorded in the conformance allow-list as a declared difference.
+- Retention on the real API is a **floor, not a fixed TTL** — the documented wording is that keys are
+  evicted once "at least 24 hours old". With one frozen instant, keys never expire within a rollout;
+  the retention window is recorded in the conformance allow-list as a declared difference.
 
 ### 6.2 Pagination
 
 Cursor pagination on every list: `limit`, `starting_after`, `ending_before`, `has_more`, and the
-`{"object": "list", "data": [...], "url": ...}` envelope. Default and maximum `limit`, ordering
-guarantee, and boundary behavior of `has_more` follow the research lane. Two behaviors it could not
-settle from primary sources — `starting_after`/`ending_before` against a deleted object id — are
-listed in §12 as conformance questions rather than guessed at.
+`{"object": "list", "data": [...], "url": ...}` envelope. `limit` defaults to 10 and ranges 1–100.
+Lists **return objects in reverse chronological order**, and `starting_after` / `ending_before` are
+mutually exclusive — supplying both is an error.
+
+`total_count` is **not** returned by default; it is opt-in via `expand[]=total_count` on the search
+endpoints, which are not routed here in any case (§3.2).
+
+`starting_after` / `ending_before` against the id of a **deleted** object remains unspecified — and
+now known to be a genuine silence in Stripe's documentation rather than a gap in our reading. It is a
+conformance scenario (§12), and until a recorded trace settles it the world's behavior is stated in
+the allow-list rather than assumed correct.
 
 ### 6.3 Expansion
 
@@ -248,6 +263,10 @@ listed in §12 as conformance questions rather than guessed at.
 list responses, and the spec's `x-expandableFields` as the authority on what is expandable. An
 expandable reference is stored as an id and inflated on read; unexpanded, it serialises as the bare
 id string.
+
+A bad or non-expandable path is a **hard `400` `invalid_request_error`, never silently ignored** —
+`"This property cannot be expanded (<field>)."` for a non-expandable field, or
+`"...because it doesn't exist: <field>."` for one that is not there at all.
 
 ### 6.4 The error envelope
 
@@ -260,16 +279,22 @@ The wire-level `type` has **exactly four values**: `api_error`, `card_error`, `i
 client-side conveniences derived from the HTTP status and are never emitted on the wire — a detail
 model recall reliably gets wrong, and one the conformance tests will catch.
 
-The full `code` (~215 values) and `decline_code` (~43 values) enumerations extracted during research
-are the source for what this world may emit. `param` names the offending parameter, including for
-nested and array parameters.
+The full `code` (~215 values) and `decline_code` (**50 values**, two of them deprecated) enumerations
+extracted during research are the source for what this world may emit. The first research pass
+captured only ~43 decline codes and was missing seven, including `authentication_required` and three
+PIN/address variants; the corrected table is authoritative. `param` names the offending parameter,
+using bracket notation for nested and array parameters.
 
 ### 6.5 Versioning
 
-One version is served: `2026-08-26.dahlia`. It is echoed on responses. A request carrying a
-*different* `stripe_version` is answered in the served version with the mismatch recorded in the
-change log — the world does not transform shapes across versions and does not pretend to. An eval
-that cares can assert on the record.
+One version is served: `2026-08-26.dahlia`. The real API does return a `stripe-version` response
+header, so this world does too. A request carrying a *different* `stripe_version` is answered in the
+served version with the mismatch recorded in the change log — the world does not transform shapes
+across versions and does not pretend to. An eval that cares can assert on the record.
+
+Stripe's codenames cover a run of monthly backward-compatible releases until the next breaking major
+release, so `dahlia` names a series rather than a single day's shape. Handling of a *malformed*
+version string is undocumented even in Stripe's own prose; ours is declared in the allow-list.
 
 ### 6.6 Events
 
@@ -278,9 +303,13 @@ Every state change that Stripe raises an event for writes an `event` row: `evt_`
 retrievable at `/v1/events`.
 
 **No delivery.** Events are queryable state; there is no HTTP webhook dispatch, no signing, no retry
-queue. Delivery is the harness's problem. The closed `event.type` list is not derivable from
-`spec3.json` (`event.type` is a bare string by design) and is taken from `stripe-python`'s webhook
-constants.
+queue. Delivery is the harness's problem.
+
+The closed `event.type` list is not derivable from `spec3.json` (`event.type` is a bare string by
+design). The authoritative set is the committed
+[`event-types-closed-set.txt`](research/stripe-billing-and-payments/api-surface-and-object-graph/event-types-closed-set.txt)
+— 266 entries, the union of Stripe's published list and `stripe-python`'s generated enum. Only the
+subset belonging to routed resources is ever emitted; the file is the validation set.
 
 ## 7. Billing and payments behavior
 
@@ -295,21 +324,42 @@ per-behavior citations in
   `auto_advance`, `collection_method`, the full `billing_reason` enum, and
   `invoice.automatically_finalizes_at` as the explicit, queryable draft window. Because time does not
   advance, automatic finalization does not fire on its own; the field is populated and honest, and
-  finalization happens when called.
+  finalization happens when called. A `subscription_cycle` invoice is created **exactly at the period
+  boundary with zero lead time** — the ~1-hour draft window follows that creation, it does not
+  precede it.
 - **Proration** — `credit = -fraction × old_price`, `debit = +fraction × new_price`, the fraction
   computed to the second, producing the familiar two `unused_time` / `remaining_time` lines.
-  **The cent-rounding rule is not settled** — it is inferred by analogy to Stripe's fee rounding
-  (round-half-up) and is not documented anywhere the research could reach. It is implemented behind a
-  single named function with the assumption stated at the call site, and it is the first conformance
-  scenario to record. See §12.
+  **Credit and debit lines each round to the nearest cent independently, and the rounded lines are
+  then summed** — the total is not computed at higher precision and rounded once. This is settled by
+  a worked example in Stripe's own documentation whose arithmetic only reconciles under
+  independent-per-line rounding (a 20/3 credit rounding to −667 and a 10/3 debit to +333, totalling
+  −334; net-then-round would give −333). It was previously an assumption by analogy and is now a
+  documented fact.
+
+  One narrow assumption remains: the tie-break at an exact half-cent (`x.xx5`) is genuinely
+  undocumented, so round-half-up stands there. It lives behind a single named function with the
+  assumption stated at the call site. The documented example is `billing_mode=classic`; whether
+  `flexible` rounds identically is unproven, because its analogous example nets to zero. Both go to
+  conformance (§12).
 - **Dunning** — Smart Retries is ML-scheduled; there is no retry-day table to transcribe, and building
   one would be inventing behavior. The world models the configuration envelope (N attempts within a
   window) and the three end-of-schedule outcomes. `invoice.attempt_count` increments only on automatic
-  retries and keeps incrementing even when a non-retryable decline blocks the network attempt.
+  retries and keeps incrementing even when a non-retryable decline blocks the network attempt. Nine
+  hard-decline codes gate further retries, the ninth being `transaction_not_allowed`.
+
+  At the end of the schedule, the `unpaid` outcome leaves invoices **`draft`**. Two Stripe
+  documentation pages say `draft`; `spec3.json`'s own prose says "closed", which was never a real
+  `invoice.status` value. The docs win, and the discrepancy is a declared difference. A subscription
+  in `unpaid` **auto-recovers to `active` when its most recent invoice is paid** — no explicit
+  subscription update is required.
 - **Refunds** — partial refunds, over-refund rejection, refunds against disputed charges, and correct
   `refunded` / `amount_refunded` bookkeeping.
 - **Disputes** — status machine, evidence submission, and the ledger effects of funds withdrawn and
-  returned.
+  returned. Both the dispute withdrawal and its reversal are `balance_transaction.type = adjustment`;
+  the enum has no dispute-specific value, and this is confirmed rather than inferred. There are **two
+  distinct fees**: the "dispute received" fee is never refunded, while a separate "dispute countered"
+  fee — charged only if the merchant contests — is refunded on a win. `dispute.status = prevented`
+  means a dispute stopped before becoming a formal chargeback.
 - **Balance ledger** — a `balance_transaction` for every money movement, the 51-value `type` enum,
   `net = amount - fee`, `available` versus `pending` with `available_on`, and payouts drawing down
   the available balance.
@@ -321,14 +371,19 @@ Test-mode magic card numbers are the failure-injection mechanism, per the overvi
 method created from a magic number carries the behavior that number implies, and charging it produces
 the corresponding decline, dispute or 3DS outcome with the right `code` and `decline_code`.
 
-**Only the corroborated subset ships initially.** The research could not fully resolve the table —
-refund-failure and payout-failure magic values, per-`decline_code` card numbers, IBAN test values and
-dispute-evidence magic strings are unresolved, and `4000 0000 0000 0069` has a genuine source conflict
-(stolen versus expired). Those are not frozen into a fixture from current sourcing; they are recorded
-as conformance scenarios (§12) and added once a recorded trace settles them. The implemented subset is
-whatever
-[`test-mode.md`](research/stripe-billing-and-payments/test-mode-clocks-and-prior-art/test-mode.md)
-marks corroborated.
+The table is now **fixture-ready**, read from Stripe's own testing documentation:
+[`magic-card-table.md`](research/stripe-billing-and-payments/test-mode-clocks-and-prior-art/magic-card-table.md).
+It covers the decline cards with their `code` and `decline_code`, the 3DS cards, the dispute cards,
+refund-failure and payout-failure values, IBAN/SEPA values, and the three dispute-evidence strings
+(`winning_evidence`, `losing_evidence`, `escalate_inquiry_evidence`).
+
+One correction worth stating because it would have been baked into a fixture: **`4000 0000 0000 0069`
+is `expired_card`, not `stolen_card`** — `stolen_card` is `4000 0000 0000 9979`. The first research
+pass flagged these as conflicting; the official table settles it.
+
+A tail of niche rows remains unresolved — mobile 3DS challenge flows, captcha/PIN cards, most Radar
+sub-variants, and the full by-country list. None is needed for the eval set, and each is added only
+when something needs it.
 
 ## 9. Fixtures
 
@@ -399,18 +454,21 @@ current session's environment.** Its egress policy blocks `api.stripe.com` outri
 will make recording work here. Replay-only CI is unaffected. Recording and every re-record need a host
 with egress to `api.stripe.com`.
 
-**Scenarios to record**, in priority order — the first is not optional, because it settles a rule the
-implementation currently assumes:
+**Scenarios to record**, in priority order. The first three exist to settle rules the implementation
+currently assumes; the rest are fidelity coverage.
 
-1. **Proration rounding**: a mid-cycle upgrade whose proration lands on a half-cent, and whether
-   credit and debit lines round independently or net-then-round.
-2. Create a customer and charge them; a declined card; an idempotent retry of a create.
-3. A subscription created, upgraded mid-cycle, cancelled.
-4. An invoice finalized and paid; a partial refund, then an over-refund attempt.
-5. A dispute; pagination past a page boundary; an `expand` two levels deep.
-6. Deliberate 400s to pin the error envelope, including a bad `expand[]` path and a nested `param` name.
-7. `starting_after` / `ending_before` against a deleted object id.
-8. The unresolved magic-card values from §8.
+1. **Proration half-cent tie-break** — a mid-cycle change whose line lands on an exact `x.xx5`, which
+   is the one part of proration rounding still undocumented (§7). Also record the same change under
+   `billing_mode=flexible`, which was never separately proven.
+2. **`starting_after` / `ending_before` against a deleted object id** — a genuine documentation
+   silence, not a gap in our reading.
+3. **A malformed `Stripe-Version`** — also undocumented.
+4. Create a customer and charge them; a declined card; an idempotent retry of a create.
+5. A subscription created, upgraded mid-cycle, cancelled; and a subscription recovering from `unpaid`.
+6. An invoice finalized and paid; a partial refund, then an over-refund attempt.
+7. A dispute through to resolution, to confirm both fee behaviors and the `adjustment` ledger rows.
+8. Pagination past a page boundary; an `expand` two levels deep; a bad `expand[]` path.
+9. Deliberate 400s to pin the error envelope, including a nested `param` name.
 
 ## 13. Evals
 
@@ -442,15 +500,28 @@ Everything the overview's §10 lists, plus:
 
 Stated rather than papered over. Each has a defined way to close it.
 
+Most of the original list closed on 2026-09-18, when a Tavily MCP server made `docs.stripe.com`
+reachable and a targeted pass re-read every previously-blocked page. What survives:
+
 | Gap | Status | How it closes |
 |---|---|---|
-| Proration cent-rounding rule | Assumed round-half-up, stated at the call site | Conformance scenario 1 |
-| Magic-card table incomplete; `4000…0069` conflicting | Corroborated subset only | Conformance scenario 8 |
-| `starting_after` on a deleted id; bad `expand[]` path error shape | Unspecified | Conformance scenario 7, 6 |
-| Dunning `unpaid` invoice outcome; `unpaid` → `active` recovery | Two sources disagree | Recorded trace, or documented as a declared difference |
-| Prose-doc claims sourced from web search, not primary pages | Labelled by source strength in the lane docs | Re-run the itemized lane list if `docs.stripe.com` egress or a search MCP becomes available |
-| Dispute-withdrawal `balance_transaction.type` | Inferred as `adjustment` | Conformance scenario 5 |
+| Proration half-cent tie-break | Round-half-up assumed; the independent-per-line rule is now documented fact | Conformance scenario 1 |
+| Proration under `billing_mode=flexible` | Unproven — the documented example nets to zero | Conformance scenario 1 |
+| `starting_after` / `ending_before` on a deleted id | Genuine documentation silence | Conformance scenario 2 |
+| Malformed `Stripe-Version` handling | Undocumented | Conformance scenario 3 |
+| Quantity-only reproration | Mechanism confirmed; no isolated worked example found | Conformance scenario 5 |
+| Dunning `unpaid` invoice outcome | Implemented as `draft`; `spec3.json` prose says "closed", which was never a real status value | Declared difference |
+| Niche magic-card rows (mobile 3DS, captcha/PIN, Radar sub-variants, by-country) | Not needed by the eval set | Added when something needs one |
+| Whether every dispute-prevention path creates a Dispute object | Open | Conformance scenario 7 |
+| Tool-count / schema-size literature | Still web-search-only | Low priority; no decision now rests on it |
+
+Closed since the first pass, and no longer assumptions: the proration independent-rounding rule, the
+magic-card table including the `4000…0069` conflict, the `decline_code` set (50, not 43), the
+`expand[]` error shape, the `stripe-version` response header, the `event.type` closed set, the
+`unpaid` → `active` recovery path, the dispute-withdrawal `balance_transaction.type`, dispute fee
+refundability, the `subscription_cycle` lead time, and the ninth hard-decline code.
 
 The source-strength labelling in the research documents must be preserved when those documents are
 cited here. A claim that was a search summary does not become a primary source by being written into
-a spec.
+a spec — and where the second pass **corrected** a first-pass claim, the correction is recorded in
+that lane's `gap-closure-2026-09-18.md` rather than silently overwritten.
