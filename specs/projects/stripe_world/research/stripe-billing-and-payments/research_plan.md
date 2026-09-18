@@ -34,11 +34,11 @@ Prose docs (docs.stripe.com) are fetched per-page by the subtopic agents and cit
 
 ## Subtopics
 
-- [ ] API surface and object graph — the OpenAPI spec as ground truth; the minimum closed object set and every reference that crosses the scope boundary
+- [x] API surface and object graph — the OpenAPI spec as ground truth; the minimum closed object set and every reference that crosses the scope boundary
 - [ ] Cross-cutting semantics — idempotency, pagination, expand, metadata, the error envelope, versioning
-- [ ] Billing and money behavior — the prose-only state machines: subscriptions, invoices, prorations, dunning, refunds, disputes, the balance ledger
-- [ ] Test mode, clocks and prior art — magic cards, test clocks, sandboxes, and exactly where `stripe-mock` stops
-- [ ] Agent surfaces, licensing and naming — the Stripe MCP server and agent toolkit tool lists; spec licensing and non-affiliation language
+- [x] Billing and money behavior — the prose-only state machines: subscriptions, invoices, prorations, dunning, refunds, disputes, the balance ledger
+- [x] Test mode, clocks and prior art — magic cards, test clocks, sandboxes, and exactly where `stripe-mock` stops
+- [x] Agent surfaces, licensing and naming — the Stripe MCP server and agent toolkit tool lists; spec licensing and non-affiliation language
 - [ ] Seahaven capabilities — what the vendored framework actually offers and where a faithful Stripe world will push on it (local sources, no web)
 
 ## Focus Details
