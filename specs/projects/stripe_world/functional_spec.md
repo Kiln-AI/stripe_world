@@ -231,9 +231,10 @@ These apply to every routed resource and are the substance of "faithful".
 - **`object` discriminator on every object**, and `livemode: false` everywhere — this is a test-mode
   replica and says so.
 - **Nullability and enums follow `spec3.json`.** Including the trap the research found: `dispute.reason`,
-  `payout.status`/`method`/`source_type`, `refund.status`, `balance_transaction.status` and
-  `setup_intent.usage` are typed as bare `string` in the spec but have closed value sets recoverable
-  only from the description prose. The conformance harness must check those against the extracted
+  `payout.status`, `payout.method`, `payout.source_type`, `refund.status`,
+  `balance_transaction.status` and `setup_intent.usage` — **seven fields** — are typed as bare
+  `string` with no `enum` key, but have closed value sets recoverable only from the description
+  prose. Verified directly against the spec. The conformance harness must check those against the extracted
   sets, not against the schema's (absent) `enum`.
 - **Schema drift is respected, not "corrected".** At `2026-08-26.dahlia` there is no top-level
   `invoice.subscription` (it is `invoice.parent.subscription_details.subscription`) and no top-level
@@ -467,7 +468,7 @@ Three kinds ProjectTracker does not have:
 
 1. **Schema conformance, generated from `spec3.json`.** Every object the world returns validates
    against its schema — field names, types, enum values, `object` discriminator, nullability — plus
-   the six bare-`string`-but-actually-enum fields from §4. Built early, because it shapes everything
+   the seven bare-`string`-but-actually-enum fields from §4. Built early, because it shapes everything
    after it. The committed `spec3.json` snapshot is a **permanent pin**: `stripe/openapi` publishes
    one version at a time and does not archive, so there is no retrieving this version later.
 2. **Behavioral conformance against the real API** (§12).

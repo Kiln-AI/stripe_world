@@ -389,7 +389,12 @@ and the two names are split here so nothing has to be guessed.
 Note which `DELETE`s are *not* exceptions: `DELETE /v1/subscriptions/{subscription_exposed_id}` and
 its customer-scoped alias do accept `expand`, because cancelling a subscription answers with the full
 Subscription object rather than a stub. Defaulting the common case means a `ParamSpec` that forgets
-`expand=True` still behaves, and the nine that must refuse it say `expand=False` out loud.
+`expand=True` still behaves, and the nine that must refuse it say `expand=False` out loud. They are,
+in full: `DELETE` on `/v1/coupons/{coupon}`, `/v1/customers/{customer}`,
+`/v1/customers/{customer}/discount`,
+`/v1/customers/{customer}/subscriptions/{subscription_exposed_id}/discount`,
+`/v1/invoiceitems/{invoiceitem}`, `/v1/invoices/{invoice}`, `/v1/products/{id}`,
+`/v1/subscription_items/{item}` and `/v1/subscriptions/{subscription_exposed_id}/discount`.
 
 #### `ResourceSpec` — `dispatch/resource.py`, one per resource module
 
@@ -863,10 +868,11 @@ refusal. `soft` sets `deleted_at = ctx.clock.iso()`; `hard` issues `DELETE FROM`
 other field, which is why those routes set `ParamSpec.expand = False`.
 
 Five of the eleven `DELETE` routes are engine-served this way: `coupons`, `customers`, `invoiceitems`,
-`invoices` and `products`. The other six are hand-written — the two subscription cancels and their
-two customer-scoped aliases drive a status machine and answer with a full Subscription, the two
-`discount` deletes remove an embedded object rather than a row, and `DELETE /v1/subscription_items/{item}`
-prorates.
+`invoices` and `products`. The other six are hand-written: the subscription cancel and its
+customer-scoped alias drive a status machine and answer with a full Subscription, the three
+`discount` deletes remove an embedded object rather than a row, and
+`DELETE /v1/subscription_items/{item}` prorates. Five generated plus the four hand-written deletes
+that answer with a stub is the nine `expand=False` routes of §2.4.
 
 ### 3.6 Invoking a hand-written handler
 

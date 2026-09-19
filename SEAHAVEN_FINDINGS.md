@@ -232,3 +232,41 @@ world; and every code example quoted verbatim from the docs in this research (th
 reading the corresponding source file. The bundled docs describe real, current behavior accurately
 — nothing in this subtopic's research surfaced a docs/code mismatch beyond Entry 1's dependency
 pin.
+
+---
+
+### Entry 6 — Middleware runs outside the per-call transaction, so a middleware that writes cannot be atomic with the call it wraps
+
+**Category**: Design concern.
+
+**Date**: 2026-09-19
+
+**What we were trying to do.** Implement Stripe's idempotency keys as middleware. The middleware
+stores the response a call produced, keyed by the idempotency key, and on a replay short-circuits and
+returns the stored response without re-running the call. Middleware is the right seam for this
+precisely because a short-circuit never reaches the tool, so a replay writes nothing and produces no
+change-log records — which is exactly the property an eval grading "did this retry double-charge?"
+depends on.
+
+**What we expected.** That a middleware writing a row and the tool call it wraps would commit or roll
+back together, since `authoring.md` describes one call as one transaction.
+
+**What happened.** Reading `vendor/Seahaven/src/seahaven/call.py` during component design: the
+per-call transaction is opened *inside* `invoke`, so it sits **beneath** the middleware chain rather
+than around it. A middleware that writes is therefore not atomic with the call it wraps. For
+idempotency that means the stored-response row and the state change it describes can diverge — the
+call's writes commit and the key row does not, or the reverse — and the failure mode is silent and
+exactly the one idempotency exists to prevent.
+
+**Minimal reproduction.** A middleware that writes a row and then lets `next_` raise. The tool's
+writes roll back with the call's own transaction; the middleware's row does not.
+
+**Workaround taken.** The idempotency middleware opens its own `ctx.db.transaction()` savepoint
+around `next_`, which restores atomicity and preserves the short-circuit-writes-nothing property.
+Labelled in the code with a comment pointing at this entry.
+
+**Why it is a finding rather than a preference.** The docs describe one call as one transaction, and
+they describe middleware as the place to do cross-cutting work. Both are true, but the composition of
+the two is not stated anywhere, and the natural reading is wrong in a way that only shows up under
+failure. A framework that wants AI authors to get this right either wraps the chain in the
+transaction, or says plainly in `authoring.md` that a writing middleware must open its own.

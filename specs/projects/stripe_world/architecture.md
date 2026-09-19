@@ -119,9 +119,11 @@ Route(
 ```
 
 Matching is a compiled prefix trie over `/`-split segments, with `{placeholder}` segments matching
-one literal. Exact matches beat placeholders, so `/v1/customers/search` never shadows
-`/v1/customers/{customer}`. A path with no match is a Stripe `404` (`invalid_request_error`,
-`resource_missing`); a path that matches with a different method is Stripe's method error, not a 404.
+one literal. Exact matches beat placeholders — the real collisions in the routed set are
+`/v1/credit_notes/preview` against `/v1/credit_notes/{id}` and `/v1/invoices/create_preview` against
+`/v1/invoices/{invoice}`. Matching is on `(method, path)` jointly, with backtracking, so a `405`
+fires only when no route anywhere carries that verb for that path. A path with no match at all is a
+Stripe `404`.
 
 **The route table is the single source of scope.** Discovery filters `spec3.json` through it (§5),
 the conformance harness enumerates it, and a test asserts the count is exactly 148 (155 once search
@@ -143,12 +145,21 @@ ResourceSpec(
 )
 ```
 
-From that, the engine provides list, create, retrieve, update and delete — roughly **95 of the 148
-operations**. The remaining ~53 are state transitions and genuinely resource-specific reads
-(`capture`, `confirm`, `cancel`, `finalize`, `pay`, `void`, `send`, `mark_uncollectible`, `refund`,
-`reverse`, `attach`, `detach`, `resume`, `release`, and the balance/event reads). Those are ordinary
-Python functions in `resources/` and `billing/`. **No operation gets a hand-written list endpoint**;
-if one needs unusual filtering, it declares it, it does not reimplement pagination.
+From that, the engine provides list, create, retrieve, update and delete. Counted against
+`spec3.json` rather than estimated, the split is **77 generated and 71 hand-written**, and the 71
+routes resolve to **63 distinct functions** because eight legacy aliases share handlers. 63 is the
+number the implementation plan budgets.
+
+The hand-written 71 are state transitions and resource-specific reads — `capture`, `confirm`,
+`cancel`, `finalize`, `pay`, `void`, `send`, `mark_uncollectible`, `refund`, `reverse`, `attach`,
+`detach`, `resume`, `release`, and the balance and event reads. `invoices` alone accounts for 14 of
+them. Ten of the twenty-two collections have a hand-written create rather than a generated one,
+which is where an earlier estimate of ~95/~53 went wrong.
+
+**No operation reimplements pagination.** Four routed reads page over JSON nested on a parent row
+rather than over a table — `invoices/{i}/lines`, `credit_notes/{cn}/lines`,
+`credit_notes/preview/lines`, `payment_intents/{i}/amount_details_line_items` — and reach the same
+paginator through `resource.page_embedded(...)`. If a list needs unusual filtering it declares it.
 
 This is the decision that makes 148 operations tractable without 148 handlers, and it is why the
 table budget (17–19) and the operation count (148) are not in tension.
@@ -246,7 +257,7 @@ discovery index and the route table have identical key sets.
 `tools_dev/prune_spec.py` generates, and we commit, `src/stripeapi/spec/spec3.min.json`: only routed
 operations, only referenced schemas, with descriptions retained (they are the discovery text and, per
 the research, they carry Stripe's own documentation prose). It also generates `expandable.py`,
-`enums.py` — including the six fields Stripe types as bare `string` but which have closed sets
+`enums.py` — including the seven fields Stripe types as bare `string` but which have closed sets
 recoverable only from description prose — and `event_types.py` from the committed 266-entry set.
 
 Regenerating is a committed command, not a manual step. A test asserts the generated files match what
@@ -360,9 +371,16 @@ inside the milliseconds constraint with headroom.
 `tests/conformance/`. Cassettes are committed JSON; CI replays only and never opens a socket.
 
 - **Recording** (`tools_dev/record.py`) drives scenarios against real test mode **through
-  `stripe-python`**, so request encoding is the SDK's problem and no form encoder exists here.
-  Requires `api.stripe.com` egress, which the current environment blocks — recording happens
-  elsewhere and the cassettes are committed artifacts.
+  `stripe-python`**, so request encoding is the SDK's problem and no form encoder exists here. The
+  coding environment has `api.stripe.com` egress, so each resource slice records its own cassettes
+  in-loop, per the implementation plan's step 3. CI never records.
+- **Recording may use unrouted Stripe machinery.** Some scenarios — a subscription exhausting its
+  dunning schedule, for one — cannot be reached on the real API without `test_helpers/test_clocks`,
+  which this world does not route. A recording script may call it purely to move *real* Stripe's
+  clock between capturable checkpoints; those calls never become cassette steps. Replay never
+  fast-forwards: it issues the same explicit, routed calls the cassette captured. This requires
+  dunning retries to be forceable by an explicit call rather than only by elapsed time — a
+  constraint on `components/billing_engine.md`.
 - **Replay** runs the same scenario against an instance and diffs the response bodies.
 - **The allow-list** (`tests/conformance/allowed_differences.py`) declares every permitted difference
   with a reason: ids, timestamps, `request_log_url`, livemode, idempotency-key retention, search
@@ -370,7 +388,7 @@ inside the milliseconds constraint with headroom.
   world is, and it is reviewed as a design document.
 
 Separately and more cheaply, **schema conformance** validates every object the world returns against
-`spec3.min.json`, including the six bare-`string`-but-enumerated fields. It is built first because it
+`spec3.min.json`, including the seven bare-`string`-but-enumerated fields. It is built first because it
 constrains everything after it.
 
 ## 11. Testing strategy
