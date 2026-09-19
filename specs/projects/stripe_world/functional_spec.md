@@ -529,10 +529,17 @@ Ten to twenty committed eval tasks, each with a natural-language task, a startin
 reward function that reads final state. Grading is on state rather than on tool calls, so the shape
 of the tool surface does not constrain what an eval can measure.
 
-The headline is **double-charge on retry**: the agent is asked to complete a payment, the first
-attempt appears to fail ambiguously, and the grader asserts exactly one charge exists against the
-customer. It is invisible in a transcript and unmissable in the change log — which is the whole
-argument for the framework.
+The headline is **double-charge on retry**: the task's setup performs a genuine first attempt through
+the tools, under a known idempotency key, and the agent is told its own visibility into that
+outcome was lost. The grader asserts exactly one succeeded charge exists against the customer. It is
+invisible in a transcript and unmissable in final state — which is the whole argument for the
+framework.
+
+**The ambiguity is narrative, not mechanical.** This world is synchronous and deterministic, so no
+tool call can return a genuinely ambiguous result — there is no timeout to simulate and no dropped
+connection to stage. The world knows exactly what happened; the agent is simply told it does not.
+That is a real difference from the production failure this task models, and it is stated here rather
+than implied by the task text.
 
 Others draw from: refunding the wrong charge; over-refunding; a mid-cycle plan change whose proration
 must be correct; rescuing a subscription in dunning; applying a credit note to the right settlement
