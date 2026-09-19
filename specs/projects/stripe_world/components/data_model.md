@@ -1,5 +1,5 @@
 ---
-status: draft
+status: complete
 ---
 
 # Component: Data Model
@@ -27,14 +27,16 @@ external-content tables are declared there.
 
 ### Three corrections to the architecture, up front
 
-1. **The table count is 23, not 21.** Architecture §4.1 says "19 tables plus two infrastructure
+1. **The table count is 24, not 21.** Architecture §4.1 says "19 tables plus two infrastructure
    tables" and then enumerates 6 + 8 + 7 = **21** Stripe tables in `001`–`003`, plus `events` and
    `idempotency_keys` in `004`. The "19" is an arithmetic slip inherited from
    [`minimum-closed-set-and-tool-budget.md`](../research/stripe-billing-and-payments/api-surface-and-object-graph/minimum-closed-set-and-tool-budget.md)
    line 102, which lists 21 resource names and then subtracts the four collapsed objects
    (`balance`, `line_item`, `credit_note_line_item`, `discount`) a second time — they were already
    absent from the list. The enumerated file contents are right; the total is wrong. **This design
-   builds 23 tables** and functional spec §3.4's "roughly 17–19" should read "23".
+   builds 24 tables** — those 21, plus `events`, `idempotency_keys` and one `counters` table that
+   §3.1.2 adds for the pagination key — and functional spec §3.4's "roughly 17–19" should read
+   "24".
 2. **`spec3.json` contains no examples, so id prefixes cannot come from it.** The file has zero
    `"example"` keys and zero id literals (verified: `grep -c '"example"'` → 0). The prefix table in
    §3.2 below is taken from `research/repos/stripe-mock/embedded/openapi/fixtures3.json`, Stripe's
@@ -50,37 +52,42 @@ external-content tables are declared there.
 
 ### Table and column inventory
 
-23 tables, 447 columns, 67 indexes. Verified by executing the four DDL blocks below against an
+24 tables, 471 columns, 69 indexes. Verified by executing the four DDL blocks below against an
 in-memory SQLite: every table ends in `STRICT`, every table declares a primary key, no foreign key
-points at a missing table, and no wall-clock expression appears anywhere.
+points at a missing table, no wall-clock expression appears anywhere, and each of the 22 listable
+tables has its `x_seq` column, its unique `(x_seq DESC)` index and its seeded `counters` row.
 
 | File | Table | Columns |
 |---|---|---|
-| `001_core` | `customers` | 19 |
-| | `products` | 17 |
-| | `prices` | 19 |
-| | `coupons` | 16 |
-| | `promotion_codes` | 11 |
-| | `tax_rates` | 16 |
-| `002_payments` | `payment_methods` | 9 |
-| | `payment_intents` | 27 |
-| | `charges` | 31 |
-| | `refunds` | 19 |
-| | `disputes` | 14 |
-| | `setup_intents` | 20 |
-| | `balance_transactions` | 16 |
-| | `payouts` | 21 |
-| `003_billing` | `subscriptions` | 35 |
-| | `subscription_items` | 12 |
-| | `subscription_schedules` | 15 |
-| | `invoices` | 54 |
-| | `invoiceitems` | 21 |
-| | `credit_notes` | 29 |
-| | `customer_balance_transactions` | 11 |
-| `004_infra` | `events` | 7 |
+| `001_core` | `customers` | 20 |
+| | `products` | 18 |
+| | `prices` | 20 |
+| | `coupons` | 17 |
+| | `promotion_codes` | 12 |
+| | `tax_rates` | 17 |
+| `002_payments` | `payment_methods` | 10 |
+| | `payment_intents` | 28 |
+| | `charges` | 32 |
+| | `refunds` | 20 |
+| | `disputes` | 15 |
+| | `setup_intents` | 21 |
+| | `balance_transactions` | 17 |
+| | `payouts` | 22 |
+| `003_billing` | `subscriptions` | 36 |
+| | `subscription_items` | 13 |
+| | `subscription_schedules` | 16 |
+| | `invoices` | 55 |
+| | `invoiceitems` | 22 |
+| | `credit_notes` | 30 |
+| | `customer_balance_transactions` | 12 |
+| `004_infra` | `events` | 8 |
 | | `idempotency_keys` | 8 |
+| | `counters` | 2 |
 
-`invoices` at 54 columns against the schema's 78 properties is the constants-and-nulls rule of §3.1
+Every count except `idempotency_keys` and `counters` includes one `x_seq` column (§3.1.2), so the
+resource field counts are these minus one.
+
+`invoices` at 55 columns against the schema's 78 properties is the constants-and-nulls rule of §3.1
 doing its work: 24 of Stripe's invoice fields are Connect, Stripe Tax, presentation or expand-only,
 and every one of them is a constant in the serializer rather than a column in the schema hash.
 
@@ -106,6 +113,12 @@ def coupon_id(ctx: seahaven.Ctx, supplied: str | None) -> str:
     """Coupons are the one resource whose id is caller-suppliable and unprefixed.
     Returns `supplied` if given, else an 8-character uppercase-alphanumeric token."""
 
+# _seq.py
+def next_seq(ctx: seahaven.Ctx, table: str) -> int:
+    """The next monotonic pagination key for `table`, from the `counters` row of that
+    name. The only reader or writer of `counters`. Raises WorldBug for a table that has
+    no counter row — i.e. one that is not listable. See §3.1.2."""
+
 # _json.py
 def dumps(value: object) -> str:
     """json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).
@@ -129,7 +142,8 @@ def from_unix(seconds: int) -> str:
 class FieldMap:
     object: str                       # the `object` discriminator
     table: str
-    columns: Mapping[str, str]        # column name -> API field name (identity for most)
+    columns: Mapping[str, str]        # column name -> API field name (identity for most);
+                                      # never contains an `x_`-prefixed column, x_seq included
     timestamps: frozenset[str]        # columns converted by _time.to_unix
     json_columns: frozenset[str]      # columns inflated by _json.loads
     money: frozenset[str]             # INTEGER minor-unit columns (documentation + tests)
@@ -204,7 +218,7 @@ a rename that lives only in a Python dict is a rename that drifts.
 10. **Every listable table carries `x_seq INTEGER NOT NULL`, the pagination key**, declared
    immediately after the primary key and covered by a unique `(x_seq DESC)` index. It is assigned on
    insert from `counters`, one row per table, by `_seq.next_seq(ctx, table)` and by nothing else.
-   `x_seq` replaces `(created DESC, id DESC)` as the list ordering throughout — see §3.12 for why
+   `x_seq` replaces `(created DESC, id DESC)` as the list ordering throughout — see §3.11 for why
    that ordering was wrong and §3.1.1 below for why this column keeps the `x_` prefix despite
    appearing almost everywhere.
 
@@ -315,8 +329,8 @@ And one non-object id: the request id echoed on `event.request.id` and stored on
 `spec3.json`).
 
 `invoice.number` and `credit_note.number` are **not** ids and take no prefix: they are
-`{customer.invoice_prefix}-{sequence:04d}` and `{invoice.number}-CN-{n}` respectively, minted at
-finalization / issue.
+`{customer.invoice_prefix}-{next_invoice_sequence:04d}` and `{invoice.number}-CN-{n}` respectively,
+minted at finalization / issue. Where those two sequences live is §3.13.
 
 ### 3. `001_core.sql` — 6 tables
 
@@ -680,7 +694,7 @@ CREATE INDEX disputes_by_payment_intent ON disputes (payment_intent, x_seq DESC)
 
 -- dispute.balance_transactions is `array<ref:balance_transaction>` — always full
 -- objects, never ids. It is NOT a column: the serializer reads
--- `SELECT * FROM balance_transactions WHERE source = :dispute_id ORDER BY created, id`.
+-- `SELECT * FROM balance_transactions WHERE source = :dispute_id ORDER BY x_seq`.
 -- Deriving makes the "withdrawal and its reversal are both type=adjustment" invariant
 -- a fact about the ledger rather than a second copy that can drift from it.
 
@@ -799,7 +813,7 @@ CREATE INDEX payouts_by_status       ON payouts (status, x_seq DESC);
 and in both cases every crossing column is nullable, so the write order (child first with the link
 `NULL`, then `UPDATE`) satisfies non-deferred foreign keys at every step.
 
-### 5. `003_billing.sql` — 7 tables, and `004_infra.sql` — 2 tables
+### 5. `003_billing.sql` — 7 tables, and `004_infra.sql` — 3 tables
 
 ```sql
 CREATE TABLE subscriptions (
@@ -973,6 +987,8 @@ CREATE TABLE invoices (
 ) STRICT;
 
 CREATE UNIQUE INDEX invoices_by_seq           ON invoices (x_seq DESC);
+-- number is NULL until finalization, so the uniqueness has to be partial. See §3.13.
+CREATE UNIQUE INDEX invoices_number            ON invoices (number) WHERE number IS NOT NULL;
 CREATE INDEX invoices_by_customer          ON invoices (customer, x_seq DESC);
 CREATE INDEX invoices_by_status            ON invoices (status, x_seq DESC);
 CREATE INDEX invoices_by_subscription      ON invoices (parent_subscription, x_seq DESC);
@@ -1334,20 +1350,56 @@ Two consequences, both designed for:
 - The complementary test — no ISO string in a serialised timestamp field — must therefore run over
   the full response document, including nested lines, not just top-level keys.
 
-### 11. `invoiceitem` has no `created`
+### 11. List ordering is `x_seq`, and `invoiceitem` has no `created`
 
-`invoiceitem` is the one in-scope resource with no `created` property: its creation timestamp is
-`date` (`required`, non-nullable). `GET /v1/invoiceitems` nevertheless takes a `created` range filter.
+**Why the timestamp cannot carry the ordering.** `(created DESC, id DESC)` is stable — the id
+tiebreak guarantees a total order, so cursor pagination never skips or repeats — but it is *not
+creation order in this world*. Under a frozen clock every object an agent creates in one episode
+shares a single `created`, so the whole sort collapses onto the tiebreak, and the tiebreak is
+`ctx.ids.random`. An agent that creates three customers and lists them gets them back in an
+arbitrary order where Stripe returns newest-first. Fixture rows hide this completely, because the
+generator writes historical timestamps that differ — which is exactly why it would have survived
+every ordering test written against a fixture.
 
-So: the column is `date`, the pagination ordering for this one table is `(date DESC, id DESC)`, and
-`dispatch/params.py` maps the `created` list filter onto the `date` column. Architecture §6.2's
-"ordering is `(created DESC, id DESC)`" needs this one exception spelled out, and the
-`ResourceSpec` therefore carries an explicit `order_column: str = "created"` rather than hard-coding
-the name in the pagination helper.
+So the ordering is a monotonic insert counter, `x_seq`, and it is the same expression on every
+table:
+
+```text
+... ORDER BY x_seq DESC LIMIT :limit
+-- starting_after: AND x_seq < (SELECT x_seq FROM <t> WHERE id = :cursor)
+-- ending_before:  AND x_seq > (SELECT x_seq FROM <t> WHERE id = :cursor)  (then reverse)
+```
+
+Every listable table has a unique `(x_seq DESC)` index, so that is an index seek plus a backwards
+scan of `limit` entries, with no temp b-tree. Composite filter indexes are `(filter, x_seq DESC)`:
+the leading equality pins a slice and the rest of the index is already in the requested order. The
+DESC is still spelled out rather than left to SQLite's ability to reverse-scan an ASC index —
+reverse-scanning works for a bare ordering, but in a mixed `(filter ASC, x_seq DESC)` composite,
+being explicit is what makes the index directly usable rather than nearly usable.
+
+**`ResourceSpec.order_column` is dropped.** It existed only because `invoiceitem` has no `created`.
+With ordering off the timestamp entirely, every table orders by `x_seq DESC` and the pagination
+helper needs no per-resource knob.
+
+**The `invoiceitem` finding still matters for filtering.** `invoiceitem` is the one in-scope resource
+with no `created` property: its creation timestamp is `date` (`required`, non-nullable), and
+`GET /v1/invoiceitems` nevertheless takes a `created` range filter. The column stays `date`, and
+`dispatch/params.py` maps the `created` filter onto it. That mapping is now the whole of the
+exception — it no longer leaks into the ordering.
+
+**Range filters take no index of their own.** Every list accepts a `created` range, and `payouts`
+and `invoices` additionally accept `arrival_date` and `due_date`. All of these are applied as a
+predicate during the `x_seq DESC` scan rather than served by their own index, because an index on the
+timestamp would deliver rows in the wrong order and force a sort. The cost is a scan proportional to
+how far back the filter reaches: `?created[gte]=<recent>` with `limit=10` touches ~10 rows, while
+`?created[lte]=<old>` walks the table. At `large`'s scale that is acceptable and it is recorded here
+rather than discovered; if a profile ever says otherwise, the fix is a covering
+`(created, x_seq DESC)` index on the one table that needs it, not a change to the ordering.
 
 Two related facts for the same helper: `subscription_items` has `created` but its list endpoint
 **requires** `subscription`, and `customer_balance_transactions` has no top-level list path at all.
-Neither needs a `created DESC` index of its own.
+Both still carry `x_seq` and a unique seq index — the scoped list needs the same total order, and the
+uniqueness is what makes a cursor resolvable.
 
 ### 12. Where the enum `CHECK`s come from
 
@@ -1403,6 +1455,69 @@ either side.
 That test is cheap and it is the only thing standing between the two copies, so it is named in the
 test plan rather than left implied.
 
+### 13. Where the invoice-number sequence lives
+
+Nobody owned this: `fixtures.md` needs to hand a counter to the tools, and `billing_engine.md` treats
+the number as frozen at finalization without saying where it comes from. It is a schema question.
+
+**It is per-customer, and it is already in the schema.** Stripe's own model is two fields on the
+customer, both of which this design already carries because they are real API fields:
+
+- `customers.invoice_prefix` — `TEXT NOT NULL`, an 8-character uppercase alphanumeric token minted
+  from `ctx.ids.random` at customer creation, or supplied by the caller;
+- `customers.next_invoice_sequence` — `INTEGER NOT NULL DEFAULT 1`, settable by the caller on create
+  and update.
+
+At finalization, `billing/invoicing.py` reads the pair, writes
+`number = f"{invoice_prefix}-{next_invoice_sequence:04d}"` onto the invoice, and increments
+`next_invoice_sequence` on the customer row. Nothing else touches either field.
+
+**Why not a `counters` row.** A global or per-account counter could not honour
+`POST /v1/customers {"next_invoice_sequence": 42}`, which is a real parameter on a real endpoint; the
+sequence has to be addressable per customer because Stripe exposes it per customer. Putting it in
+`counters` would mean either ignoring that parameter or keeping two sources of truth for one number.
+The `counters` table exists for `x_seq`, which has no API surface at all, and that is the whole
+difference between the two.
+
+**Uniqueness.** `{prefix}-{seq}` is unique exactly as long as prefixes are, so:
+
+```text
+-- declared in 001_core.sql and 003_billing.sql respectively; quoted here for the argument
+CREATE UNIQUE INDEX customers_invoice_prefix ON customers (invoice_prefix);
+CREATE UNIQUE INDEX invoices_number ON invoices (number) WHERE number IS NOT NULL;
+```
+
+The partial predicate is what lets draft invoices coexist: `number` is `NULL` until finalization
+(the table-level `CHECK (number IS NOT NULL OR status = 'draft')` is the other half of that rule),
+and SQLite's `UNIQUE` would otherwise be satisfied by any number of NULLs but tell us nothing. A
+tombstoned customer keeps its row and therefore keeps its prefix reserved, which matches Stripe:
+deleting a customer does not free its invoice numbers.
+
+**Per-account or global?** The world models exactly one account (functional spec §2.6 — the account
+is static within an instance), so "per-account" and "global within the instance" are the same scope
+here, and the sequence is per-customer *within* that one account. If the account ever becomes
+configurable at reset, nothing about this changes: the prefix is still the per-customer
+discriminator.
+
+**Across composed worlds.** Under composition each node gets its own namespace and its own store, so
+two hosts wrapping StripeAPI get two independent `customers` tables and two independent sequences.
+They are two Stripe accounts, which is the faithful answer — invoice numbers are per-account in
+reality and nothing about a host's wrapper makes two accounts into one. There is no shared counter to
+coordinate, which is fortunate, because architecture §12 records that there is **no cross-world
+atomicity** to coordinate it with: a sequence spanning two nodes could not be incremented safely.
+
+If a host did point two nodes at one store, the two unique indexes above are what makes it fail
+loudly — the second customer to claim a prefix is rejected at insert — rather than quietly minting
+two invoices numbered `ABCD1234-0001`. That is the intended behavior and it is why the uniqueness is
+declared in DDL rather than checked in a handler.
+
+**Credit-note numbers need no counter.** `credit_note.number` is
+`f"{invoice.number}-CN-{n}"` where `n` is `SELECT COUNT(*) FROM credit_notes WHERE invoice = ?` plus
+one. Credit notes are never deleted — `void` keeps the row (§3.5's
+`CHECK ((status = 'void') = (voided_at IS NOT NULL))`) — so the count is monotonic and the derivation
+cannot collide. Deriving beats a column here for the same reason `dispute.balance_transactions` is
+derived: there is no second copy to drift.
+
 ## Dependencies
 
 **This component depends on:**
@@ -1419,8 +1534,11 @@ test plan rather than left implied.
 
 **Depends on this component:**
 
-- `dispatch/resource.py` — the `ResourceSpec` engine reads `table`, `id_prefix`, `order_column` and
-  the list-filter columns declared here.
+- `dispatch/resource.py` — the `ResourceSpec` engine reads `table`, `id_prefix` and the list-filter
+  columns declared here, and orders every list by `x_seq DESC`. It no longer needs an
+  `order_column` (§3.11).
+- `cross_cutting.md`'s `PageOrder` — which must spell the column `x_seq`, not `seq` (§3.1.1).
+- `billing/invoicing.py` — for `customers.invoice_prefix` / `next_invoice_sequence` (§3.13).
 - `serialize/expand.py` — the id-versus-object decision in §3.6 is what tells it which columns are
   references.
 - every module in `resources/` and `billing/` — they write these rows.
@@ -1436,8 +1554,9 @@ Named tests, all through `instance.call(...)` or `inst.inspect()` unless stated.
 - `test_schema_executes` — `World()` constructs, which means the four files applied cleanly to a blank database.
 - `test_every_table_is_strict_with_pk` — `sqlite_master` rows all end in `STRICT` and declare a primary key. (Duplicates a `seahaven check` lint deliberately, so it fails in pytest too.)
 - `test_no_wall_clock_in_ddl` — no `CURRENT_TIMESTAMP`, `datetime('now')`, `date('now')` or `unixepoch()` anywhere in `sqlite_master.sql`.
-- `test_table_count_is_23` — 21 Stripe tables plus `events` and `idempotency_keys`, named explicitly, so an added table is a decision rather than an accident.
+- `test_table_count_is_24` — 21 Stripe tables plus `events`, `idempotency_keys` and `counters`, named explicitly, so an added table is a decision rather than an accident.
 - `test_column_names_match_spec_fields` — for every `FieldMap`, every non-`x_` column is either a spec property name of that resource or one of the seven declared flattenings.
+- `test_every_listable_table_has_seq` — each of the 22 listable tables has `x_seq INTEGER NOT NULL`, a unique `(x_seq DESC)` index, and a seeded `counters` row; `idempotency_keys` and `counters` have none.
 - `test_schema_enums_match_spec` — §3.12's `CHECK`-versus-`enums.py` comparison.
 - `test_doc_only_enum_values_still_in_descriptions` — regenerating the pruner's doc-only table against the live `spec3.json` descriptions; guards the seven fields in §3.12 plus the four in §3.9.
 
@@ -1467,15 +1586,18 @@ Named tests, all through `instance.call(...)` or `inst.inspect()` unless stated.
 - `test_rail_stub_shapes` — a `klarna` payment method serialises `{"klarna": {}}`; its charge serialises `payment_method_details == {"type": "klarna", "klarna": {}}`; a card charge carries the full card block.
 - `test_discounts_serialise_as_ids` — `subscription.discounts` is `["di_…"]` unexpanded and full objects under `expand[]=discounts`.
 - `test_always_inflated_references` — `subscription_item.price` and `invoice.default_tax_rates` are full objects with no `expand[]`.
-- `test_dispute_balance_transactions_derived` — the array equals the ledger rows whose `source` is the dispute, in `(created, id)` order.
+- `test_dispute_balance_transactions_derived` — the array equals the ledger rows whose `source` is the dispute, in `x_seq` order.
 - `test_decimal_fields_round_trip` — `percent_off: 33.33` stored and returned as the JSON number `33.33`, and `Decimal("33.33")` inside the engine.
 - `test_deleted_stub_shape` — `DELETE /v1/customers/{id}` returns exactly three keys; a subsequent retrieve returns the same stub; the customer is gone from `GET /v1/customers`.
 
 **Indexes and pagination**
 - `test_list_order_uses_index` — `EXPLAIN QUERY PLAN` for each resource's default list shows the `_by_created` index and no `TEMP B-TREE`.
 - `test_filtered_list_uses_index` — same for each declared list filter.
-- `test_invoiceitems_order_by_date` — `GET /v1/invoiceitems` is ordered by `date DESC, id DESC`, and `?created[gte]=` filters the `date` column (§3.11).
-- `test_frozen_clock_tiebreak` — 100 objects created in one instance (all identical `created`) paginate stably in 10-object pages with no repeat and no omission. This is the test architecture §6.2's id tiebreak exists for.
+- `test_invoiceitems_created_filter_maps_to_date` — `GET /v1/invoiceitems` is ordered by `x_seq DESC` like everything else, and `?created[gte]=` filters the `date` column (§3.11).
+- `test_frozen_clock_list_is_creation_order` — create five customers in one episode through the tools, list them, and assert the order is the exact reverse of creation. This is the test that `(created DESC, id DESC)` would have failed and that no fixture-based test could have caught, because every row shares one `created` and the old tiebreak sorted on a random id.
+- `test_pagination_stable_under_identical_created` — 100 objects created in one instance paginate in 10-object pages with no repeat and no omission.
+- `test_seq_never_reused_after_delete` — create three draft invoices, hard-delete the newest, create a fourth; its `x_seq` is strictly greater than the deleted one's, and a cursor naming the surviving second invoice still pages correctly.
+- `test_seq_matches_timeline_in_fixtures` — over all three fixtures, ordering each table by `x_seq` gives the same sequence as ordering by its timestamp column. This is the guard on the generator's insert order (§3.1.2).
 - `test_pending_invoiceitems_partial_index` — `?pending=true` uses `invoiceitems_pending`.
 
 **Foreign keys and invariants** (written as SQL over `inst.inspect()`, reusable as eval rewards)
@@ -1486,7 +1608,12 @@ Named tests, all through `instance.call(...)` or `inst.inspect()` unless stated.
 - `test_invoice_lines_sum_to_subtotal` — `json_each(lines)` amounts sum to `subtotal`.
 - `test_subscription_item_periods_never_overlap` — per subscription item, successive periods abut.
 - `test_customer_balance_matches_ledger` — `customers.balance` equals the latest `customer_balance_transactions.ending_balance`, and the ledger's `amount`s sum to it.
-- `test_no_x_columns_serialised` — no `FieldMap` maps an `x_`-prefixed column.
+- `test_no_x_columns_serialised` — no `FieldMap` maps an `x_`-prefixed column, `x_seq` included, and no list filter resolves to one.
+- `test_counters_untracked` — a create through the tools produces change-log records for the resource row and nothing for `counters`; a replayed idempotent write produces none at all.
+- `test_invoice_number_sequence` — two invoices finalized for one customer are `{prefix}-0001` and `{prefix}-0002`; a third for a different customer starts again at `-0001` under a different prefix; `next_invoice_sequence` supplied at customer creation is honoured.
+- `test_invoice_prefix_unique` — a second customer created with an existing `invoice_prefix` is rejected.
+- `test_draft_invoice_has_no_number` — `number` is null in `draft` and non-null from `open` onward; two drafts coexist under the partial unique index.
+- `test_credit_note_numbering` — three credit notes against one invoice are `-CN-1`, `-CN-2`, `-CN-3`, and voiding the second does not renumber the third.
 
 **Schema-hash discipline**
 - `test_schema_hash_pinned` — the hash of the applied schema equals a committed constant. Changing it is a deliberate edit to that constant plus a fixture regeneration, which is what architecture §12 asks for and what makes the cost visible in a diff.

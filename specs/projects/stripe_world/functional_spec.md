@@ -208,7 +208,8 @@ is exact. That is a declared difference, not an accident.
 
 ### 3.4 Objects, and how they are stored
 
-23 tables — 21 Stripe plus `events` and `idempotency_keys` — counted from the finished DDL. Four
+24 tables — 21 Stripe plus `events`, `idempotency_keys` and `counters` — counted from DDL verified
+by execution. Four
 objects in the closed set are deliberately *not* tables:
 
 - **`balance`** — no id, not listable, derivable from `balance_transaction` rows. A computed read.

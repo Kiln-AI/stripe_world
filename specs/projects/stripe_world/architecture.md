@@ -1,5 +1,5 @@
 ---
-status: draft
+status: complete
 ---
 
 # Architecture: StripeAPI
@@ -180,8 +180,8 @@ redeclared per operation.
 
 ### 4.1 Tables
 
-**23 tables** — 21 Stripe plus two infrastructure — 447 columns, 67 indexes, counted from the
-finished DDL rather than estimated. `balance` is computed, and `line_item` / `credit_note_line_item`
+**24 tables** — 21 Stripe plus `events`, `idempotency_keys` and `counters` — 471 columns, 69
+indexes, counted from DDL that was verified by execution rather than estimated. `balance` is computed, and `line_item` / `credit_note_line_item`
 / `discount` are nested JSON on their parents.
 
 Earlier drafts said 19+2, and the functional spec said 17–19. Both traced to a research document that
@@ -306,7 +306,8 @@ leaving it tracked would put bookkeeping rows into every graded change log. Keys
 One implementation in `dispatch/resource.py`: reverse-chronological ordering, `limit` 1–100 default
 10, mutually exclusive `starting_after` / `ending_before`, `has_more`, and the list envelope.
 
-**Ordering is `(seq DESC)`, where `seq` is a monotonic `INTEGER` column on every listable table.**
+**Ordering is `(x_seq DESC)`, where `x_seq` is a monotonic `INTEGER` column on all 22 listable
+tables.**
 The obvious `(created DESC, id DESC)` is stable but *wrong*: under a frozen clock every object an
 agent creates in one episode shares one `created`, and `id` is drawn from the seeded random stream,
 so the tiebreak orders by a random value. An agent that creates three customers and lists them would
@@ -314,8 +315,16 @@ get a stable but arbitrary order where Stripe returns newest-first — and that 
 what an eval inspects. Fixture rows are unaffected, since the generator writes historical timestamps,
 which is what made this easy to miss.
 
-`seq` is assigned on insert from a per-table counter. The ordering is expressed once, in `PageOrder`,
-so it is one definition and one index per table.
+`x_seq` carries the `x_` world-internal prefix like `x_payout` and `x_behavior`, so the blanket
+"no `x_` column is ever serialised" test covers it without an exception list. It is allocated from a
+`counters` table via `UPDATE … RETURNING`, **not** `MAX(x_seq)+1`: this world hard-deletes rows, and
+`MAX+1` reuses a number after a delete, which makes a cursor ambiguous — `starting_after` resolves an
+id to its seq, and a reused number silently skips or repeats a page. `counters` joins
+`idempotency_keys` in `untracked_tables`, because every insert bumps a counter and a tracked
+`counters` would put a bookkeeping row in every graded episode's change log — making "a replay writes
+nothing" false for a reason that has nothing to do with idempotency.
+
+The ordering is expressed once, in `PageOrder`, so it is one definition and one index per table.
 
 ### 6.3 Events
 
@@ -405,6 +414,10 @@ made against the instance sees one clock.
 `inst.bulk()` for volume; a deliberate handful of objects created **through the real tools** at the
 end, as ProjectTracker does, so the fixture exercises the path an agent uses and any stateful counter
 lands where the tools would have left it.
+
+**The generator must insert rows in simulated-timeline order**, because `x_seq` order is insert
+order. Insert out of order and an eval reading `created` off a listed object finds the two disagree.
+Guarded by `test_seq_matches_timeline_in_fixtures`.
 
 | Fixture | Built by | Scale |
 |---|---|---|
