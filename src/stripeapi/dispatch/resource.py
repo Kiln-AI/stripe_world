@@ -103,6 +103,12 @@ class ResourceSpec:
     collection_url: str  # "/v1/customers"
     serializer: Serializer
     columns: tuple[str, ...]  # the SELECT list; data_model.md owns it
+    # The `param` a missing path id names, when live Stripe does not use the
+    # placeholder: it is per-resource inconsistent (probed: customers and
+    # charges say "id"; prices and payment_methods keep the placeholder;
+    # nested sub-resource paths always keep it), so each slice pins its own
+    # spelling from its recordings. None means the placeholder.
+    missing_path_param: str | None = None
     list_filters: tuple[ListFilter, ...] = ()
     creatable: ParamSpec | None = None
     updatable: ParamSpec | None = None
@@ -177,18 +183,36 @@ def page(
     ascending scan is reversed in Python so `data` is newest-first whichever
     cursor produced it.
     """
-    if starting_after is not None and ending_before is not None:
-        raise seahaven.WorldBug("page() received both cursors; bind rejects that")
     clauses = list(where)
     binds: list[Any] = list(params)
-    if starting_after is not None:
+    # Resolve before refusing the pair: a bogus cursor 400s even when both
+    # cursors were sent (probed live, Phase 5 cassettes scenario 09), so
+    # resolution is the first thing that touches the table.
+    after_seq = (
+        None
+        if starting_after is None
+        else _cursor_seq(ctx, table, object_name, starting_after, "starting_after")
+    )
+    before_seq = (
+        None
+        if ending_before is None
+        else _cursor_seq(ctx, table, object_name, ending_before, "ending_before")
+    )
+    if after_seq is not None and before_seq is not None:
+        # Wire-verbatim from the live probe with two real ids; no `code` —
+        # the live envelope carries type and message only.
+        raise invalid_request(
+            "Received both starting_after and ending_before parameters. Please pass in only one.",
+            pre_execution=True,
+        )
+    if after_seq is not None:
         clauses.append("x_seq < ?")
-        binds.append(_cursor_seq(ctx, table, object_name, starting_after, "starting_after"))
-    if ending_before is not None:
+        binds.append(after_seq)
+    if before_seq is not None:
         clauses.append("x_seq > ?")
-        binds.append(_cursor_seq(ctx, table, object_name, ending_before, "ending_before"))
+        binds.append(before_seq)
     where_sql = f" WHERE {' AND '.join(clauses)}" if clauses else ""
-    direction = "ASC" if ending_before is not None else "DESC"
+    direction = "ASC" if before_seq is not None else "DESC"
     rows = ctx.db.rows(
         f"SELECT * FROM {table}{where_sql} ORDER BY x_seq {direction} LIMIT ?", *binds, limit + 1
     )
@@ -200,17 +224,19 @@ def page(
 
 
 def _cursor_seq(ctx: seahaven.Ctx, table: str, object_name: str, id: str, param: str) -> int:
-    """Resolve a cursor to its `x_seq`.
+    """Resolve a cursor to its `x_seq`, at 400 (`resource_missing`).
 
     Resolution is scoped to the table, not to the filter: a cursor naming a
     real customer on a filtered list still resolves — it is a coordinate in
     the ordering, and only the page query applies the filter
     (`components/cross_cutting.md` §3.2.3). A soft-deleted row resolves the
-    same way; the list's own `deleted = 0` keeps it out of the page.
+    same way; the list's own `deleted = 0` keeps it out of the page. The
+    status is the recorded one (Phase 5 cassettes, scenario 09): a query-side
+    `resource_missing` is a 400, unlike the 404 a path id earns.
     """
     row = ctx.db.one(f"SELECT x_seq FROM {table} WHERE id = ?", id)
     if row is None:
-        raise resource_missing(object_name, id, param=param)
+        raise resource_missing(object_name, id, param=param, status=400)
     return int(row["x_seq"])
 
 
@@ -227,16 +253,30 @@ def page_embedded(
     than a table (`components/dispatcher.md` §5); no handler reimplements
     pagination.
     """
-    if page.starting_after is not None and page.ending_before is not None:
-        raise seahaven.WorldBug("page_embedded received both cursors; bind rejects that")
     chosen = list(items)
-    if page.starting_after is not None:
-        chosen = _after_embedded_cursor(items, page.starting_after, object_name, "starting_after")
-    elif page.ending_before is not None:
-        newer_first = _after_embedded_cursor(
-            list(reversed(items)), page.ending_before, object_name, "ending_before"
+    # The same resolve-then-refuse order as `page()`: a bogus cursor 400s even
+    # alongside a second cursor, and only a pair that both resolves is refused.
+    after_at = (
+        None
+        if page.starting_after is None
+        else _cursor_index(items, page.starting_after, object_name, "starting_after")
+    )
+    before_at = (
+        None
+        if page.ending_before is None
+        else _cursor_index(items, page.ending_before, object_name, "ending_before")
+    )
+    if after_at is not None and before_at is not None:
+        raise invalid_request(
+            "Received both starting_after and ending_before parameters. Please pass in only one.",
+            pre_execution=True,
         )
-        chosen = list(reversed(newer_first))
+    if after_at is not None:
+        chosen = list(items[after_at + 1 :])
+    elif before_at is not None:
+        # The newer-than-cursor set, already newest-first; the final slice
+        # below takes the `limit` nearest the cursor — the previous page.
+        chosen = list(items[:before_at])
     has_more = len(chosen) > page.limit
     # Forward: the newest `limit` of the older-than-cursor set. Backward: the
     # `limit` nearest the cursor — the previous page, matching `page()`'s
@@ -252,18 +292,18 @@ def page_embedded(
     }
 
 
-def _after_embedded_cursor(
+def _cursor_index(
     items: Sequence[dict[str, Any]],
     cursor: str,
     object_name: str,
     param: str,
-) -> list[dict[str, Any]]:
+) -> int:
+    """Resolve a cursor against an embedded list, at 400 like `page()`."""
     ids = [item["id"] for item in items]
     try:
-        index = ids.index(cursor)
+        return ids.index(cursor)
     except ValueError:
-        raise resource_missing(object_name, cursor, param=param) from None
-    return list(items[index + 1 :])
+        raise resource_missing(object_name, cursor, param=param, status=400) from None
 
 
 # --- The engine actions ---------------------------------------------------------
@@ -283,6 +323,12 @@ def _path_id(req: Request) -> tuple[str, str]:
         raise seahaven.WorldBug(f"route {req.route.op_id} has no path placeholder")
     name = spec.path[-1]
     return name, req.path_params[name]
+
+
+def _missing_param(spec: ResourceSpec, path_param: str) -> str:
+    """The `param` a missing path id names: the resource's pinned spelling,
+    else the placeholder (`ResourceSpec.missing_path_param`)."""
+    return spec.missing_path_param if spec.missing_path_param is not None else path_param
 
 
 def _scope_clause(ctx: seahaven.Ctx, req: Request) -> tuple[str, Any] | None:
@@ -344,6 +390,7 @@ def retrieve(ctx: seahaven.Ctx, req: Request) -> dict[str, Any]:
     """`GET /v1/<collection>/{id}`: one row, or the deleted stub."""
     spec = _spec_of(req)
     path_param, id_ = _path_id(req)
+    error_param = _missing_param(spec, path_param)
     scoped = _scope_clause(ctx, req)
     if scoped is not None:
         column, parent_id = scoped
@@ -351,9 +398,9 @@ def retrieve(ctx: seahaven.Ctx, req: Request) -> dict[str, Any]:
             f"SELECT * FROM {spec.table} WHERE id = ? AND {column} = ?", id_, parent_id
         )
         if row is None:
-            raise resource_missing(spec.object, id_, param=path_param)
+            raise resource_missing(spec.object, id_, param=error_param)
     else:
-        row = _lookup.require_row(ctx, spec.table, spec.object, id_, param=path_param)
+        row = _lookup.require_row(ctx, spec.table, spec.object, id_, param=error_param)
     if spec.delete is not None and spec.delete.mode == "soft" and row.get("deleted") == 1:
         return fields.deleted_stub(spec.object, id_)
     return spec.serializer(ctx, row)
@@ -400,7 +447,8 @@ def update(ctx: seahaven.Ctx, req: Request) -> dict[str, Any]:
     """`POST /v1/<collection>/{id}`: present-means-set, absent-means-unchanged."""
     spec = _spec_of(req)
     path_param, id_ = _path_id(req)
-    row = _lookup.require_row(ctx, spec.table, spec.object, id_, param=path_param)
+    error_param = _missing_param(spec, path_param)
+    row = _lookup.require_row(ctx, spec.table, spec.object, id_, param=error_param)
     old = spec.serializer(ctx, row)
     sets: dict[str, Any] = {column: _store(value) for column, value in req.params.items()}
     if req.metadata is not None:
@@ -411,7 +459,7 @@ def update(ctx: seahaven.Ctx, req: Request) -> dict[str, Any]:
     if sets:
         assignments = ", ".join(f"{column} = ?" for column in sets)
         ctx.db.execute(f"UPDATE {spec.table} SET {assignments} WHERE id = ?", *sets.values(), id_)
-    fresh = _lookup.require_row(ctx, spec.table, spec.object, id_, param=path_param)
+    fresh = _lookup.require_row(ctx, spec.table, spec.object, id_, param=error_param)
     new = spec.serializer(ctx, fresh)
     if spec.updated_event is not None:
         previous = {key: value for key, value in old.items() if new.get(key) != value}
@@ -430,7 +478,8 @@ def delete(ctx: seahaven.Ctx, req: Request) -> dict[str, Any]:
     if delete_spec is None:
         raise seahaven.WorldBug(f"route {req.route.op_id} is generated-delete with no DeleteSpec")
     path_param, id_ = _path_id(req)
-    row = _lookup.require_row(ctx, spec.table, spec.object, id_, param=path_param)
+    error_param = _missing_param(spec, path_param)
+    row = _lookup.require_row(ctx, spec.table, spec.object, id_, param=error_param)
     if (
         delete_spec.requires_status
         and row.get(delete_spec.status_column) not in delete_spec.requires_status

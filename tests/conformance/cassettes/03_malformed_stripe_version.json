@@ -1,0 +1,27 @@
+{
+  "scenario": "03_malformed_stripe_version",
+  "description": "A malformed Stripe-Version header on a plain GET: what real Stripe answers, recorded once; this world serves one fixed version and declares the difference.",
+  "recorded_at": "2026-09-19T22:07:56+00:00",
+  "stripe_version_pin": "2026-08-26.dahlia",
+  "steps": [
+    {
+      "seq": 0,
+      "method": "GET",
+      "path": "/v1/customers",
+      "path_refs": {},
+      "params": {
+        "limit": 1
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 400,
+      "recorded_stripe_version": "not-a-real-version",
+      "recorded_body": {
+        "error": {
+          "message": "Invalid Stripe API version: not-a-real-version",
+          "type": "invalid_request_error"
+        }
+      }
+    }
+  ]
+}

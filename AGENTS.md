@@ -12,6 +12,8 @@ Commands: `uv run ruff format --check && uv run ruff check`, `uv run ty check`, 
 Every `seahaven` subcommand needs `--world stripeapi:world`: the distribution name
 (`seahaven-stripe-world`) is not the world's package name (`stripeapi`), so the CLI's
 project-name heuristic cannot find the world without it.
+Conformance cassettes re-record with `uv run python -m tools_dev.record --scenario <name>`
+(`--list` prints names; needs a test-mode key, never runs in CI).
 
 Rules: time comes from `ctx.clock` and ids and randomness from `ctx.ids`, so a replay of the same
 fixture and seed gives the same result; SQL goes through `ctx.db` (`ctx.db.conn` is the raw APSW

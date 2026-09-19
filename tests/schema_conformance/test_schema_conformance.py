@@ -416,7 +416,9 @@ def test_check_passes_silently_on_clean_bodies() -> None:
 
 def test_conformance_code_never_imports_stripe_python() -> None:
     """CI's replay-and-validate set never needs the SDK; `import stripe`
-    belongs to the Phase 5 recorder under `tools_dev/` alone."""
+    belongs to the Phase 5 recorder under `tools_dev/` alone — and the only
+    module that imports it is `tools_dev.record`, so importing *that* from
+    the replay side is the same leak one hop further out."""
     scanned = [
         path
         for path in (
@@ -435,9 +437,15 @@ def test_conformance_code_never_imports_stripe_python() -> None:
                     alias.name == "stripe" or alias.name.startswith("stripe.")
                     for alias in node.names
                 ), f"{path}: import stripe"
+                assert not any(alias.name == "tools_dev.record" for alias in node.names), (
+                    f"{path}: import tools_dev.record (it imports stripe)"
+                )
             if isinstance(node, ast.ImportFrom) and isinstance(node.module, str):
                 assert not (node.module == "stripe" or node.module.startswith("stripe.")), (
                     f"{path}: from stripe import"
+                )
+                assert node.module != "tools_dev.record", (
+                    f"{path}: from tools_dev.record import (it imports stripe)"
                 )
 
 

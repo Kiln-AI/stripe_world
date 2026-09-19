@@ -156,15 +156,24 @@ def invalid_request(
     )
 
 
-def resource_missing(object_name: str, id_: str, *, param: str | None = None) -> StripeApiError:
-    """404: the object the caller named does not exist.
+def resource_missing(
+    object_name: str,
+    id_: str,
+    *,
+    param: str | None = None,
+    status: int = 404,
+) -> StripeApiError:
+    """The named object does not exist: 404 on a path id, 400 on a query one.
 
     No trailing period: live probes return `No such customer: 'cus_…'` verbatim
     (`errors.md` shows the same), so the period the component design carried
-    was an invention and `cross_cutting.md` §2.1 is corrected to match.
+    was an invention and `cross_cutting.md` §2.1 is corrected to match. The
+    status split is recorded fact too (Phase 5 cassettes, scenario 09): a
+    bogus pagination cursor answers 400 `resource_missing`, unlike the 404 a
+    path id earns.
     """
     return StripeApiError(
-        404,
+        status,
         "invalid_request_error",
         f"No such {object_name}: '{id_}'",
         code="resource_missing",

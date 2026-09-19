@@ -47,7 +47,7 @@ A slice is not done until steps 3 and 4 are both green and `seahaven check` is c
 - [x] **Phase 4: Schema conformance harness.** Generated validation of every returned object against
       `spec3.min.json`, including the seven bare-`string`-but-enumerated fields. Before any real
       resource, because it constrains all of them.
-- [ ] **Phase 5: Cassette harness.** Recorder (via `stripe-python`), replayer, and
+- [x] **Phase 5: Cassette harness.** Recorder (via `stripe-python`), replayer, and
       `allowed_differences.py`. First phase that needs a Stripe test-mode key.
 
 ### Resource slices

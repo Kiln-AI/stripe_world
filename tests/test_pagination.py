@@ -113,6 +113,64 @@ def test_page_embedded_forward_page_and_envelope() -> None:
     }
 
 
+def test_page_embedded_bogus_cursor_is_400_resource_missing() -> None:
+    """The embedded twin of the table-backed rule: a query-side
+    `resource_missing` is a 400, not the 404 a path id earns (recorded
+    Phase 5, scenario 09)."""
+    from stripeapi.dispatch.resource import page_embedded
+    from stripeapi.dispatch.response import Page
+    from stripeapi.stripe_errors import StripeApiError
+
+    items = [{"id": f"il_{i}"} for i in range(9, 0, -1)]
+    with pytest.raises(StripeApiError) as raised:
+        page_embedded(
+            items,
+            Page(limit=2, starting_after="il_nope", ending_before=None),
+            url="/v1/invoices/in_1/lines",
+            object_name="line_item",
+        )
+    assert raised.value.status == 400
+    assert raised.value.code == "resource_missing"
+    assert raised.value.param == "starting_after"
+    assert raised.value.message == "No such line_item: 'il_nope'"
+
+
+def test_page_embedded_resolves_both_cursors_before_refusing_the_pair() -> None:
+    """Mirrors `page()`: a bogus cursor 400s even alongside a second cursor,
+    and only a pair that both resolves is refused — message wire-verbatim,
+    no `code` (recorded Phase 5, scenario 09)."""
+    from stripeapi.dispatch.resource import page_embedded
+    from stripeapi.dispatch.response import Page
+    from stripeapi.stripe_errors import StripeApiError
+
+    items = [{"id": f"il_{i}"} for i in range(9, 0, -1)]
+
+    with pytest.raises(StripeApiError) as bogus:
+        page_embedded(
+            items,
+            Page(limit=2, starting_after="il_nope", ending_before="il_5"),
+            url="/v1/invoices/in_1/lines",
+            object_name="line_item",
+        )
+    assert bogus.value.status == 400
+    assert bogus.value.code == "resource_missing"
+    assert bogus.value.param == "starting_after"
+
+    with pytest.raises(StripeApiError) as pair:
+        page_embedded(
+            items,
+            Page(limit=2, starting_after="il_7", ending_before="il_5"),
+            url="/v1/invoices/in_1/lines",
+            object_name="line_item",
+        )
+    assert pair.value.status == 400
+    assert pair.value.code is None
+    assert (
+        pair.value.message
+        == "Received both starting_after and ending_before parameters. Please pass in only one."
+    )
+
+
 def test_has_more_on_an_exactly_full_last_page(instance: seahaven.Instance) -> None:
     for i in range(4):
         create(instance, f"c{i:02}")
@@ -143,9 +201,11 @@ def test_starting_after_is_exclusive(instance: seahaven.Instance) -> None:
     assert page["data"] == []
 
 
-def test_unknown_cursor_is_404_resource_missing(instance: seahaven.Instance) -> None:
+def test_unknown_cursor_is_400_resource_missing(instance: seahaven.Instance) -> None:
+    """A query-side `resource_missing` is a 400, unlike the 404 a path id
+    earns — recorded Phase 5, scenario 09."""
     result = list_customers(instance, starting_after="cus_nope")
-    assert result["status"] == 404
+    assert result["status"] == 400
     error = result["body"]["error"]
     assert error["code"] == "resource_missing"
     assert error["param"] == "starting_after"
@@ -177,5 +237,5 @@ def test_listing_writes_nothing(instance: seahaven.Instance) -> None:
     list_customers(instance, limit=1)
     assert len(instance.change_log()) == marker
     result = list_customers(instance, starting_after="cus_missing")
-    assert result["status"] == 404
+    assert result["status"] == 400
     assert len(instance.change_log()) == marker

@@ -77,10 +77,14 @@ CENTRAL_PARAMETERS = frozenset(("expand", "limit", "starting_after", "ending_bef
 
 #: The documented default and bounds of `limit`, identical on every list
 #: endpoint (functional spec §6.2). The live API is laxer than its own spec
-#: here — this phase's probes show `limit=0` and `limit=101` accepted — and
-#: this world implements the documented contract; the cassettes of the
-#: conformance phase settle the difference properly.
+#: The documented default. `limit` itself clamps into [1, 100] rather than
+#: rejecting: the live API answers `limit=0` (or negative) with one item and
+#: `limit=101` with one hundred, both 200 — settled by this world's Phase 5
+#: cassettes (scenario 08), which supersede the documented 1-100 contract
+#: Phase 3 had implemented as a 400.
 DEFAULT_LIMIT = 10
+LIMIT_FLOOR = 1
+LIMIT_CEILING = 100
 
 METADATA_MAX_KEYS = 50
 METADATA_MAX_KEY_LENGTH = 40
@@ -149,7 +153,9 @@ class MetadataUpdate:
 EXPAND: Final = Param(
     name="expand", kind="array", item=Param(name="", kind="string", max_length=5000)
 )
-LIMIT: Final = Param(name="limit", kind="integer", minimum=1, maximum=100)
+# Integer-typed only: the 1-100 range is a silent clamp (see DEFAULT_LIMIT),
+# not a rejection, so the Param carries no bounds for `bind` to enforce.
+LIMIT: Final = Param(name="limit", kind="integer")
 # The two cursors carry the spec's own `maxLength: 5000`; `bind` runs every
 # cursor value through these, so the bound is enforced rather than declared.
 STARTING_AFTER: Final = Param(name="starting_after", kind="string", max_length=5000)
@@ -235,13 +241,15 @@ def _check(param: Param, value: object, path: str) -> Any:
         return value
     if kind == "integer":
         if not isinstance(value, int) or isinstance(value, bool):
-            raise _invalid("integer", path, f"Invalid integer: {value!r}")
+            # Unquoted: `Invalid integer: abc` / `Invalid integer: 1.5` — the
+            # wire-verbatim shape (Phase 5 cassettes, scenario 09).
+            raise _invalid("integer", path, f"Invalid integer: {value}")
         if (param.minimum is not None and value < param.minimum) or (
             param.maximum is not None and value > param.maximum
         ):
             low = "-∞" if param.minimum is None else param.minimum
             high = "∞" if param.maximum is None else param.maximum
-            raise _invalid("integer", path, f"Invalid integer: {value!r}; must be {low} to {high}")
+            raise _invalid("integer", path, f"Invalid integer: {value}; must be {low} to {high}")
         return value
     if kind == "boolean":
         if not isinstance(value, bool):
@@ -263,7 +271,7 @@ def _check(param: Param, value: object, path: str) -> Any:
         return text
     if kind == "timestamp":
         if not isinstance(value, int) or isinstance(value, bool):
-            raise _invalid("integer", path, f"Invalid integer: {value!r}")
+            raise _invalid("integer", path, f"Invalid integer: {value}")
         return _time.from_unix(value)
     if kind == "range":
         return _check_range(param, value, path)
@@ -294,7 +302,7 @@ def _check_range(param: Param, value: object, path: str) -> dict[str, str]:
         if key not in _RANGE_OPS:
             raise unknown_parameter(_bracket(path, str(key)))
         if not isinstance(bound, int) or isinstance(bound, bool):
-            raise _invalid("integer", _bracket(path, key), f"Invalid integer: {bound!r}")
+            raise _invalid("integer", _bracket(path, key), f"Invalid integer: {bound}")
         bounds[key] = _time.from_unix(bound)
     if not bounds:
         raise _invalid(
@@ -426,11 +434,16 @@ def bind(
         raise seahaven.WorldBug(f"route {route.op_id} is not wired")
 
     # 1. Path — prefix-checked here so `/v1/customers/ch_123` is a 404 naming
-    #    `customer` (probed: `No such customer: 'ch_123'`) before any query
-    #    runs. `ParamSpec.path` carries placeholder *names*, so the expected
-    #    prefix comes from a body `Param` named after the placeholder when an
-    #    author declares one, else from the resource the route serves (its own
-    #    id for the last placeholder, the scope's parent for a scoping one).
+    #    the missing id before any query runs. `ParamSpec.path` carries
+    #    placeholder *names*, so the expected prefix comes from a body `Param`
+    #    named after the placeholder when an author declares one, else from the
+    #    resource the route serves (its own id for the last placeholder, the
+    #    scope's parent for a scoping one). The `param` the error names is the
+    #    placeholder by default, but live Stripe is per-resource inconsistent
+    #    here (probed: customers and charges say `id`, prices and
+    #    payment_methods keep the placeholder; nested sub-resource paths keep
+    #    the placeholder), so a resource may pin its own spelling and each
+    #    slice's recordings do.
     body_by_name = {param.name: param for param in spec.body}
     path_params: dict[str, str] = {}
     last = len(spec.path) - 1
@@ -443,7 +456,14 @@ def bind(
             elif route.resource is not None and index == last:
                 prefixes = (route.resource.id_prefix,)
             param = Param(name=name, kind="id", id_prefixes=prefixes)
-        path_params[name] = _check(param, value, name)
+        error_name = name
+        if (
+            route.resource is not None
+            and index == last
+            and route.resource.missing_path_param is not None
+        ):
+            error_name = route.resource.missing_path_param
+        path_params[name] = _check(param, value, error_name)
 
     # 2. Lift the five. A lifted parameter the operation does not accept is
     #    `parameter_unknown`, the same as any other.
@@ -480,6 +500,9 @@ def bind(
     page: Page | None = None
     if spec.paginated:
         limit = DEFAULT_LIMIT if limit_raw is None else _check(LIMIT, limit_raw, "limit")
+        # The silent clamp the live API applies (see DEFAULT_LIMIT): 0 and
+        # negatives become 1, anything above 100 becomes 100.
+        limit = max(LIMIT_FLOOR, min(LIMIT_CEILING, limit))
         starting_after = (
             None
             if starting_after_raw is None
@@ -490,14 +513,11 @@ def bind(
             if ending_before_raw is None
             else _check(ENDING_BEFORE, ending_before_raw, "ending_before")
         )
-        if starting_after is not None and ending_before is not None:
-            # Probed verbatim, with two real ids, this phase.
-            raise invalid_request(
-                "Received both starting_after and ending_before parameters. "
-                "Please pass in only one.",
-                code="parameters_exclusive",
-                pre_execution=True,
-            )
+        # Both cursors present is *not* rejected here: the live API resolves
+        # each cursor first and only then refuses the pair (probed with a
+        # bogus + a real id — the bogus one's 400 wins; Phase 5 cassettes,
+        # scenario 09), so the exclusivity check lives in `page()` /
+        # `page_embedded()`, after resolution.
         page = Page(limit=limit, starting_after=starting_after, ending_before=ending_before)
     else:
         for name, value in (

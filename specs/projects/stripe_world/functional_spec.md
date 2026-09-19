@@ -303,17 +303,23 @@ Non-negotiable for fidelity, and mostly not in the OpenAPI schema. Details and c
 ### 6.2 Pagination
 
 Cursor pagination on every list: `limit`, `starting_after`, `ending_before`, `has_more`, and the
-`{"object": "list", "data": [...], "url": ...}` envelope. `limit` defaults to 10 and ranges 1–100.
-Lists **return objects in reverse chronological order**, and `starting_after` / `ending_before` are
-mutually exclusive — supplying both is an error.
+`{"object": "list", "data": [...], "url": ...}` envelope. `limit` defaults to 10. The documented
+contract says it "can range between 1 and 100", but the live API at the pinned version never
+rejects an out-of-range value: `limit=0` (or negative) answers one item and `limit>100` answers
+one hundred, both 200 — a silent clamp, settled by cassette 08 and implemented as such. A cursor
+that does not name an existing object is a **400** `resource_missing` naming the cursor
+parameter, and each cursor is resolved before the both-cursors refusal fires. Lists **return
+objects in reverse chronological order**, and `starting_after` / `ending_before` are
+mutually exclusive — supplying both is an error whose envelope carries type and message only,
+no `code`.
 
 `total_count` is **not** returned by default; it is opt-in via `expand[]=total_count` on the search
 endpoints, which are not routed here in any case (§3.2).
 
-`starting_after` / `ending_before` against the id of a **deleted** object remains unspecified — and
-now known to be a genuine silence in Stripe's documentation rather than a gap in our reading. It is a
-conformance scenario (§12), and until a recorded trace settles it the world's behavior is stated in
-the allow-list rather than assumed correct.
+`starting_after` / `ending_before` against the id of a **deleted** object was a genuine
+documentation silence, settled by cassette 02: the deleted id remains a valid cursor (it is a
+coordinate in the ordering, not a membership test), the deleted row never appears in a page,
+and retrieving it answers the three-key `deleted` stub at 200.
 
 ### 6.3 Expansion
 
@@ -577,8 +583,8 @@ reachable and a targeted pass re-read every previously-blocked page. What surviv
 |---|---|---|
 | Proration half-cent tie-break | Round-half-up assumed; the independent-per-line rule is now documented fact | Conformance scenario 1 |
 | Proration under `billing_mode=flexible` | Unproven — the documented example nets to zero | Conformance scenario 1 |
-| `starting_after` / `ending_before` on a deleted id | Genuine documentation silence | Conformance scenario 2 |
-| Malformed `Stripe-Version` handling | Undocumented | Conformance scenario 3 |
+| `starting_after` / `ending_before` on a deleted id | **Closed** — cassette 02: a deleted id is a valid cursor, excluded from pages (§6.2) | Recorded |
+| Malformed `Stripe-Version` handling | **Closed** — cassette 03: 400 `invalid_request_error`, type and message only; this world's fixed-version answer is a declared scenario-scoped difference | Recorded |
 | Quantity-only reproration | Mechanism confirmed; no isolated worked example found | Conformance scenario 5 |
 | Dunning `unpaid` invoice outcome | Implemented as `draft`; `spec3.json` prose says "closed", which was never a real status value | Declared difference |
 | Niche magic-card rows (mobile 3DS, captcha/PIN, Radar sub-variants, by-country) | Not needed by the eval set | Added when something needs one |

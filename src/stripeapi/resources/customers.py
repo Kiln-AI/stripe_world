@@ -88,6 +88,7 @@ FIELDS = FieldMap(
         "address": "address",
         "balance": "balance",
         "created": "created",
+        "currency": "currency",
         "delinquent": "delinquent",
         "description": "description",
         "discount": "discount",
@@ -111,6 +112,10 @@ FIELDS = FieldMap(
         "livemode": False,
         "default_source": None,
         "test_clock": None,
+        # Always emitted `null` on a fresh customer at the pinned version
+        # (recorded Phase 5, scenario 02); no column exists until something
+        # can set it.
+        "customer_account": None,
         # Cut at the scope boundary and never emitted: the last three are
         # expand-only inline lists this world does not serve.
         "cash_balance": OMIT,
@@ -155,6 +160,11 @@ SPEC = register(
         collection_url="/v1/customers",
         serializer=serializer_for(FIELDS),
         columns=tuple(FIELDS.columns),
+        # Probed on all three top-level routes (recorded Phase 5, scenario 02):
+        # a missing customer id names `param: "id"`, not the `{customer}`
+        # placeholder — while the nested `balance_transactions` path keeps the
+        # placeholder (`ResourceSpec.missing_path_param`).
+        missing_path_param="id",
         list_filters=(
             ListFilter(name="email", column="email", kind="exact"),
             ListFilter(name="created", column="created", kind="range"),

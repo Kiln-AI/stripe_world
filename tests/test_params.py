@@ -82,24 +82,32 @@ def test_empty_string_where_none_is_allowed(instance: seahaven.Instance) -> None
 
 
 def test_id_prefix_checked_before_any_query(instance: seahaven.Instance) -> None:
-    """`No such customer: 'ch_123'`, naming the path parameter (probed)."""
+    """`No such customer: 'ch_123'`, naming `id` — the recorded spelling for
+    every top-level customers route (Phase 5 cassettes, scenario 02), not the
+    `{customer}` placeholder a nested path would name."""
     result = read(instance, "/v1/customers/ch_123")
     assert result["status"] == 404
     error = result["body"]["error"]
     assert error["code"] == "resource_missing"
-    assert error["param"] == "customer"
+    assert error["param"] == "id"
     assert error["message"] == "No such customer: 'ch_123'"
 
 
-def test_limit_bounds_and_default(instance: seahaven.Instance) -> None:
-    for bad in (0, 101, -1):
-        error = error_of(read(instance, "/v1/customers", {"limit": bad}))
-        assert error["code"] == "parameter_invalid_integer"
-        assert error["param"] == "limit"
-    # The documented bounds pass, and the default page is 10.
-    for good in (1, 100):
-        assert read(instance, "/v1/customers", {"limit": good})["status"] == 200
-    assert read(instance, "/v1/customers")["body"]["data"] == []
+def test_limit_clamps_into_the_documented_range(instance: seahaven.Instance) -> None:
+    """The live API never rejects an out-of-range `limit`: 0 and negatives
+    answer one item, anything above 100 answers one hundred (recorded Phase 5,
+    scenario 08 — superseding the documented 1-100 contract Phase 3 enforced
+    as a 400)."""
+    for _ in range(3):
+        write(instance, "/v1/customers", {})
+    for low in (0, -1, -50):
+        body = read(instance, "/v1/customers", {"limit": low})["body"]
+        assert len(body["data"]) == 1
+        assert body["has_more"] is True
+    body = read(instance, "/v1/customers", {"limit": 101})["body"]
+    assert len(body["data"]) == 3  # clamped to 100, then to what exists
+    assert body["has_more"] is False
+    assert read(instance, "/v1/customers")["body"]["data"]  # the default 10
 
 
 def test_cursor_length_bound_is_enforced(instance: seahaven.Instance) -> None:
@@ -115,16 +123,25 @@ def test_cursor_length_bound_is_enforced(instance: seahaven.Instance) -> None:
 
 
 def test_mutually_exclusive_cursors(instance: seahaven.Instance) -> None:
-    """The message is wire-verbatim from this phase's probe with two real
-    ids; the code is a real value from the ~215-entry enumeration."""
-    error = error_of(
-        read(instance, "/v1/customers", {"starting_after": "cus_a", "ending_before": "cus_b"})
-    )
-    assert error["code"] == "parameters_exclusive"
+    """Two real ids → the exclusivity refusal, message wire-verbatim with **no
+    `code`** (recorded Phase 5, scenario 09). A bogus cursor alongside a real
+    one is the bogus one's `resource_missing` at 400 first — resolution
+    precedes exclusivity on the live API."""
+    first = write(instance, "/v1/customers", {})["body"]["id"]
+    second = write(instance, "/v1/customers", {})["body"]["id"]
+    result = read(instance, "/v1/customers", {"starting_after": first, "ending_before": second})
+    assert result["status"] == 400
+    error = result["body"]["error"]
+    assert "code" not in error
     assert (
         error["message"]
         == "Received both starting_after and ending_before parameters. Please pass in only one."
     )
+
+    bogus = read(instance, "/v1/customers", {"starting_after": "cus_aaa", "ending_before": second})
+    assert bogus["status"] == 400
+    assert bogus["body"]["error"]["code"] == "resource_missing"
+    assert bogus["body"]["error"]["param"] == "starting_after"
 
 
 # --- bind() directly: the shapes only a synthetic spec can provoke -------------

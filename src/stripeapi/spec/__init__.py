@@ -26,9 +26,21 @@ __all__ = [
     "ENUM_OVERRIDES",
     "EVENT_TYPES",
     "EXPANDABLE_FIELDS",
+    "pinned_version",
     "schema_rules",
     "spec_document",
 ]
+
+
+@cache
+def pinned_version() -> str:
+    """The one API version this world serves, read from the pinned spec itself.
+
+    The conformance recorder re-exports this for every recorded request
+    (`tools_dev/scenarios/_dsl.py::PINNED_VERSION`), so the pin on the wire and
+    the pin in the served shapes are the same fact rather than two constants.
+    """
+    return str(spec_document()["info"]["version"])
 
 
 @cache

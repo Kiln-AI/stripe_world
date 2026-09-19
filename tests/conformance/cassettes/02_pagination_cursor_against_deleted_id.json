@@ -1,0 +1,375 @@
+{
+  "scenario": "02_pagination_cursor_against_deleted_id",
+  "description": "starting_after / ending_before against a deleted object id, and the deleted-stub retrieve: the documented silence, settled by recording.",
+  "recorded_at": "2026-09-19T22:07:56+00:00",
+  "stripe_version_pin": "2026-08-26.dahlia",
+  "steps": [
+    {
+      "seq": 0,
+      "method": "POST",
+      "path": "/v1/customers",
+      "path_refs": {},
+      "params": {
+        "email": "s02-cohort@conformance.stripeapi.invalid",
+        "description": "s02 oldest"
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "cus_VI6ddvMeYxuNfh",
+        "object": "customer",
+        "address": null,
+        "balance": 0,
+        "created": 1789855674,
+        "currency": null,
+        "customer_account": null,
+        "default_source": null,
+        "delinquent": false,
+        "description": "s02 oldest",
+        "discount": null,
+        "email": "s02-cohort@conformance.stripeapi.invalid",
+        "invoice_prefix": "KLMQRH7W",
+        "invoice_settings": {
+          "custom_fields": null,
+          "default_payment_method": null,
+          "footer": null,
+          "rendering_options": null
+        },
+        "livemode": false,
+        "metadata": {},
+        "name": null,
+        "next_invoice_sequence": 1,
+        "phone": null,
+        "preferred_locales": [],
+        "shipping": null,
+        "tax_exempt": "none",
+        "test_clock": null
+      }
+    },
+    {
+      "seq": 1,
+      "method": "POST",
+      "path": "/v1/customers",
+      "path_refs": {},
+      "params": {
+        "email": "s02-cohort@conformance.stripeapi.invalid",
+        "description": "s02 middle"
+      },
+      "idempotency_key": null,
+      "binds_as": "middle",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "cus_VI6dyxHSwITXE9",
+        "object": "customer",
+        "address": null,
+        "balance": 0,
+        "created": 1789855675,
+        "currency": null,
+        "customer_account": null,
+        "default_source": null,
+        "delinquent": false,
+        "description": "s02 middle",
+        "discount": null,
+        "email": "s02-cohort@conformance.stripeapi.invalid",
+        "invoice_prefix": "IQTV54AM",
+        "invoice_settings": {
+          "custom_fields": null,
+          "default_payment_method": null,
+          "footer": null,
+          "rendering_options": null
+        },
+        "livemode": false,
+        "metadata": {},
+        "name": null,
+        "next_invoice_sequence": 1,
+        "phone": null,
+        "preferred_locales": [],
+        "shipping": null,
+        "tax_exempt": "none",
+        "test_clock": null
+      }
+    },
+    {
+      "seq": 2,
+      "method": "POST",
+      "path": "/v1/customers",
+      "path_refs": {},
+      "params": {
+        "email": "s02-cohort@conformance.stripeapi.invalid",
+        "description": "s02 newest"
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "cus_VI6dPhIlxzLqqn",
+        "object": "customer",
+        "address": null,
+        "balance": 0,
+        "created": 1789855675,
+        "currency": null,
+        "customer_account": null,
+        "default_source": null,
+        "delinquent": false,
+        "description": "s02 newest",
+        "discount": null,
+        "email": "s02-cohort@conformance.stripeapi.invalid",
+        "invoice_prefix": "BG6YZCFZ",
+        "invoice_settings": {
+          "custom_fields": null,
+          "default_payment_method": null,
+          "footer": null,
+          "rendering_options": null
+        },
+        "livemode": false,
+        "metadata": {},
+        "name": null,
+        "next_invoice_sequence": 1,
+        "phone": null,
+        "preferred_locales": [],
+        "shipping": null,
+        "tax_exempt": "none",
+        "test_clock": null
+      }
+    },
+    {
+      "seq": 3,
+      "method": "DELETE",
+      "path": "/v1/customers/{customer}",
+      "path_refs": {
+        "customer": {
+          "step": "middle",
+          "field": "id"
+        }
+      },
+      "params": {},
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "cus_VI6dyxHSwITXE9",
+        "object": "customer",
+        "deleted": true
+      }
+    },
+    {
+      "seq": 4,
+      "method": "GET",
+      "path": "/v1/customers/{customer}",
+      "path_refs": {
+        "customer": {
+          "step": "middle",
+          "field": "id"
+        }
+      },
+      "params": {},
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "cus_VI6dyxHSwITXE9",
+        "object": "customer",
+        "deleted": true
+      }
+    },
+    {
+      "seq": 5,
+      "method": "GET",
+      "path": "/v1/customers",
+      "path_refs": {},
+      "params": {
+        "email": "s02-cohort@conformance.stripeapi.invalid",
+        "starting_after": {
+          "$ref": {
+            "step": "middle",
+            "field": "id"
+          }
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "object": "list",
+        "data": [
+          {
+            "id": "cus_VI6ddvMeYxuNfh",
+            "object": "customer",
+            "address": null,
+            "balance": 0,
+            "created": 1789855674,
+            "currency": null,
+            "customer_account": null,
+            "default_source": null,
+            "delinquent": false,
+            "description": "s02 oldest",
+            "discount": null,
+            "email": "s02-cohort@conformance.stripeapi.invalid",
+            "invoice_prefix": "KLMQRH7W",
+            "invoice_settings": {
+              "custom_fields": null,
+              "default_payment_method": null,
+              "footer": null,
+              "rendering_options": null
+            },
+            "livemode": false,
+            "metadata": {},
+            "name": null,
+            "next_invoice_sequence": 1,
+            "phone": null,
+            "preferred_locales": [],
+            "shipping": null,
+            "tax_exempt": "none",
+            "test_clock": null
+          }
+        ],
+        "has_more": false,
+        "url": "/v1/customers"
+      }
+    },
+    {
+      "seq": 6,
+      "method": "GET",
+      "path": "/v1/customers",
+      "path_refs": {},
+      "params": {
+        "email": "s02-cohort@conformance.stripeapi.invalid",
+        "ending_before": {
+          "$ref": {
+            "step": "middle",
+            "field": "id"
+          }
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "object": "list",
+        "data": [
+          {
+            "id": "cus_VI6dPhIlxzLqqn",
+            "object": "customer",
+            "address": null,
+            "balance": 0,
+            "created": 1789855675,
+            "currency": null,
+            "customer_account": null,
+            "default_source": null,
+            "delinquent": false,
+            "description": "s02 newest",
+            "discount": null,
+            "email": "s02-cohort@conformance.stripeapi.invalid",
+            "invoice_prefix": "BG6YZCFZ",
+            "invoice_settings": {
+              "custom_fields": null,
+              "default_payment_method": null,
+              "footer": null,
+              "rendering_options": null
+            },
+            "livemode": false,
+            "metadata": {},
+            "name": null,
+            "next_invoice_sequence": 1,
+            "phone": null,
+            "preferred_locales": [],
+            "shipping": null,
+            "tax_exempt": "none",
+            "test_clock": null
+          }
+        ],
+        "has_more": false,
+        "url": "/v1/customers"
+      }
+    },
+    {
+      "seq": 7,
+      "method": "GET",
+      "path": "/v1/customers",
+      "path_refs": {},
+      "params": {
+        "email": "s02-cohort@conformance.stripeapi.invalid",
+        "limit": 10
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "object": "list",
+        "data": [
+          {
+            "id": "cus_VI6dPhIlxzLqqn",
+            "object": "customer",
+            "address": null,
+            "balance": 0,
+            "created": 1789855675,
+            "currency": null,
+            "customer_account": null,
+            "default_source": null,
+            "delinquent": false,
+            "description": "s02 newest",
+            "discount": null,
+            "email": "s02-cohort@conformance.stripeapi.invalid",
+            "invoice_prefix": "BG6YZCFZ",
+            "invoice_settings": {
+              "custom_fields": null,
+              "default_payment_method": null,
+              "footer": null,
+              "rendering_options": null
+            },
+            "livemode": false,
+            "metadata": {},
+            "name": null,
+            "next_invoice_sequence": 1,
+            "phone": null,
+            "preferred_locales": [],
+            "shipping": null,
+            "tax_exempt": "none",
+            "test_clock": null
+          },
+          {
+            "id": "cus_VI6ddvMeYxuNfh",
+            "object": "customer",
+            "address": null,
+            "balance": 0,
+            "created": 1789855674,
+            "currency": null,
+            "customer_account": null,
+            "default_source": null,
+            "delinquent": false,
+            "description": "s02 oldest",
+            "discount": null,
+            "email": "s02-cohort@conformance.stripeapi.invalid",
+            "invoice_prefix": "KLMQRH7W",
+            "invoice_settings": {
+              "custom_fields": null,
+              "default_payment_method": null,
+              "footer": null,
+              "rendering_options": null
+            },
+            "livemode": false,
+            "metadata": {},
+            "name": null,
+            "next_invoice_sequence": 1,
+            "phone": null,
+            "preferred_locales": [],
+            "shipping": null,
+            "tax_exempt": "none",
+            "test_clock": null
+          }
+        ],
+        "has_more": false,
+        "url": "/v1/customers"
+      }
+    }
+  ]
+}

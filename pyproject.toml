@@ -20,7 +20,10 @@ dependencies = ["seahaven~=0.0"]
 serve = ["seahaven[serve]"]
 
 [dependency-groups]
-dev = ["pytest>=8", "ruff>=0.14", "ty>=0.0.1a21"]
+# `stripe` is the conformance recorder's transport and nothing else: the test
+# suite replays committed cassettes and never imports it
+# (components/conformance.md Dependencies, enforced by a static test).
+dev = ["pytest>=8", "ruff>=0.14", "ty>=0.0.1a21", "stripe>=13"]
 
 # Seahaven is unpublished; while that is true this checkout depends on the
 # framework vendored beside it rather than on the placeholder PyPI release
@@ -55,6 +58,13 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 
 [tool.ty.src]
 include = ["src", "tests", "fixtures_src", "tools_dev"]
+
+[tool.ty.environment]
+# `tools_dev/record.py` and the scenario DSL import the cassette format from
+# `tests/conformance/` (the recorder's dump pipeline and the replayer share
+# one format module); pytest puts `tests/` on the path via the root conftest,
+# and this gives ty the same root.
+extra-paths = ["tests"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

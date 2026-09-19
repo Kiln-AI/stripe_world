@@ -69,7 +69,8 @@ def test_a_bad_expand_path_on_a_create_writes_nothing(instance: seahaven.Instanc
 
 def test_the_id_prefix_refusal_reads_no_row(instance: seahaven.Instance) -> None:
     """`ch_123` fails at bind time — before any `SELECT` — so it answers 404
-    even where the table is empty, and never confuses the engine."""
+    even where the table is empty, and never confuses the engine. The `param`
+    is `id`, the recorded spelling for top-level customers routes."""
     result = instance.call("stripe_api_read", path="/v1/customers/ch_123")
     assert result["status"] == 404
-    assert result["body"]["error"]["param"] == "customer"
+    assert result["body"]["error"]["param"] == "id"
