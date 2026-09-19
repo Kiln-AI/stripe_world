@@ -41,7 +41,7 @@ A slice is not done until steps 3 and 4 are both green and `seahaven check` is c
       generates — `spec3.min.json`, `expandable.py`, `enums.py`, `event_types.py` — plus the drift
       test. Built early because the schema's enum `CHECK`s and every later conformance test read from
       it.
-- [ ] **Phase 3: Dispatcher and the four tools.** Router, `ResourceSpec` engine, `ParamSpec`,
+- [x] **Phase 3: Dispatcher and the four tools.** Router, `ResourceSpec` engine, `ParamSpec`,
       response construction, pagination, the Stripe error envelope, and the four tools. Exercised
       against one throwaway resource, replaced in Phase 5.
 - [ ] **Phase 4: Schema conformance harness.** Generated validation of every returned object against

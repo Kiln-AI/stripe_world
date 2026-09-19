@@ -97,7 +97,12 @@ def test_cut_operations_are_absent() -> None:
 )
 def test_table_equals_the_mechanical_derivation() -> None:
     """The committed table is exactly what derive_operations produces from the
-    pinned spec, both directions — no hand drift between bootstraps."""
+    pinned spec, both directions — no hand drift between bootstraps.
+
+    Compared on `(method, pattern, op_id)`: from the dispatcher phase on the
+    hand-maintained entries carry wiring the mechanical derivation does not,
+    which is why `--bootstrap-routes` stopped being round-trippable.
+    """
     from tools_dev.prune_spec import derive_operations
 
     derived = derive_operations(json.loads(SPEC_PATH.read_text()))
@@ -106,4 +111,4 @@ def test_table_equals_the_mechanical_derivation() -> None:
         return (route.method, route.pattern, route.op_id)
 
     assert route_keys(derived) == route_keys(routes.ALL)
-    assert sorted(derived, key=sort_key) == sorted(routes.ALL, key=sort_key)
+    assert sorted(map(sort_key, derived)) == sorted(map(sort_key, routes.ALL))

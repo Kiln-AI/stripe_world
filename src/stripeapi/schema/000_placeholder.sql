@@ -1,7 +1,0 @@
--- StripeAPI's schema, applied to a blank instance in filename order.
---
--- This file is the Phase 1 placeholder: `seahaven.sql_files` refuses a schema
--- directory with no `*.sql` in it, and no table belongs to the skeleton. The
--- resource phases add `001_core.sql` onward
--- (specs/projects/stripe_world/architecture.md §2) and delete this file with
--- the first of them.

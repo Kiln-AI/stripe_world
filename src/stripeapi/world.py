@@ -4,9 +4,12 @@ One `World` per package, built here so that tool and middleware modules import
 it without an import cycle: `world.py` imports nothing of this world's, and
 everything of this world's imports `world.py`.
 
-`untracked_tables` — for `idempotency_keys` and `counters` — is added by the
-phases that create those tables, not here: naming a table that does not exist
-yet would be a pin on a schema this world does not have.
+`untracked_tables` names `counters` from the dispatcher phase on: every insert
+bumps a counter, so a tracked `counters` would put a bookkeeping row into the
+change log of every graded episode (`components/data_model.md` §5).
+`idempotency_keys` joins it in the idempotency phase, when the table exists —
+naming a table that does not exist yet would be a pin on a schema this world
+does not have.
 """
 
 import seahaven
@@ -15,6 +18,7 @@ world = seahaven.World(
     name="stripeapi",
     version="0.1.0",
     schema=seahaven.sql_files(__package__, "schema"),
+    untracked_tables=("counters",),
     # The one line an OpenEnv hub shows beside the name. `README.md` is the
     # card's whole body, and nothing is derived from it; this sentence is kept
     # in step with the README's opening paragraph by hand.

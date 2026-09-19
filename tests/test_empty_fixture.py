@@ -1,11 +1,10 @@
 """The committed `empty` fixture: what it is on disk and what an instance of it
 starts from.
 
-Phase 1's schema is the placeholder file, so "schema only, no rows" is "no
-tables" until the resource phases add theirs. The test asserts that honestly
-rather than pretending otherwise: what it pins is that the fixture exists, is
-frozen at the one instant, and that nothing — table or row — rides along with
-it.
+From the dispatcher phase on, "schema only" means the tables exist and the
+tracked tables hold no rows; `counters` carries its seeded rows by design (a
+static reference seed from the schema file, `components/data_model.md` §5) and
+is untracked, so it never appears in a graded change log.
 """
 
 import pytest
@@ -26,8 +25,20 @@ def test_the_empty_fixture_is_committed(world: seahaven.World) -> None:
     assert empty.description.startswith("Schema only.")
 
 
-def test_an_instance_of_empty_starts_from_nothing(instance: seahaven.Instance) -> None:
-    assert world_tables(instance.inspect().conn) == []
-    assert instance.inspect().one(
-        "SELECT count(*) AS n FROM sqlite_master WHERE type = 'table'"
-    ) == {"n": 0}
+def test_an_instance_of_empty_has_the_schema_and_no_rows(instance: seahaven.Instance) -> None:
+    assert world_tables(instance.inspect().conn) == ["counters", "customers", "events"]
+    # No tracked table carries a row: no customer, no event.
+    assert instance.inspect().one("SELECT count(*) AS n FROM customers") == {"n": 0}
+    assert instance.inspect().one("SELECT count(*) AS n FROM events") == {"n": 0}
+
+
+def test_the_counters_seed_is_present_and_untracked(instance: seahaven.Instance) -> None:
+    """One row per listable table, all at zero — the `x_seq` source.
+
+    `counters` is in `untracked_tables`, so these seeded rows (and every bump
+    a call makes) stay out of the change log a graded episode reads.
+    """
+    seeded = instance.inspect().rows("SELECT name, value FROM counters ORDER BY name")
+    assert len(seeded) == 22
+    assert {row["value"] for row in seeded} == {0}
+    assert instance.change_log() == []

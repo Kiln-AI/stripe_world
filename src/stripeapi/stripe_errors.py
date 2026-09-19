@@ -199,11 +199,14 @@ def missing_parameter(param: str) -> StripeApiError:
 def cannot_expand(segment: str, *, exists: bool, hint: str | None = None) -> StripeApiError:
     """400: a bad or non-expandable `expand[]` path. Never silently ignored.
 
-    Three message forms, all wire-quoted (`gap-closure-2026-09-18.md` item 4):
-    a field that exists but is not expandable; a field that is not there at
-    all; and a list endpoint addressed without the `data.` prefix, which gets
-    the redirecting hint. No `code` and no `param` — the one complete wire body
-    in the research carries neither.
+    Three message forms, of which two fire at `2026-08-26.dahlia`: the plain
+    form (wire-quoted, `gap-closure-2026-09-18.md` item 4) and the
+    list-endpoint hint. The `exists=False` "because it doesn't exist" variant
+    never fires on this surface — probed this phase; see
+    `serialize/expand.py`'s module docstring for the correction — and every
+    call site passes `exists=True`. The branch is retained for the shape the
+    research quoted, not because any call site reaches it. No `code` and no
+    `param` — the one complete wire body in the research carries neither.
     """
     if not exists:
         message = f"This property cannot be expanded because it doesn't exist: {segment}."

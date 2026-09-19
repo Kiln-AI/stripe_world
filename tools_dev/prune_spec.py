@@ -431,6 +431,59 @@ class Artifacts(NamedTuple):
     event_types: frozenset[str]
 
 
+def _filter_request_surface(trimmed: dict[str, Any], route: Route) -> dict[str, Any]:
+    """Discovery §8a: a wired route is documented only with the parameters
+    this world's `ParamSpec` accepts — in the request body *and* in the spec's
+    query `parameters`, which otherwise arrive verbatim (`test_clock` on
+    `GET /v1/customers` was documented and then rejected as
+    `parameter_unknown`: exactly the "advertised but unimplemented" hole this
+    rule exists to close, one level below paths).
+
+    Path placeholders (`in: "path"`) are always kept: they name the pattern's
+    own segments. The central parameters are kept where the spec accepts
+    them: `expand` when `ParamSpec.expand`, the three pagination parameters
+    when `ParamSpec.paginated`, `metadata` when `ParamSpec.metadata`. An
+    *unwired* route (no `ParamSpec` yet — its resource phase has not landed)
+    keeps everything verbatim until that phase wires it and the artifacts are
+    regenerated.
+    """
+    spec = route.params
+    if spec is None:
+        return trimmed
+    from stripeapi.dispatch.params import body_of
+
+    allowed_body = {param.name for param in body_of(route)}
+    if spec.expand:
+        allowed_body.add("expand")
+    if spec.metadata:
+        allowed_body.add("metadata")
+    allowed_query = set(allowed_body)
+    if spec.paginated:
+        allowed_query |= {"limit", "starting_after", "ending_before"}
+
+    parameters = trimmed.get("parameters")
+    if isinstance(parameters, list):
+        trimmed["parameters"] = [
+            parameter
+            for parameter in parameters
+            if parameter.get("in") == "path" or parameter.get("name") in allowed_query
+        ]
+    if "requestBody" in trimmed:
+        body = trimmed["requestBody"]
+        for media in body.get("content", {}).values():
+            schema = media.get("schema")
+            if not isinstance(schema, dict) or "properties" not in schema:
+                continue
+            schema["properties"] = {
+                name: prop for name, prop in schema["properties"].items() if name in allowed_body
+            }
+            if "required" in schema:
+                schema["required"] = [name for name in schema["required"] if name in allowed_body]
+                if not schema["required"]:
+                    schema.pop("required")
+    return trimmed
+
+
 def build_artifacts(
     full_spec: dict[str, Any], routes: Sequence[Route], event_types: frozenset[str]
 ) -> Artifacts:
@@ -466,6 +519,7 @@ def build_artifacts(
         trimmed = _strip_all_markup(
             {op_key: operation[op_key] for op_key in OPERATION_KEYS if op_key in operation}
         )
+        trimmed = _filter_request_surface(trimmed, route)
         pruned_paths.setdefault(route.pattern, {})[route.method.lower()] = trimmed
         _harvest_refs(trimmed, frontier)
 

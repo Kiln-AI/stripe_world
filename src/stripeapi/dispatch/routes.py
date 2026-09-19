@@ -4,28 +4,63 @@ Every entry's `(method, pattern)` matches the pinned spec3.json verbatim,
 placeholder names included, and the spec pipeline validates that on every
 regeneration — so a typo'd path or a spec bump that moves the surface fails
 generation rather than silently narrowing discovery (components/discovery.md
-§1). Handlers and ParamSpecs attach to these entries in the dispatcher phase;
-`alias_of` will mark the eight legacy aliases that share a canonical handler
+§1). `alias_of` marks the eight legacy aliases that share a canonical handler
 (components/dispatcher.md §3.1.3).
 
 Bootstrapped mechanically by `python -m tools_dev.prune_spec --bootstrap-routes`
 and hand-maintained thereafter.
+
+A route is **wired** once it carries `params`; exactly one of `handler`
+(hand-written) and `(resource, action)` (engine-served) is then set, and the
+router checks that at import. Routes still awaiting their resource phase are
+unwired data, and dispatching one is a `WorldBug` naming the `op_id` — an
+honest "not built yet" rather than a pretend Stripe answer. The resource
+phases wire their own entries; the dispatcher phase wires the five core
+customers routes to the throwaway slice (`resources/customers.py`).
 """
 
 from dataclasses import dataclass
-from typing import Final
+from typing import TYPE_CHECKING, Final, Literal
+
+if TYPE_CHECKING:
+    from stripeapi.dispatch.params import ParamSpec
+    from stripeapi.dispatch.resource import ResourceSpec, Scope
+    from stripeapi.dispatch.response import Handler
+
+from stripeapi.resources import customers
 
 __all__ = ["ALL", "Route"]
+
+Method = Literal["GET", "POST", "DELETE"]
+Action = Literal["list", "create", "retrieve", "update", "delete"]
 
 
 @dataclass(frozen=True, slots=True)
 class Route:
     """One routed operation: the HTTP verb, the path pattern with `{placeholder}`
-    segments as they appear in the spec, and the spec's own operationId."""
+    segments as they appear in the spec, and the spec's own operationId.
 
-    method: str
+    `handler is None` is the definition of "generated": exactly one of
+    `handler` and `(resource, action)` is set on a wired route, and the router
+    enforces it at import. An unwired route (`params is None`) carries none of
+    the three and waits for its resource phase.
+    """
+
+    method: Method
     pattern: str
     op_id: str
+    params: ParamSpec | None = None
+    resource: ResourceSpec | None = None
+    action: Action | None = None
+    handler: Handler | None = None
+    scope: Scope | None = None
+    alias_of: str | None = None  # the op_id this one delegates to
+    # What the operation answers, declared so `expand[]` paths can be
+    # validated statically, before any row is written (cross_cutting.md
+    # §3.3.1). `response_object` is the schema name of the object returned —
+    # the item's, for a list — and `envelope` says which shape wraps it.
+    response_object: str | None = None
+    envelope: Literal["object", "list"] | None = None
 
 
 ALL: Final[tuple[Route, ...]] = (
@@ -83,12 +118,56 @@ ALL: Final[tuple[Route, ...]] = (
     Route(method="GET", pattern="/v1/credit_notes/{id}", op_id="GetCreditNotesId"),
     Route(method="POST", pattern="/v1/credit_notes/{id}", op_id="PostCreditNotesId"),
     Route(method="POST", pattern="/v1/credit_notes/{id}/void", op_id="PostCreditNotesIdVoid"),
-    # customers
-    Route(method="GET", pattern="/v1/customers", op_id="GetCustomers"),
-    Route(method="POST", pattern="/v1/customers", op_id="PostCustomers"),
-    Route(method="GET", pattern="/v1/customers/{customer}", op_id="GetCustomersCustomer"),
-    Route(method="POST", pattern="/v1/customers/{customer}", op_id="PostCustomersCustomer"),
-    Route(method="DELETE", pattern="/v1/customers/{customer}", op_id="DeleteCustomersCustomer"),
+    # customers — the five core routes are wired to the throwaway slice; the
+    # rest wait for the customers-and-payment-methods phase.
+    Route(
+        method="GET",
+        pattern="/v1/customers",
+        op_id="GetCustomers",
+        response_object="customer",
+        envelope="list",
+        params=customers.CUSTOMER_LIST,
+        resource=customers.SPEC,
+        action="list",
+    ),
+    Route(
+        method="POST",
+        pattern="/v1/customers",
+        op_id="PostCustomers",
+        response_object="customer",
+        envelope="object",
+        params=customers.CUSTOMER_CREATE,
+        resource=customers.SPEC,
+        action="create",
+    ),
+    Route(
+        method="GET",
+        pattern="/v1/customers/{customer}",
+        op_id="GetCustomersCustomer",
+        response_object="customer",
+        envelope="object",
+        params=customers.CUSTOMER_RETRIEVE,
+        resource=customers.SPEC,
+        action="retrieve",
+    ),
+    Route(
+        method="POST",
+        pattern="/v1/customers/{customer}",
+        op_id="PostCustomersCustomer",
+        response_object="customer",
+        envelope="object",
+        params=customers.CUSTOMER_UPDATE,
+        resource=customers.SPEC,
+        action="update",
+    ),
+    Route(
+        method="DELETE",
+        pattern="/v1/customers/{customer}",
+        op_id="DeleteCustomersCustomer",
+        params=customers.CUSTOMER_DELETE,
+        resource=customers.SPEC,
+        action="delete",
+    ),
     Route(
         method="GET",
         pattern="/v1/customers/{customer}/balance_transactions",

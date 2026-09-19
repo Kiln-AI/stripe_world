@@ -21,7 +21,7 @@ from typing import Any
 
 import seahaven
 
-__all__ = ["Internal", "InvalidInput"]
+__all__ = ["Internal", "InvalidInput", "InvalidMethod", "InvalidSearchQuery", "UnknownOperation"]
 
 
 class InvalidInput(seahaven.ToolError):
@@ -64,3 +64,48 @@ class Internal(seahaven.ToolError):
 
     def __init__(self, message: str = "Something went wrong") -> None:
         super().__init__("INTERNAL", message)
+
+
+# --- The discovery tools' two error conditions (`components/discovery.md` §2):
+# an agent that mis-calls the catalogue has made an authoring mistake, not a
+# Stripe request, so these are Seahaven errors rather than a Stripe envelope.
+
+
+class InvalidSearchQuery(seahaven.ToolError):
+    """A search query with no tokens after normalization."""
+
+    def __init__(self, query: str) -> None:
+        super().__init__(
+            "INVALID_SEARCH_QUERY",
+            f"a search query needs at least one keyword: {query!r}",
+            {"query": query},
+        )
+
+
+class InvalidMethod(seahaven.ToolError):
+    """A method outside the three verbs the routed surface serves.
+
+    Defensive only: the registered tool's `Literal` annotation makes a bad
+    verb an `ArgumentError` — restated as `INVALID_INPUT` — before the tool
+    body runs, so this shape is unreachable through the tool and exists for
+    the direct-call path alone.
+    """
+
+    def __init__(self, method: str) -> None:
+        super().__init__(
+            "INVALID_METHOD",
+            f"method must be GET, POST or DELETE: {method!r}",
+            {"method": method},
+        )
+
+
+class UnknownOperation(seahaven.ToolError):
+    """A `(method, path)` that is not a routed operation — including a real
+    Stripe path this world cut."""
+
+    def __init__(self, method: str, path: str) -> None:
+        super().__init__(
+            "UNKNOWN_OPERATION",
+            f"no routed operation for {method} {path}",
+            {"method": method, "path": path},
+        )

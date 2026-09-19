@@ -9,21 +9,29 @@ def test_importing_the_package_builds_the_world() -> None:
     assert stripeapi.world.pinned_state_format == "seahaven.state/1"
 
 
-def test_the_error_handler_is_the_only_middleware() -> None:
+def test_the_chain_is_error_handler_then_stripe_envelope() -> None:
     """Registration order is chain order, outermost first.
 
-    The Stripe envelope and idempotency layers register inside the error handler
-    in later phases; until they exist, the chain is the error handler alone.
+    The error handler wraps everything — a bug in the Stripe envelope reaches
+    the agent as this world's `INTERNAL`, never as a raw traceback. The
+    idempotency layer registers inside the envelope in a later phase
+    (`components/cross_cutting.md` §3.1.7).
     """
     from stripeapi.middleware.error_handler import error_handler
+    from stripeapi.middleware.stripe_envelope import stripe_envelope
 
-    assert list(stripeapi.world.middlewares) == [error_handler]
+    assert list(stripeapi.world.middlewares) == [error_handler, stripe_envelope]
 
 
-def test_the_world_registers_no_tools_of_its_own_yet() -> None:
-    """Phase 1 is a skeleton: the four Stripe tools arrive with the dispatcher.
-
-    `controller_run_sql` is the framework's, contributed to every world and not
-    part of this world's surface.
-    """
-    assert set(stripeapi.world.tools) == {"controller_run_sql"}
+def test_the_four_stripe_tools_are_registered() -> None:
+    """The dispatcher phase's surface: the four Stripe MCP tools. The
+    controller tool is the framework's, contributed to every world and not
+    part of this world's surface; `call_stripe` is deliberately unregistered
+    (functional spec §2.5)."""
+    assert set(stripeapi.world.tools) == {
+        "stripe_api_read",
+        "stripe_api_write",
+        "stripe_api_search",
+        "stripe_api_details",
+        "controller_run_sql",
+    }

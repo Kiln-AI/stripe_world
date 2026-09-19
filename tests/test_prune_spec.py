@@ -285,3 +285,197 @@ def test_canonical_dump_is_sorted_and_compact() -> None:
     blob = _dump_canonical({"b": 1, "a": {"y": 1, "x": 2}})
     assert blob == '{"a":{"x":2,"y":1},"b":1}'
     json.loads(blob)
+
+
+# --- §8a: request bodies filtered to the wired ParamSpec -----------------------
+
+
+def test_a_wired_route_filters_its_request_body_to_the_allowlist() -> None:
+    """Discovery §8a: `stripe_api_details` may not document a parameter the
+    write tool rejects. A wired route's body keeps its `ParamSpec`'s names
+    plus the centrally-handled `expand` and `metadata` — and `required`
+    follows."""
+    from stripeapi.dispatch.params import Param, ParamSpec
+
+    spec = synthetic_spec()
+    spec["paths"]["/v1/prices"]["post"]["requestBody"]["content"][
+        "application/x-www-form-urlencoded"
+    ] = spec["paths"]["/v1/prices"]["post"]["requestBody"]["content"].pop("application/json")
+    body = spec["paths"]["/v1/prices"]["post"]["requestBody"]["content"][
+        "application/x-www-form-urlencoded"
+    ]["schema"]
+    body["properties"] = {
+        "name": {"type": "string"},
+        "nickname": {"type": "string"},
+        "on_behalf_of": {"type": "string"},  # Connect: out of scope, must go
+        "expand": {"type": "array"},
+        "metadata": {"type": "object"},
+        "limit": {"type": "integer"},  # central on lists only, not on a create
+    }
+    body["required"] = ["name", "on_behalf_of"]
+
+    wired = Route(
+        method="POST",
+        pattern="/v1/prices",
+        op_id="PostPrices",
+        params=ParamSpec(
+            op_id="PostPrices",
+            body=(Param(name="name", kind="string", required=True),),
+            metadata=True,
+        ),
+    )
+    artifacts = build_artifacts(spec, (ROUTES[0], wired), EVENTS)
+    served = artifacts.spec3_min["paths"]["/v1/prices"]["post"]["requestBody"]["content"][
+        "application/x-www-form-urlencoded"
+    ]["schema"]
+    assert set(served["properties"]) == {"name", "expand", "metadata"}
+    assert served["required"] == ["name"]
+    # An unwired body would have kept all six properties verbatim.
+
+
+def test_an_unwired_route_keeps_its_body_verbatim() -> None:
+    """Until a route's resource phase wires its `ParamSpec`, its body is
+    served as the spec wrote it — the interim rule that lets the slices land
+    one at a time."""
+    spec = synthetic_spec()
+    body = spec["paths"]["/v1/prices"]["post"]["requestBody"]["content"]["application/json"][
+        "schema"
+    ]
+    body["properties"]["on_behalf_of"] = {"type": "string"}
+    artifacts = build(spec)
+    served = artifacts.spec3_min["paths"]["/v1/prices"]["post"]["requestBody"]["content"][
+        "application/json"
+    ]["schema"]
+    assert set(served["properties"]) == {"name", "on_behalf_of"}
+
+
+def test_a_wired_route_filters_its_query_parameters_to_the_allowlist() -> None:
+    """The query half of §8a: the spec's `parameters` arrive verbatim
+    (`test_clock`-shaped cut filters included) and must be reduced to the
+    enforced set — the body's names, the path placeholders, and the central
+    parameters the operation actually accepts."""
+    from stripeapi.dispatch.params import ParamSpec
+    from stripeapi.resources.customers import SPEC
+
+    spec = synthetic_spec()
+    spec["paths"]["/v1/prices/{id}"] = {
+        "get": {
+            "operationId": "GetPricesId",
+            "parameters": [
+                {"in": "path", "name": "id", "required": True, "schema": {"type": "string"}},
+                {"in": "query", "name": "email", "schema": {"type": "string"}},
+                {"in": "query", "name": "test_clock", "schema": {"type": "string"}},
+                {"in": "query", "name": "expand", "schema": {"type": "array"}},
+                {"in": "query", "name": "limit", "schema": {"type": "integer"}},
+                {"in": "query", "name": "starting_after", "schema": {"type": "string"}},
+                {"in": "query", "name": "ending_before", "schema": {"type": "string"}},
+            ],
+            "responses": {},
+        }
+    }
+    wired_get = Route(
+        method="GET",
+        pattern="/v1/prices/{id}",
+        op_id="GetPricesId",
+        params=ParamSpec(op_id="GetPricesId", path=("id",), paginated=True),
+        resource=SPEC,
+        action="list",
+    )
+
+    unwired_post = Route(method="POST", pattern="/v1/prices", op_id="PostPrices")
+    artifacts = build_artifacts(spec, (wired_get, unwired_post), EVENTS)
+
+    served = artifacts.spec3_min["paths"]["/v1/prices/{id}"]["get"]["parameters"]
+    assert [(p["in"], p["name"]) for p in served] == [
+        ("path", "id"),
+        ("query", "email"),
+        ("query", "expand"),
+        ("query", "limit"),
+        ("query", "starting_after"),
+        ("query", "ending_before"),
+    ]
+    # The unwired route keeps everything, path and query alike.
+    served_post = artifacts.spec3_min["paths"]["/v1/prices"]["post"]
+    assert served_post.get("parameters") is None
+
+
+def test_a_stub_delete_drops_expand_from_its_query_parameters() -> None:
+    """One of the nine `expand=False` stub DELETEs: `expand` is rejected, so
+    it must not be documented."""
+    from stripeapi.dispatch.params import ParamSpec
+    from stripeapi.resources.customers import SPEC
+
+    spec = synthetic_spec()
+    spec["paths"]["/v1/prices/{id}"] = {
+        "delete": {
+            "operationId": "DeletePricesId",
+            "parameters": [
+                {"in": "path", "name": "id", "required": True, "schema": {"type": "string"}},
+                {"in": "query", "name": "expand", "schema": {"type": "array"}},
+            ],
+            "responses": {},
+        }
+    }
+    wired = Route(
+        method="DELETE",
+        pattern="/v1/prices/{id}",
+        op_id="DeletePricesId",
+        params=ParamSpec(op_id="DeletePricesId", path=("id",), expand=False),
+        resource=SPEC,
+        action="delete",
+    )
+    artifacts = build_artifacts(spec, (wired,), EVENTS)
+    served = artifacts.spec3_min["paths"]["/v1/prices/{id}"]["delete"]["parameters"]
+    assert [(p["in"], p["name"]) for p in served] == [("path", "id")]
+
+
+def test_central_parameters_are_gated_on_their_param_spec_flags() -> None:
+    """`expand` and `metadata` are documented exactly where the dispatcher
+    accepts them: a wired route with `metadata=False` whose spec body carries
+    `metadata` must have it filtered out (and the mirrored `expand=False`
+    case on the body side likewise) — the §8a hole one parameter over."""
+    from stripeapi.dispatch.params import Param, ParamSpec
+    from stripeapi.resources.customers import SPEC
+
+    spec = synthetic_spec()
+    spec["paths"]["/v1/prices/{id}"] = {
+        "post": {
+            "operationId": "PostPricesId",
+            "parameters": [{"in": "path", "name": "id", "schema": {"type": "string"}}],
+            "requestBody": {
+                "content": {
+                    "application/x-www-form-urlencoded": {
+                        "schema": {
+                            "properties": {
+                                "name": {"type": "string"},
+                                "metadata": {"type": "object"},
+                                "expand": {"type": "array"},
+                            },
+                            "required": ["metadata"],
+                        }
+                    }
+                }
+            },
+            "responses": {},
+        }
+    }
+    wired = Route(
+        method="POST",
+        pattern="/v1/prices/{id}",
+        op_id="PostPricesId",
+        params=ParamSpec(
+            op_id="PostPricesId",
+            path=("id",),
+            body=(Param(name="name", kind="string"),),
+            expand=False,
+            metadata=False,
+        ),
+        resource=SPEC,
+        action="update",
+    )
+    artifacts = build_artifacts(spec, (wired,), EVENTS)
+    served = artifacts.spec3_min["paths"]["/v1/prices/{id}"]["post"]["requestBody"]["content"][
+        "application/x-www-form-urlencoded"
+    ]["schema"]
+    assert set(served["properties"]) == {"name"}
+    assert "required" not in served

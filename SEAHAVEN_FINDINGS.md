@@ -311,3 +311,43 @@ does not point at the fix.
 look for a `[tool.uv.build-backend] module-name` (which a scaffold with this exact layout already
 writes) before giving up — or name `--world` in the `ModuleNotFoundError` message the way
 `_import`'s other branches do.
+
+---
+
+### Entry 8 — `invoke` logs an ERROR-level traceback for every *raised* exception, including ones the world's own middleware catches and renders as ordinary results
+
+**Category**: Design concern (ops noise).
+
+**Date**: 2026-09-19 (Phase 3).
+
+**What we were trying to do.** Serve Stripe errors as return values: `stripe_api_read`/`stripe_api_write` answer `{"status": 404, "body": {"error": …}}` for a missing object, a bad parameter, an unknown cursor — the ordinary, agent-expected outcomes. The world raises `StripeApiError` out of the tool body, the per-call transaction rolls back, and this world's `stripe_envelope` middleware (outside the transaction, per `authoring.md`'s own layering) catches it and renders the envelope.
+
+**What we expected.** An exception a middleware catches and converts into a normal return is not a failure the framework needs to report; at most it is debug-level information about a handled condition.
+
+**What happened.** `vendor/Seahaven/src/seahaven/call.py:162-173` (`invoke`) logs `_log.error("tool %r failed on instance %s", …, exc_info=True)` for **every** exception that is not a `ToolError` — before the middleware chain gets a chance to see it, and with no way for a world to mark an exception class as "expected, handled further out." So in this world every ordinary 400/404 — every typo'd parameter, every retrieve of a missing id, every bad `expand[]` path — writes a full Python traceback at ERROR level to the log, interleaved with real failures, for the whole length of an eval rollout. The failure mode `components/dispatcher.md` §3.8 attributes only to a *leaked* Stripe error ("would fill the log with tracebacks for ordinary card declines") in fact applies to every caught-and-rendered one too, because the log line fires at raise time, not at escape time.
+
+**Minimal reproduction.** Any world whose middleware catches an exception subclass raised by its tools and returns a value:
+
+```python
+class Expected(Exception): ...
+
+
+@world.middleware
+def catcher(ctx, call, next_):
+    try:
+        return next_(ctx, call)
+    except Expected:
+        return {"handled": True}
+
+
+@world.tool
+def raising(ctx) -> dict:
+    """Raises an exception the chain handles."""
+    raise Expected()
+```
+
+`inst.call("raising")` returns `{"handled": True}`, and the log carries `tool 'raising' failed on instance …` at ERROR with a full traceback.
+
+**Why it is a finding rather than our bug to fix.** The alternatives in world code are all worse: catching inside the tool (commits the partial writes the raise was supposed to discard — the exact hazard the boundary design exists to avoid), or demoting the log level from world code (world code cannot; the handler is `invoke`'s). What is wanted is small and framework-shaped: either a documented "expected exception" marker a middleware-handled class can carry (`invoke` skips or demotes the log for it), or the log moved to the chain's outer boundary so a middleware that converts an exception into a result also converts the log line. Until then this is a declared ops note for anyone running long rollouts against this world: ERROR-level entries with Stripe envelopes in the transcript are noise by construction, and the filter is "did the call return or raise."
+
+**Where the code points at it.** `src/stripeapi/middleware/stripe_envelope.py`'s `except StripeApiError` branch carries a comment referencing this entry.

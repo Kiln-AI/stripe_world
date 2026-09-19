@@ -6,9 +6,9 @@ real world through `Instance.call`, because a middleware tested with a stub for
 `next_` proves only that a function maps an exception.
 
 A `StripeApiError` is deliberately absent from these cases: it is not the error
-handler's to map. The Stripe-envelope middleware (a later phase) catches it
-outside the per-call transaction and renders `{status, body}`; if it reached
-this handler, that would be the bug.
+handler's to map. The Stripe-envelope middleware catches it outside the
+per-call transaction and renders `{status, body}`; if it reached this handler,
+that would be the bug (`tests/test_stripe_envelope.py` holds those cases).
 """
 
 import logging
