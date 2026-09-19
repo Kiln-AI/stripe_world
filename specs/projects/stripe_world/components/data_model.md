@@ -194,12 +194,19 @@ a rename that lives only in a Python dict is a rename that drifts.
    `parent_subscription_proration_date`, and `invoiceitem.period.{start,end}` /
    `line_item.period.{start,end}` become `period_start` + `period_end` (because proration reads the
    window). Everywhere else a nested object is one JSON column under its own name.
-9. **World-internal columns carry an `x_` prefix and are never serialised.** There are exactly two:
+9. **World-internal columns carry an `x_` prefix and are never serialised.** Two are per-resource:
    `balance_transactions.x_payout` (the grouping that answers
    `GET /v1/balance_transactions?payout=…`, which is not a field on the object) and
    `payment_methods.x_behavior` (the magic-card failure-injection tag from
    [`magic-card-table.md`](../research/stripe-billing-and-payments/test-mode-clocks-and-prior-art/magic-card-table.md)).
-   A test asserts no `x_`-prefixed column appears in any `FieldMap.columns`.
+   The third, `x_seq`, is on every listable table — see rule 10. A test asserts no `x_`-prefixed
+   column appears in any `FieldMap.columns`.
+10. **Every listable table carries `x_seq INTEGER NOT NULL`, the pagination key**, declared
+   immediately after the primary key and covered by a unique `(x_seq DESC)` index. It is assigned on
+   insert from `counters`, one row per table, by `_seq.next_seq(ctx, table)` and by nothing else.
+   `x_seq` replaces `(created DESC, id DESC)` as the list ordering throughout — see §3.12 for why
+   that ordering was wrong and §3.1.1 below for why this column keeps the `x_` prefix despite
+   appearing almost everywhere.
 
 **A field gets a column only if its value can differ between two rows of this world.** Constants get
 no column and are emitted from `FieldMap.constants`. This is what keeps `invoices` at 54 columns
@@ -207,6 +214,49 @@ rather than 78, and it is why `invoice.issuer`, `invoice.automatic_tax` and
 `subscription.automatic_tax` — required, non-nullable, and permanently fixed here — are storage-free
 (§3.7). The rule is also the test: a constant that the world ever needs to vary is a schema change,
 and a schema change regenerates every fixture, so the rule is stated rather than discovered.
+
+#### 3.1.1 Why `x_seq` and not `seq`
+
+Architecture §6.2 names the column `seq`. This design spells it **`x_seq`**, and
+`cross_cutting.md`'s `PageOrder` should reference it by that name — a visible deviation rather than a
+silent one, flagged here because it crosses a component boundary.
+
+The reason is that the `x_` convention is only worth having if it has no exceptions. Its whole value
+is one blanket test (`test_no_x_columns_serialised`) that a reviewer can trust without checking a
+list; the moment one world-internal column is spelled without the prefix, the test needs an
+allow-list and the convention stops meaning anything. `x_seq` is exactly as un-serialisable as
+`x_payout` — it is not a Stripe field, it must never appear in a response, and an agent must never be
+able to filter on it — so it takes the prefix. That it appears on 22 tables rather than one is an
+argument for consistency, not against it.
+
+#### 3.1.2 How `x_seq` is assigned
+
+```python
+# _seq.py
+def next_seq(ctx: seahaven.Ctx, table: str) -> int:
+    """The next pagination key for `table`. The only reader or writer of `counters`.
+    Raises WorldBug if `table` has no counter row (i.e. is not a listable table)."""
+    row = ctx.db.execute(
+        "UPDATE counters SET value = value + 1 WHERE name = ? RETURNING value", (table,)
+    ).fetchone()
+    if row is None:
+        raise WorldBug(f"no counter for table {table!r}")
+    return row[0]
+```
+
+A `counters` table rather than `MAX(x_seq) + 1`. The `MAX` form is tempting — one fewer table, and
+SQLite answers `SELECT MAX(indexed_col)` from a single index seek — but it **reuses a number after a
+delete**, and this world hard-deletes rows (`invoices`, `invoiceitems`, `subscription_items`; §3.3).
+A reused `x_seq` makes a cursor ambiguous: `starting_after` resolves an id to its `x_seq`, and if
+that number now belongs to a different row the page silently skips or repeats. A counter that only
+ever increases cannot do that. The same table then also answers "where does a monotonic sequence
+live", which is the question §3.13 has to answer anyway.
+
+One constraint this pushes onto `fixtures_src/generate.py`, worth stating because nothing else
+enforces it: **the generator must insert rows in the order of its simulated timeline.** `x_seq` order
+is insert order, and an eval that reads `created` off a listed object will see the two disagree if
+the generator writes, say, all customers and then all their subscriptions out of timeline order. The
+fixture invariant test in the plan below checks exactly this.
 
 **Fields ruled `null` by
 [`scope-boundary-edges.md`](../research/stripe-billing-and-payments/api-surface-and-object-graph/scope-boundary-edges.md)
@@ -282,6 +332,7 @@ finalization / issue.
 
 CREATE TABLE customers (
     id                    TEXT PRIMARY KEY,
+    x_seq                 INTEGER NOT NULL,
     created               TEXT NOT NULL,
     deleted               INTEGER NOT NULL DEFAULT 0 CHECK (deleted IN (0, 1)),
     address               TEXT CHECK (address IS NULL OR (json_valid(address) AND json_type(address) = 'object')),
@@ -302,8 +353,11 @@ CREATE TABLE customers (
     tax_exempt            TEXT CHECK (tax_exempt IS NULL OR tax_exempt IN ('exempt', 'none', 'reverse'))
 ) STRICT;
 
-CREATE INDEX customers_by_created ON customers (created DESC, id DESC);
-CREATE INDEX customers_by_email   ON customers (email, created DESC, id DESC);
+CREATE UNIQUE INDEX customers_by_seq ON customers (x_seq DESC);
+-- invoice.number is {invoice_prefix}-{next_invoice_sequence:04d}; the prefix is what makes
+-- two customers' `-0001` invoices distinct, so it is unique. See §3.13.
+CREATE UNIQUE INDEX customers_invoice_prefix ON customers (invoice_prefix);
+CREATE INDEX customers_by_email   ON customers (email, x_seq DESC);
 
 -- products.default_price and prices.product are mutually referential. Both are
 -- declared; the create path writes the product with default_price NULL, then the
@@ -312,6 +366,7 @@ CREATE INDEX customers_by_email   ON customers (email, created DESC, id DESC);
 -- without also changing the connection's pragmas, which world code may not do).
 CREATE TABLE products (
     id                   TEXT PRIMARY KEY,
+    x_seq                INTEGER NOT NULL,
     created              TEXT NOT NULL,
     updated              TEXT NOT NULL,
     deleted              INTEGER NOT NULL DEFAULT 0 CHECK (deleted IN (0, 1)),
@@ -330,11 +385,12 @@ CREATE TABLE products (
     url                  TEXT
 ) STRICT;
 
-CREATE INDEX products_by_created ON products (created DESC, id DESC);
-CREATE INDEX products_by_active  ON products (active, created DESC, id DESC);
+CREATE UNIQUE INDEX products_by_seq ON products (x_seq DESC);
+CREATE INDEX products_by_active  ON products (active, x_seq DESC);
 
 CREATE TABLE prices (
     id                  TEXT PRIMARY KEY,
+    x_seq               INTEGER NOT NULL,
     created             TEXT NOT NULL,
     active              INTEGER NOT NULL CHECK (active IN (0, 1)),
     billing_scheme      TEXT NOT NULL CHECK (billing_scheme IN ('per_unit', 'tiered')),
@@ -356,9 +412,9 @@ CREATE TABLE prices (
     CHECK ((type = 'recurring') = (recurring IS NOT NULL))
 ) STRICT;
 
-CREATE INDEX prices_by_created ON prices (created DESC, id DESC);
-CREATE INDEX prices_by_product ON prices (product, created DESC, id DESC);
-CREATE INDEX prices_by_active  ON prices (active, created DESC, id DESC);
+CREATE UNIQUE INDEX prices_by_seq ON prices (x_seq DESC);
+CREATE INDEX prices_by_product ON prices (product, x_seq DESC);
+CREATE INDEX prices_by_active  ON prices (active, x_seq DESC);
 -- Stripe enforces lookup_key uniqueness among live prices only; transferring a key
 -- archives the old price. A partial unique index says exactly that, and a partial
 -- index is legal here because its predicate reads no clock.
@@ -366,6 +422,7 @@ CREATE UNIQUE INDEX prices_lookup_key ON prices (lookup_key) WHERE lookup_key IS
 
 CREATE TABLE coupons (
     id                 TEXT PRIMARY KEY,
+    x_seq              INTEGER NOT NULL,
     created            TEXT NOT NULL,
     deleted            INTEGER NOT NULL DEFAULT 0 CHECK (deleted IN (0, 1)),
     amount_off         INTEGER,
@@ -386,7 +443,7 @@ CREATE TABLE coupons (
     CHECK ((duration = 'repeating') = (duration_in_months IS NOT NULL))
 ) STRICT;
 
-CREATE INDEX coupons_by_created ON coupons (created DESC, id DESC);
+CREATE UNIQUE INDEX coupons_by_seq ON coupons (x_seq DESC);
 
 -- `valid` is computed by Stripe from redeem_by vs now and times_redeemed vs
 -- max_redemptions. It is a stored column rather than a generated one because the
@@ -396,6 +453,7 @@ CREATE INDEX coupons_by_created ON coupons (created DESC, id DESC);
 
 CREATE TABLE promotion_codes (
     id              TEXT PRIMARY KEY,
+    x_seq           INTEGER NOT NULL,
     created         TEXT NOT NULL,
     active          INTEGER NOT NULL CHECK (active IN (0, 1)),
     code            TEXT NOT NULL,
@@ -408,13 +466,14 @@ CREATE TABLE promotion_codes (
     times_redeemed  INTEGER NOT NULL DEFAULT 0
 ) STRICT;
 
-CREATE INDEX promotion_codes_by_created  ON promotion_codes (created DESC, id DESC);
-CREATE INDEX promotion_codes_by_code     ON promotion_codes (code, created DESC, id DESC);
-CREATE INDEX promotion_codes_by_coupon   ON promotion_codes (coupon, created DESC, id DESC);
-CREATE INDEX promotion_codes_by_customer ON promotion_codes (customer, created DESC, id DESC);
+CREATE UNIQUE INDEX promotion_codes_by_seq  ON promotion_codes (x_seq DESC);
+CREATE INDEX promotion_codes_by_code     ON promotion_codes (code, x_seq DESC);
+CREATE INDEX promotion_codes_by_coupon   ON promotion_codes (coupon, x_seq DESC);
+CREATE INDEX promotion_codes_by_customer ON promotion_codes (customer, x_seq DESC);
 
 CREATE TABLE tax_rates (
     id                   TEXT PRIMARY KEY,
+    x_seq                INTEGER NOT NULL,
     created              TEXT NOT NULL,
     active               INTEGER NOT NULL CHECK (active IN (0, 1)),
     country              TEXT,
@@ -436,8 +495,8 @@ CREATE TABLE tax_rates (
                               'retail_delivery_fee', 'rst', 'sales_tax', 'service_tax', 'vat'))
 ) STRICT;
 
-CREATE INDEX tax_rates_by_created ON tax_rates (created DESC, id DESC);
-CREATE INDEX tax_rates_by_active  ON tax_rates (active, created DESC, id DESC);
+CREATE UNIQUE INDEX tax_rates_by_seq ON tax_rates (x_seq DESC);
+CREATE INDEX tax_rates_by_active  ON tax_rates (active, x_seq DESC);
 ```
 
 **`deleted` tombstones.** Three tables carry one: `customers`, `products`, `coupons`. They are the
@@ -455,6 +514,7 @@ and `subscription_items`. `DELETE /v1/subscriptions/{id}` is a cancel, not a del
 ```sql
 CREATE TABLE payment_methods (
     id              TEXT PRIMARY KEY,
+    x_seq           INTEGER NOT NULL,
     created         TEXT NOT NULL,
     type            TEXT NOT NULL CHECK (type IN (
         'acss_debit','affirm','afterpay_clearpay','alipay','alma','amazon_pay','au_becs_debit',
@@ -476,12 +536,13 @@ CREATE TABLE payment_methods (
     x_behavior      TEXT
 ) STRICT;
 
-CREATE INDEX payment_methods_by_created  ON payment_methods (created DESC, id DESC);
-CREATE INDEX payment_methods_by_customer ON payment_methods (customer, created DESC, id DESC);
-CREATE INDEX payment_methods_by_type     ON payment_methods (type, created DESC, id DESC);
+CREATE UNIQUE INDEX payment_methods_by_seq  ON payment_methods (x_seq DESC);
+CREATE INDEX payment_methods_by_customer ON payment_methods (customer, x_seq DESC);
+CREATE INDEX payment_methods_by_type     ON payment_methods (type, x_seq DESC);
 
 CREATE TABLE payment_intents (
     id                          TEXT PRIMARY KEY,
+    x_seq                       INTEGER NOT NULL,
     created                     TEXT NOT NULL,
     amount                      INTEGER NOT NULL,
     amount_capturable           INTEGER NOT NULL DEFAULT 0,
@@ -514,11 +575,12 @@ CREATE TABLE payment_intents (
                                      'requires_confirmation','requires_payment_method','succeeded'))
 ) STRICT;
 
-CREATE INDEX payment_intents_by_created  ON payment_intents (created DESC, id DESC);
-CREATE INDEX payment_intents_by_customer ON payment_intents (customer, created DESC, id DESC);
+CREATE UNIQUE INDEX payment_intents_by_seq  ON payment_intents (x_seq DESC);
+CREATE INDEX payment_intents_by_customer ON payment_intents (customer, x_seq DESC);
 
 CREATE TABLE charges (
     id                             TEXT PRIMARY KEY,
+    x_seq                          INTEGER NOT NULL,
     created                        TEXT NOT NULL,
     amount                         INTEGER NOT NULL,
     amount_captured                INTEGER NOT NULL DEFAULT 0,
@@ -552,12 +614,13 @@ CREATE TABLE charges (
     CHECK (amount_refunded <= amount_captured)
 ) STRICT;
 
-CREATE INDEX charges_by_created        ON charges (created DESC, id DESC);
-CREATE INDEX charges_by_customer       ON charges (customer, created DESC, id DESC);
-CREATE INDEX charges_by_payment_intent ON charges (payment_intent, created DESC, id DESC);
+CREATE UNIQUE INDEX charges_by_seq        ON charges (x_seq DESC);
+CREATE INDEX charges_by_customer       ON charges (customer, x_seq DESC);
+CREATE INDEX charges_by_payment_intent ON charges (payment_intent, x_seq DESC);
 
 CREATE TABLE refunds (
     id                          TEXT PRIMARY KEY,
+    x_seq                       INTEGER NOT NULL,
     created                     TEXT NOT NULL,
     amount                      INTEGER NOT NULL,
     balance_transaction         TEXT REFERENCES balance_transactions (id),
@@ -581,12 +644,13 @@ CREATE TABLE refunds (
                                     ('pending', 'requires_action', 'succeeded', 'failed', 'canceled'))
 ) STRICT;
 
-CREATE INDEX refunds_by_created        ON refunds (created DESC, id DESC);
-CREATE INDEX refunds_by_charge         ON refunds (charge, created DESC, id DESC);
-CREATE INDEX refunds_by_payment_intent ON refunds (payment_intent, created DESC, id DESC);
+CREATE UNIQUE INDEX refunds_by_seq        ON refunds (x_seq DESC);
+CREATE INDEX refunds_by_charge         ON refunds (charge, x_seq DESC);
+CREATE INDEX refunds_by_payment_intent ON refunds (payment_intent, x_seq DESC);
 
 CREATE TABLE disputes (
     id                         TEXT PRIMARY KEY,
+    x_seq                      INTEGER NOT NULL,
     created                    TEXT NOT NULL,
     amount                     INTEGER NOT NULL,
     charge                     TEXT NOT NULL REFERENCES charges (id),
@@ -610,9 +674,9 @@ CREATE TABLE disputes (
                                     'warning_needs_response','warning_under_review','won'))
 ) STRICT;
 
-CREATE INDEX disputes_by_created        ON disputes (created DESC, id DESC);
-CREATE INDEX disputes_by_charge         ON disputes (charge, created DESC, id DESC);
-CREATE INDEX disputes_by_payment_intent ON disputes (payment_intent, created DESC, id DESC);
+CREATE UNIQUE INDEX disputes_by_seq        ON disputes (x_seq DESC);
+CREATE INDEX disputes_by_charge         ON disputes (charge, x_seq DESC);
+CREATE INDEX disputes_by_payment_intent ON disputes (payment_intent, x_seq DESC);
 
 -- dispute.balance_transactions is `array<ref:balance_transaction>` — always full
 -- objects, never ids. It is NOT a column: the serializer reads
@@ -622,6 +686,7 @@ CREATE INDEX disputes_by_payment_intent ON disputes (payment_intent, created DES
 
 CREATE TABLE setup_intents (
     id                     TEXT PRIMARY KEY,
+    x_seq                  INTEGER NOT NULL,
     created                TEXT NOT NULL,
     attach_to_self         INTEGER NOT NULL DEFAULT 0 CHECK (attach_to_self IN (0, 1)),
     automatic_payment_methods TEXT CHECK (automatic_payment_methods IS NULL OR (json_valid(automatic_payment_methods) AND json_type(automatic_payment_methods) = 'object')),
@@ -646,12 +711,13 @@ CREATE TABLE setup_intents (
     usage                  TEXT NOT NULL DEFAULT 'off_session' CHECK (usage IN ('on_session', 'off_session'))
 ) STRICT;
 
-CREATE INDEX setup_intents_by_created        ON setup_intents (created DESC, id DESC);
-CREATE INDEX setup_intents_by_customer       ON setup_intents (customer, created DESC, id DESC);
-CREATE INDEX setup_intents_by_payment_method ON setup_intents (payment_method, created DESC, id DESC);
+CREATE UNIQUE INDEX setup_intents_by_seq        ON setup_intents (x_seq DESC);
+CREATE INDEX setup_intents_by_customer       ON setup_intents (customer, x_seq DESC);
+CREATE INDEX setup_intents_by_payment_method ON setup_intents (payment_method, x_seq DESC);
 
 CREATE TABLE balance_transactions (
     id                 TEXT PRIMARY KEY,
+    x_seq              INTEGER NOT NULL,
     created            TEXT NOT NULL,
     amount             INTEGER NOT NULL,
     available_on       TEXT NOT NULL,
@@ -689,15 +755,16 @@ CREATE TABLE balance_transactions (
     CHECK (net = amount - fee)
 ) STRICT;
 
-CREATE INDEX balance_transactions_by_created      ON balance_transactions (created DESC, id DESC);
-CREATE INDEX balance_transactions_by_type         ON balance_transactions (type, created DESC, id DESC);
-CREATE INDEX balance_transactions_by_source       ON balance_transactions (source, created DESC, id DESC);
-CREATE INDEX balance_transactions_by_payout       ON balance_transactions (x_payout, created DESC, id DESC);
+CREATE UNIQUE INDEX balance_transactions_by_seq      ON balance_transactions (x_seq DESC);
+CREATE INDEX balance_transactions_by_type         ON balance_transactions (type, x_seq DESC);
+CREATE INDEX balance_transactions_by_source       ON balance_transactions (source, x_seq DESC);
+CREATE INDEX balance_transactions_by_payout       ON balance_transactions (x_payout, x_seq DESC);
 -- the available/pending split in §6.4 of the architecture is a scan of this index
 CREATE INDEX balance_transactions_by_available_on ON balance_transactions (available_on, currency);
 
 CREATE TABLE payouts (
     id                          TEXT PRIMARY KEY,
+    x_seq                       INTEGER NOT NULL,
     created                     TEXT NOT NULL,
     amount                      INTEGER NOT NULL,
     arrival_date                TEXT NOT NULL,
@@ -724,9 +791,8 @@ CREATE TABLE payouts (
     type                        TEXT NOT NULL CHECK (type IN ('bank_account', 'card'))
 ) STRICT;
 
-CREATE INDEX payouts_by_created      ON payouts (created DESC, id DESC);
-CREATE INDEX payouts_by_status       ON payouts (status, created DESC, id DESC);
-CREATE INDEX payouts_by_arrival_date ON payouts (arrival_date DESC, id DESC);
+CREATE UNIQUE INDEX payouts_by_seq      ON payouts (x_seq DESC);
+CREATE INDEX payouts_by_status       ON payouts (status, x_seq DESC);
 ```
 
 `balance_transactions` ↔ `payouts` and `charges` ↔ `payment_intents` are both mutually referential,
@@ -738,6 +804,7 @@ and in both cases every crossing column is nullable, so the write order (child f
 ```sql
 CREATE TABLE subscriptions (
     id                          TEXT PRIMARY KEY,
+    x_seq                       INTEGER NOT NULL,
     created                     TEXT NOT NULL,
     billing_cycle_anchor        TEXT NOT NULL,
     billing_cycle_anchor_config TEXT CHECK (billing_cycle_anchor_config IS NULL OR (json_valid(billing_cycle_anchor_config) AND json_type(billing_cycle_anchor_config) = 'object')),
@@ -779,9 +846,9 @@ CREATE TABLE subscriptions (
     CHECK (days_until_due IS NULL OR collection_method = 'send_invoice')
 ) STRICT;
 
-CREATE INDEX subscriptions_by_created  ON subscriptions (created DESC, id DESC);
-CREATE INDEX subscriptions_by_customer ON subscriptions (customer, created DESC, id DESC);
-CREATE INDEX subscriptions_by_status   ON subscriptions (status, created DESC, id DESC);
+CREATE UNIQUE INDEX subscriptions_by_seq  ON subscriptions (x_seq DESC);
+CREATE INDEX subscriptions_by_customer ON subscriptions (customer, x_seq DESC);
+CREATE INDEX subscriptions_by_status   ON subscriptions (status, x_seq DESC);
 CREATE INDEX subscriptions_by_schedule ON subscriptions (schedule);
 
 -- NOTE: there is no current_period_start/current_period_end on `subscription` at
@@ -790,6 +857,7 @@ CREATE INDEX subscriptions_by_schedule ON subscriptions (schedule);
 
 CREATE TABLE subscription_items (
     id                   TEXT PRIMARY KEY,
+    x_seq                INTEGER NOT NULL,
     created              TEXT NOT NULL,
     billed_until         TEXT,
     billing_thresholds   TEXT CHECK (billing_thresholds IS NULL OR (json_valid(billing_thresholds) AND json_type(billing_thresholds) = 'object')),
@@ -806,11 +874,13 @@ CREATE TABLE subscription_items (
 
 -- `subscription` is a REQUIRED query parameter on GET /v1/subscription_items, so this
 -- index is the whole list path. `price` serves GET /v1/subscriptions?price=… .
-CREATE INDEX subscription_items_by_subscription ON subscription_items (subscription, created DESC, id DESC);
+CREATE UNIQUE INDEX subscription_items_by_seq   ON subscription_items (x_seq DESC);
+CREATE INDEX subscription_items_by_subscription ON subscription_items (subscription, x_seq DESC);
 CREATE INDEX subscription_items_by_price        ON subscription_items (price, subscription);
 
 CREATE TABLE subscription_schedules (
     id                    TEXT PRIMARY KEY,
+    x_seq                 INTEGER NOT NULL,
     created               TEXT NOT NULL,
     billing_mode          TEXT NOT NULL DEFAULT 'classic' CHECK (billing_mode IN ('classic', 'flexible')),
     canceled_at           TEXT,
@@ -827,8 +897,8 @@ CREATE TABLE subscription_schedules (
     subscription          TEXT REFERENCES subscriptions (id)
 ) STRICT;
 
-CREATE INDEX subscription_schedules_by_created      ON subscription_schedules (created DESC, id DESC);
-CREATE INDEX subscription_schedules_by_customer     ON subscription_schedules (customer, created DESC, id DESC);
+CREATE UNIQUE INDEX subscription_schedules_by_seq      ON subscription_schedules (x_seq DESC);
+CREATE INDEX subscription_schedules_by_customer     ON subscription_schedules (customer, x_seq DESC);
 CREATE INDEX subscription_schedules_by_subscription ON subscription_schedules (subscription);
 
 -- `phases` is the scoped-down array functional spec §3.2 calls for: each element carries
@@ -838,6 +908,7 @@ CREATE INDEX subscription_schedules_by_subscription ON subscription_schedules (s
 
 CREATE TABLE invoices (
     id                               TEXT PRIMARY KEY,
+    x_seq                            INTEGER NOT NULL,
     created                          TEXT NOT NULL,
     amount_due                       INTEGER NOT NULL DEFAULT 0,
     amount_overpaid                  INTEGER NOT NULL DEFAULT 0,
@@ -901,12 +972,11 @@ CREATE TABLE invoices (
     CHECK (number IS NOT NULL OR status = 'draft')
 ) STRICT;
 
-CREATE INDEX invoices_by_created           ON invoices (created DESC, id DESC);
-CREATE INDEX invoices_by_customer          ON invoices (customer, created DESC, id DESC);
-CREATE INDEX invoices_by_status            ON invoices (status, created DESC, id DESC);
-CREATE INDEX invoices_by_subscription      ON invoices (parent_subscription, created DESC, id DESC);
-CREATE INDEX invoices_by_collection_method ON invoices (collection_method, created DESC, id DESC);
-CREATE INDEX invoices_by_due_date          ON invoices (due_date DESC, id DESC);
+CREATE UNIQUE INDEX invoices_by_seq           ON invoices (x_seq DESC);
+CREATE INDEX invoices_by_customer          ON invoices (customer, x_seq DESC);
+CREATE INDEX invoices_by_status            ON invoices (status, x_seq DESC);
+CREATE INDEX invoices_by_subscription      ON invoices (parent_subscription, x_seq DESC);
+CREATE INDEX invoices_by_collection_method ON invoices (collection_method, x_seq DESC);
 
 -- No top-level `subscription` column and no `days_until_due`: neither field exists on
 -- `invoice` at 2026-08-26.dahlia. Functional spec §4 is right and the widely-documented
@@ -914,6 +984,7 @@ CREATE INDEX invoices_by_due_date          ON invoices (due_date DESC, id DESC);
 
 CREATE TABLE invoiceitems (
     id               TEXT PRIMARY KEY,
+    x_seq            INTEGER NOT NULL,
     -- `invoiceitem` has NO `created` field; its creation timestamp is `date`. See §3.11.
     date             TEXT NOT NULL,
     amount           INTEGER NOT NULL,
@@ -937,14 +1008,15 @@ CREATE TABLE invoiceitems (
     tax_rates        TEXT CHECK (tax_rates IS NULL OR (json_valid(tax_rates) AND json_type(tax_rates) = 'array'))
 ) STRICT;
 
-CREATE INDEX invoiceitems_by_date     ON invoiceitems (date DESC, id DESC);
-CREATE INDEX invoiceitems_by_customer ON invoiceitems (customer, date DESC, id DESC);
-CREATE INDEX invoiceitems_by_invoice  ON invoiceitems (invoice, date DESC, id DESC);
+CREATE UNIQUE INDEX invoiceitems_by_seq     ON invoiceitems (x_seq DESC);
+CREATE INDEX invoiceitems_by_customer ON invoiceitems (customer, x_seq DESC);
+CREATE INDEX invoiceitems_by_invoice  ON invoiceitems (invoice, x_seq DESC);
 -- GET /v1/invoiceitems?pending=true is exactly "not yet swept onto an invoice"
-CREATE INDEX invoiceitems_pending     ON invoiceitems (date DESC, id DESC) WHERE invoice IS NULL;
+CREATE INDEX invoiceitems_pending     ON invoiceitems (x_seq DESC) WHERE invoice IS NULL;
 
 CREATE TABLE credit_notes (
     id                           TEXT PRIMARY KEY,
+    x_seq                        INTEGER NOT NULL,
     created                      TEXT NOT NULL,
     amount                       INTEGER NOT NULL,
     amount_shipping              INTEGER NOT NULL DEFAULT 0,
@@ -978,12 +1050,13 @@ CREATE TABLE credit_notes (
     CHECK (amount = pre_payment_amount + post_payment_amount)
 ) STRICT;
 
-CREATE INDEX credit_notes_by_created  ON credit_notes (created DESC, id DESC);
-CREATE INDEX credit_notes_by_customer ON credit_notes (customer, created DESC, id DESC);
-CREATE INDEX credit_notes_by_invoice  ON credit_notes (invoice, created DESC, id DESC);
+CREATE UNIQUE INDEX credit_notes_by_seq  ON credit_notes (x_seq DESC);
+CREATE INDEX credit_notes_by_customer ON credit_notes (customer, x_seq DESC);
+CREATE INDEX credit_notes_by_invoice  ON credit_notes (invoice, x_seq DESC);
 
 CREATE TABLE customer_balance_transactions (
     id             TEXT PRIMARY KEY,
+    x_seq          INTEGER NOT NULL,
     created        TEXT NOT NULL,
     amount         INTEGER NOT NULL,
     credit_note    TEXT REFERENCES credit_notes (id),
@@ -1001,8 +1074,9 @@ CREATE TABLE customer_balance_transactions (
 ) STRICT;
 
 -- There is no top-level list path; the only list is scoped to one customer.
-CREATE INDEX cbt_by_customer    ON customer_balance_transactions (customer, created DESC, id DESC);
-CREATE INDEX cbt_by_invoice     ON customer_balance_transactions (invoice, created DESC, id DESC);
+CREATE UNIQUE INDEX cbt_by_seq  ON customer_balance_transactions (x_seq DESC);
+CREATE INDEX cbt_by_customer    ON customer_balance_transactions (customer, x_seq DESC);
+CREATE INDEX cbt_by_invoice     ON customer_balance_transactions (invoice, x_seq DESC);
 CREATE INDEX cbt_by_credit_note ON customer_balance_transactions (credit_note);
 ```
 
@@ -1014,6 +1088,7 @@ third mutually-referential pair; both nullable, same two-step write.
 
 CREATE TABLE events (
     id                      TEXT PRIMARY KEY,
+    x_seq                   INTEGER NOT NULL,
     created                 TEXT NOT NULL,
     api_version             TEXT NOT NULL DEFAULT '2026-08-26.dahlia',
     -- {"object": <the full API object as of the change>, "previous_attributes": {...}?}
@@ -1024,8 +1099,8 @@ CREATE TABLE events (
     type                    TEXT NOT NULL
 ) STRICT;
 
-CREATE INDEX events_by_created ON events (created DESC, id DESC);
-CREATE INDEX events_by_type    ON events (type, created DESC, id DESC);
+CREATE UNIQUE INDEX events_by_seq ON events (x_seq DESC);
+CREATE INDEX events_by_type    ON events (type, x_seq DESC);
 
 -- `type` carries NO CHECK. The closed set is 266 values and is not derivable from
 -- spec3.json at all (event.type is a bare string by design); it lives in
@@ -1045,12 +1120,38 @@ CREATE TABLE idempotency_keys (
     response     TEXT NOT NULL CHECK (json_valid(response) AND json_type(response) = 'object'),
     PRIMARY KEY (key, method, path)
 ) STRICT;
+
+-- The only mutable counter in the world: one row per listable table for `x_seq`
+-- (§3.1 rule 10). `value` is the last number handed out, so the first row of any
+-- table gets 1. Seeding static reference rows from a schema file is explicitly
+-- allowed (capability-map §Schema) and these INSERTs read no clock.
+--
+-- invoice.number does NOT draw from here: its sequence is per-customer and lives on
+-- customers.next_invoice_sequence, which is a real Stripe field. See §3.13.
+CREATE TABLE counters (
+    name  TEXT PRIMARY KEY,
+    value INTEGER NOT NULL DEFAULT 0 CHECK (value >= 0)
+) STRICT;
+
+INSERT INTO counters (name, value) VALUES
+    ('customers', 0), ('products', 0), ('prices', 0), ('coupons', 0),
+    ('promotion_codes', 0), ('tax_rates', 0), ('payment_methods', 0),
+    ('payment_intents', 0), ('charges', 0), ('refunds', 0), ('disputes', 0),
+    ('setup_intents', 0), ('balance_transactions', 0), ('payouts', 0),
+    ('subscriptions', 0), ('subscription_items', 0), ('subscription_schedules', 0),
+    ('invoices', 0), ('invoiceitems', 0), ('credit_notes', 0),
+    ('customer_balance_transactions', 0), ('events', 0);
 ```
 
-`idempotency_keys` goes in `World(untracked_tables=("idempotency_keys",))` (architecture §6.1). It
-still needs the explicit primary key: capability-map records that a table without one is refused at
-instance creation (`SH102`) whether it is tracked or not. Keys never expire — the clock is frozen —
-which is an allow-list entry, not a column.
+`idempotency_keys` and `counters` both go in
+`World(untracked_tables=("idempotency_keys", "counters"))`. `idempotency_keys` is infrastructure
+(architecture §6.1); `counters` must join it for the same reason and a sharper one — **every insert
+bumps a counter, so a tracked `counters` would put a bookkeeping row into the change log of every
+graded episode**, and the idempotency eval's "a replay writes nothing" property would be false for a
+reason that has nothing to do with idempotency. Both still need their explicit primary key:
+capability-map records that a table without one is refused at instance creation (`SH102`) whether it
+is tracked or not. Keys never expire — the clock is frozen — which is an allow-list entry, not a
+column.
 
 `GET /v1/events?delivery_success=` takes no column: there is no delivery, so the filter matches
 everything (`true`) or nothing (`false`), decided in the handler and declared in the allow-list.

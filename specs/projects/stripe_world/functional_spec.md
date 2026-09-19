@@ -233,11 +233,21 @@ These apply to every routed resource and are the substance of "faithful".
   field. Four in-scope objects do not carry `livemode` at this API version — `balance_transaction`,
   `refund`, `subscription_item` and `discount` — and emitting it on those four fails schema
   conformance.
-- **Nullability and enums follow `spec3.json`.** Including the trap the research found: `dispute.reason`,
-  `payout.status`, `payout.method`, `payout.source_type`, `refund.status`,
-  `balance_transaction.status` and `setup_intent.usage` — **seven fields** — are typed as bare
-  `string` with no `enum` key, but have closed value sets recoverable only from the description
-  prose. Verified directly against the spec. The conformance harness must check those against the extracted
+- **Nullability and enums follow `spec3.json`.** Including the trap the research found: **seven
+  fields** are typed as bare `string` with no `enum` key, yet have closed value sets. Verified
+  directly against the spec, and they are not all the same strength of evidence:
+
+  - **Six state an exhaustive list in prose** — `dispute.reason`, `payout.status`, `payout.method`,
+    `payout.source_type`, `refund.status`, `balance_transaction.status`. Their descriptions read
+    "Possible values are …" or "This can be …", so the closed set is recoverable verbatim.
+  - **One, `setup_intent.usage`, names its two values (`on_session`, `off_session`) without phrasing
+    them as exhaustive.** The validator treats it as closed; that reading is ours, and it is declared
+    in the conformance allow-list rather than presented as documented fact.
+
+  Sibling fields such as `charge.status` and `payout.type` *do* carry `enum`, so this is a per-field
+  trap rather than a whole-object one. The data model found four more of the same kind on data stored
+  inside JSON columns — `charge_outcome.type`, `fee.type`, `payment_method_card.brand`,
+  `payment_method_card.funding` — checkable by the validator but not by DDL. The conformance harness must check those against the extracted
   sets, not against the schema's (absent) `enum`.
 - **Schema drift is respected, not "corrected".** At `2026-08-26.dahlia` there is no top-level
   `invoice.subscription` (it is `invoice.parent.subscription_details.subscription`) and no top-level

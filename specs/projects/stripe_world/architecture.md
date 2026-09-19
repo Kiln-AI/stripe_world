@@ -273,8 +273,8 @@ discovery index and the route table have identical key sets.
 `tools_dev/prune_spec.py` generates, and we commit, `src/stripeapi/spec/spec3.min.json`: only routed
 operations, only referenced schemas, with descriptions retained (they are the discovery text and, per
 the research, they carry Stripe's own documentation prose). It also generates `expandable.py`,
-`enums.py` — including the seven fields Stripe types as bare `string` but which have closed sets
-recoverable only from description prose — and `event_types.py` from the committed 266-entry set.
+`enums.py` — including the bare-`string`-but-closed-set fields, whose values are recoverable only
+from description prose — and `event_types.py` from the committed 266-entry set.
 
 Regenerating is a committed command, not a manual step. A test asserts the generated files match what
 the pruner produces from the full spec, so a stale artifact fails CI rather than drifting. The full
@@ -437,7 +437,9 @@ inside the milliseconds constraint with headroom.
   world is, and it is reviewed as a design document.
 
 Separately and more cheaply, **schema conformance** validates every object the world returns against
-`spec3.min.json`, including the seven bare-`string`-but-enumerated fields. It is built first because it
+`spec3.min.json`, including the seven bare-`string`-but-enumerated fields (six documented as
+exhaustive, one — `setup_intent.usage` — read as closed by us and declared), plus four more of the
+same kind inside JSON columns. It is built first because it
 constrains everything after it.
 
 ## 11. Testing strategy
