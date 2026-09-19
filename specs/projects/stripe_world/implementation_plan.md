@@ -37,7 +37,7 @@ A slice is not done until steps 3 and 4 are both green and `seahaven check` is c
       `world.py`, `errors.py`, `stripe_errors.py`, the error-handler middleware, `_ids.py`, `_time.py`,
       `_json.py`, and `empty` fixture. Ends with a green `pytest` and a clean `seahaven check` on a
       world that does nothing.
-- [ ] **Phase 2: The spec pipeline.** `tools_dev/prune_spec.py` and the committed artifacts it
+- [x] **Phase 2: The spec pipeline.** `tools_dev/prune_spec.py` and the committed artifacts it
       generates — `spec3.min.json`, `expandable.py`, `enums.py`, `event_types.py` — plus the drift
       test. Built early because the schema's enum `CHECK`s and every later conformance test read from
       it.

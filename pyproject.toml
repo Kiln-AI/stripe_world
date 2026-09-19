@@ -44,7 +44,7 @@ module-name = "stripeapi"
 
 [tool.ruff]
 line-length = 100
-src = ["src", "tests", "fixtures_src"]
+src = ["src", "tests", "fixtures_src", "tools_dev"]
 # The committed specs and research are point-in-time documents whose Python
 # fragments are prose, not code; `vendor/` has its own configuration; a frozen
 # fixture is a binary artifact.
@@ -54,10 +54,13 @@ extend-exclude = ["specs", "research", "vendor", "fixtures"]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 
 [tool.ty.src]
-include = ["src", "tests", "fixtures_src"]
+include = ["src", "tests", "fixtures_src", "tools_dev"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# The repo root, so tests can import `tools_dev` (the build-time generator,
+# which is not installed) alongside the installed `stripeapi` package.
+pythonpath = ["."]
 # The distribution name (`seahaven-stripe-world`) is deliberately not the world's
 # package name (`stripeapi`), so the plugin's project-name heuristic cannot find
 # the world; `--seahaven-world` is its documented override for exactly this
