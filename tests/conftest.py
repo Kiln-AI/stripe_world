@@ -8,13 +8,14 @@ transaction and the serialiser are wired up. Nothing here calls a tool function
 directly.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any, Literal
 
 import pytest
 import seahaven
 
+from schema_conformance import capture
 from stripeapi.middleware.error_handler import error_handler
 from stripeapi.middleware.stripe_envelope import stripe_envelope
 from stripeapi.world import world
@@ -92,3 +93,26 @@ def dispatch_tool() -> Any:
         return call_stripe(ctx, method, path, params)
 
     return seahaven.Tool.from_function(call, name="call_stripe", description="the dispatcher probe")
+
+
+@pytest.fixture(autouse=True)
+def _schema_conformance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> Iterator[list[capture.CapturedCall]]:
+    """Every dispatcher-tool response body this test produced is validated
+    against the pinned spec after the body runs (components/conformance.md,
+    "Schema conformance"). No test opts in and none can opt out: from Phase 6
+    on, every resource phase's own tests are the corpus.
+
+    Registered here rather than ``tests/schema_conformance/conftest.py`` — a
+    conftest only covers its own subtree, and the resource suites the design
+    means to cover live beside this package. ``Instance.call`` is wrapped
+    rather than the design's ``instance.call_log`` because a ``CallRecord``
+    carries no result (SEAHAVEN_FINDINGS.md Entry 9).
+
+    Tests may take this fixture to assert on what they captured; the
+    validation itself always runs at teardown.
+    """
+    captured = capture.begin(monkeypatch)
+    yield captured
+    capture.check(captured)

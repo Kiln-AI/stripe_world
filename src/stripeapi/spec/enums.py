@@ -3,12 +3,25 @@
 Regenerate with `python -m tools_dev.prune_spec`. The source spec carries the
 MIT licence; see THIRD_PARTY_LICENSES.md.
 
-The six fields whose closed value set exists only in the spec's
-description prose (no machine-readable `enum`), hand-transcribed from
-resource-inventory.md's citations. The schema's CHECK constraints and
-the conformance validator both read this, so the two cannot disagree.
-`setup_intent.usage` is deliberately absent — an open string with a
-documented default, not a closed set (components/discovery.md §5).
+DOC_ONLY_ENUMS: the six fields whose closed value set exists only in
+the spec's description prose (no machine-readable `enum`),
+hand-transcribed from resource-inventory.md's citations. The schema's
+CHECK constraints read this; `setup_intent.usage` is deliberately
+absent there — an open string with a documented default, not a closed
+set (components/discovery.md §5).
+
+ENUM_OVERRIDES: the schema-conformance validator's superset — those
+six plus every further closure field whose description genuinely
+closes its set (components/data_model.md §12's pass-2 enrollment,
+including the copies of one enum under each schema name it takes on
+the wire), plus `setup_intent.usage`, whose closed reading is this
+project's declaration, not Stripe's documentation, and is marked as
+such in DECLARED_OVERRIDES (functional spec §4). The excluded
+candidates and their reasons are recorded in phase_plans/phase_4.md.
+
+Every value token is asserted at generation time to still appear in
+the live description of its field, so a Stripe wording change fails
+regeneration rather than silently dropping a value.
 """
 
 DOC_ONLY_ENUMS: dict[str, dict[str, tuple[str, ...]]] = {
@@ -43,3 +56,191 @@ DOC_ONLY_ENUMS: dict[str, dict[str, tuple[str, ...]]] = {
         "status": ("pending", "requires_action", "succeeded", "failed", "canceled"),
     },
 }
+
+ENUM_OVERRIDES: dict[str, dict[str, tuple[str, ...]]] = {
+    "balance_transaction": {
+        "status": ("available", "pending"),
+    },
+    "charge_fraud_details": {
+        "user_report": ("safe", "fraudulent"),
+    },
+    "charge_outcome": {
+        "network_status": (
+            "approved_by_network",
+            "declined_by_network",
+            "not_sent_to_network",
+            "reversed_after_approval",
+        ),
+        "risk_level": ("normal", "elevated", "highest", "not_assessed", "unknown"),
+        "type": ("authorized", "manual_review", "issuer_declined", "blocked", "invalid"),
+    },
+    "dispute": {
+        "reason": (
+            "bank_cannot_process",
+            "check_returned",
+            "credit_not_processed",
+            "customer_initiated",
+            "debit_not_authorized",
+            "duplicate",
+            "fraudulent",
+            "general",
+            "incorrect_account_details",
+            "insufficient_funds",
+            "noncompliant",
+            "product_not_received",
+            "product_unacceptable",
+            "subscription_canceled",
+            "unrecognized",
+        ),
+    },
+    "dispute_payment_method_details_card": {
+        "brand": (
+            "amex",
+            "cartes_bancaires",
+            "diners",
+            "discover",
+            "eftpos_au",
+            "jcb",
+            "link",
+            "mastercard",
+            "unionpay",
+            "visa",
+            "unknown",
+        ),
+        "network": (
+            "amex",
+            "cartes_bancaires",
+            "diners",
+            "discover",
+            "eftpos_au",
+            "interac",
+            "jcb",
+            "link",
+            "mastercard",
+            "unionpay",
+            "visa",
+            "unknown",
+        ),
+    },
+    "fee": {
+        "type": (
+            "application_fee",
+            "payment_method_passthrough_fee",
+            "stripe_fee",
+            "tax",
+            "withheld_tax",
+        ),
+    },
+    "invoice_payment": {
+        "status": ("open", "paid", "canceled"),
+    },
+    "payment_method_card": {
+        "brand": (
+            "amex",
+            "cartes_bancaires",
+            "diners",
+            "discover",
+            "eftpos_au",
+            "jcb",
+            "link",
+            "mastercard",
+            "unionpay",
+            "visa",
+            "unknown",
+        ),
+        "funding": ("credit", "debit", "prepaid", "unknown"),
+    },
+    "payment_method_card_checks": {
+        "address_line1_check": ("pass", "fail", "unavailable", "unchecked"),
+        "address_postal_code_check": ("pass", "fail", "unavailable", "unchecked"),
+        "cvc_check": ("pass", "fail", "unavailable", "unchecked"),
+    },
+    "payment_method_details_card": {
+        "brand": (
+            "amex",
+            "cartes_bancaires",
+            "diners",
+            "discover",
+            "eftpos_au",
+            "jcb",
+            "link",
+            "mastercard",
+            "unionpay",
+            "visa",
+            "unknown",
+        ),
+        "funding": ("credit", "debit", "prepaid", "unknown"),
+        "network": (
+            "amex",
+            "cartes_bancaires",
+            "diners",
+            "discover",
+            "eftpos_au",
+            "interac",
+            "jcb",
+            "link",
+            "mastercard",
+            "unionpay",
+            "visa",
+            "unknown",
+        ),
+    },
+    "payment_method_details_card_checks": {
+        "address_line1_check": ("pass", "fail", "unavailable", "unchecked"),
+        "address_postal_code_check": ("pass", "fail", "unavailable", "unchecked"),
+        "cvc_check": ("pass", "fail", "unavailable", "unchecked"),
+    },
+    "payout": {
+        "method": ("standard", "instant"),
+        "source_type": ("card", "fpx", "bank_account"),
+        "status": ("paid", "pending", "in_transit", "canceled", "failed"),
+    },
+    "payouts_trace_id": {
+        "status": ("pending", "supported", "unsupported"),
+    },
+    "refund": {
+        "failure_reason": (
+            "lost_or_stolen_card",
+            "expired_or_canceled_card",
+            "charge_for_pending_refund_disputed",
+            "insufficient_funds",
+            "declined",
+            "merchant_request",
+            "unknown",
+        ),
+        "status": ("pending", "requires_action", "succeeded", "failed", "canceled"),
+    },
+    "refund_destination_details_br_bank_transfer": {
+        "reference_status": ("pending", "available", "unavailable"),
+    },
+    "refund_destination_details_card": {
+        "reference_status": ("pending", "available", "unavailable"),
+    },
+    "refund_destination_details_eu_bank_transfer": {
+        "reference_status": ("pending", "available", "unavailable"),
+    },
+    "refund_destination_details_gb_bank_transfer": {
+        "reference_status": ("pending", "available", "unavailable"),
+    },
+    "refund_destination_details_jp_bank_transfer": {
+        "reference_status": ("pending", "available", "unavailable"),
+    },
+    "refund_destination_details_mx_bank_transfer": {
+        "reference_status": ("pending", "available", "unavailable"),
+    },
+    "refund_destination_details_th_bank_transfer": {
+        "reference_status": ("pending", "available", "unavailable"),
+    },
+    "refund_destination_details_us_bank_transfer": {
+        "reference_status": ("pending", "available", "unavailable"),
+    },
+    "setup_intent": {
+        "usage": ("on_session", "off_session"),
+    },
+}
+
+DECLARED_OVERRIDES: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("setup_intent", "usage"),
+    }
+)

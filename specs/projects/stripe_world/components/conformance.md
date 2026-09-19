@@ -517,7 +517,28 @@ architecture §5.2's prose) bare-`string`-but-closed-set fields** are layered on
 pass from the *same generation step* that already extracts them into `enums.py` — `validate_object`
 does not special-case them by name in hand-written code; it consults `ENUM_OVERRIDES`, a generated
 `{object_type: {field_path: frozenset[str]}}` table, and validates against that set wherever it has an
-entry instead of accepting "any string."
+entry instead of accepting "any string." Since Phase 4's review round the table also carries the
+pass-2 enrollment `data_model.md` §12 prescribes — every closure field whose description genuinely
+closes its value set, 36 `(schema, field)` pairs at the pinned version — because the same enum
+appears under several schema names on the wire (`brand`/`funding` exist on the payment-method
+storage shape, the charge's `payment_method_details.card`, and the dispute's copy, and each needs
+its own entry); every value token is asserted at generation time to still appear in the live
+description, and the deliberately excluded fields are recorded with reasons in
+`phase_plans/phase_4.md`.
+
+**A nullability-annotation gap, declared rather than papered over.** The spec's `nullable`
+annotations are incomplete in at least one place the live API contradicts: at the pinned version a
+freshly created customer carries `default_source: null` and
+`invoice_settings.default_payment_method: null`, while `spec3.json` gives both an expandable union
+with no `nullable` key (probed on the sandbox account, Phase 4, 2026-09-19). Strict
+no-declared-differences conformance is therefore unimplementable against this spec, so the validator
+carries exactly one declared exception table, `NULLABLE_DESPITE_SPEC` in
+`tests/schema_conformance/validate.py`: `(schema, field)` pairs the pinned spec types as
+non-nullable that the live API emits `null` for anyway. An entry is added only with probe evidence,
+cited beside it, and the general declaration — Stripe's `nullable` annotations are not authoritative
+where a recording contradicts them — belongs to Phase 5's `allowed_differences.py` review, which
+this handoff names explicitly. This table is the one place schema conformance permits a declared
+difference; every other violation remains excuseless.
 
 **A discrepancy worth flagging while it's in front of me, not silently resolved:** the functional
 spec's own list in §4 —

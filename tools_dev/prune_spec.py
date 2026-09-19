@@ -9,8 +9,13 @@ git-ignored; provenance in ``research/MANIFEST.md``) and the route table
 - ``spec3.min.json.sha256`` — the sha256 of the exact source blob, so CI can
   check provenance without the 8 MB file;
 - ``expandable.py`` — each closure schema's non-empty ``x-expandableFields``;
-- ``enums.py`` — the six hand-transcribed doc-only enum sets;
-- ``event_types.py`` — the committed 266-entry closed set, verbatim.
+- ``enums.py`` — the six hand-transcribed doc-only enum sets, plus the schema
+  conformance validator's ``ENUM_OVERRIDES`` superset (every closure field
+  whose description genuinely closes its set, per data_model.md §12's pass 2);
+- ``event_types.py`` — the committed 266-entry closed set, verbatim;
+- ``schema_rules.json`` — the normalized structural rules ``validate_object``
+  reads: per discriminated object, required fields, types, nullability, enums,
+  closed property sets, keyed by ``object`` discriminator value.
 
 Usage::
 
@@ -211,6 +216,199 @@ DOC_ONLY_ENUMS: dict[str, dict[str, tuple[str, ...]]] = {
         "status": ("pending", "requires_action", "succeeded", "failed", "canceled"),
     },
 }
+
+# The further bare-string fields the schema-conformance validator also
+# treats as closed (components/conformance.md "Schema conformance";
+# components/data_model.md §12, pass 2 applied mechanically over the whole
+# closure): fields whose description prose genuinely closes the set. The
+# same enum often appears under several schema names — `brand`/`funding`
+# exist on the payment-method storage shape, the charge wire shape and the
+# dispute wire shape — and each copy needs its own entry, keyed by the
+# schema the walk is inside. Plus `setup_intent.usage`: two values named in
+# prose without being phrased as an exhaustive set, whose closed reading is
+# this project's declaration (functional spec §4), recorded in
+# DECLARED_OVERRIDES and in Phase 5's conformance allow-list, not presented
+# as documented fact. The DDL keeps discovery.md §5's ruling:
+# `setup_intent.usage` stays an unconstrained column; only the validator
+# closes it. Fields the pass found whose prose does *not* close the set are
+# recorded, with reasons, in phase_plans/phase_4.md.
+# "Status of the reference on the refund. This can be `pending`, `available`
+# or `unavailable`." — one sentence shared verbatim by all eight
+# refund_destination_details_* schemas' reference_status fields.
+_REFERENCE_STATUS: dict[str, tuple[str, ...]] = {
+    "reference_status": ("pending", "available", "unavailable"),
+}
+
+EXTRA_DOC_ONLY_ENUMS: dict[str, dict[str, tuple[str, ...]]] = {
+    "charge_fraud_details": {
+        # "possible values of are `safe` and `fraudulent`"
+        "user_report": ("safe", "fraudulent"),
+    },
+    "charge_outcome": {
+        # data_model.md §12, charge_outcome.type (inside charges.outcome).
+        "type": ("authorized", "manual_review", "issuer_declined", "blocked", "invalid"),
+        # "Possible values are …" — the four network dispositions.
+        "network_status": (
+            "approved_by_network",
+            "declined_by_network",
+            "not_sent_to_network",
+            "reversed_after_approval",
+        ),
+        # Evaluated payments are normal/elevated/highest; non-card and
+        # predating payments are `not_assessed`; evaluation errors are
+        # `unknown` — the three cases cover every payment.
+        "risk_level": ("normal", "elevated", "highest", "not_assessed", "unknown"),
+    },
+    "dispute_payment_method_details_card": {
+        # The dispute wire copy of the card brand set.
+        "brand": (
+            "amex",
+            "cartes_bancaires",
+            "diners",
+            "discover",
+            "eftpos_au",
+            "jcb",
+            "link",
+            "mastercard",
+            "unionpay",
+            "visa",
+            "unknown",
+        ),
+        # "Can be …" — the network set, `interac` included.
+        "network": (
+            "amex",
+            "cartes_bancaires",
+            "diners",
+            "discover",
+            "eftpos_au",
+            "interac",
+            "jcb",
+            "link",
+            "mastercard",
+            "unionpay",
+            "visa",
+            "unknown",
+        ),
+    },
+    "fee": {
+        # data_model.md §12, fee.type (inside balance_transactions.fee_details).
+        "type": (
+            "application_fee",
+            "payment_method_passthrough_fee",
+            "stripe_fee",
+            "tax",
+            "withheld_tax",
+        ),
+    },
+    "invoice_payment": {
+        # "one of `open`, `paid`, or `canceled`"
+        "status": ("open", "paid", "canceled"),
+    },
+    "payment_method_card": {
+        # data_model.md §3.9: the two card-rail sets the magic-card table writes.
+        "brand": (
+            "amex",
+            "cartes_bancaires",
+            "diners",
+            "discover",
+            "eftpos_au",
+            "jcb",
+            "link",
+            "mastercard",
+            "unionpay",
+            "visa",
+            "unknown",
+        ),
+        "funding": ("credit", "debit", "prepaid", "unknown"),
+    },
+    "payment_method_card_checks": {
+        # "one of `pass`, `fail`, `unavailable`, or `unchecked`" — all three
+        # check fields share the sentence.
+        "address_line1_check": ("pass", "fail", "unavailable", "unchecked"),
+        "address_postal_code_check": ("pass", "fail", "unavailable", "unchecked"),
+        "cvc_check": ("pass", "fail", "unavailable", "unchecked"),
+    },
+    "payment_method_details_card": {
+        # The charge wire copy (charge.payment_method_details.card) — the
+        # path Phase 8's magic-card serializer writes brands through.
+        "brand": (
+            "amex",
+            "cartes_bancaires",
+            "diners",
+            "discover",
+            "eftpos_au",
+            "jcb",
+            "link",
+            "mastercard",
+            "unionpay",
+            "visa",
+            "unknown",
+        ),
+        "funding": ("credit", "debit", "prepaid", "unknown"),
+        "network": (
+            "amex",
+            "cartes_bancaires",
+            "diners",
+            "discover",
+            "eftpos_au",
+            "interac",
+            "jcb",
+            "link",
+            "mastercard",
+            "unionpay",
+            "visa",
+            "unknown",
+        ),
+    },
+    "payment_method_details_card_checks": {
+        # The charge wire copy of the checks sets.
+        "address_line1_check": ("pass", "fail", "unavailable", "unchecked"),
+        "address_postal_code_check": ("pass", "fail", "unavailable", "unchecked"),
+        "cvc_check": ("pass", "fail", "unavailable", "unchecked"),
+    },
+    "payouts_trace_id": {
+        # "Possible values are `pending`, `supported`, and `unsupported`"
+        "status": ("pending", "supported", "unsupported"),
+    },
+    "refund": {
+        # "Possible values are: …" (failure_reason is nullable; the override
+        # applies only to non-null strings).
+        "failure_reason": (
+            "lost_or_stolen_card",
+            "expired_or_canceled_card",
+            "charge_for_pending_refund_disputed",
+            "insufficient_funds",
+            "declined",
+            "merchant_request",
+            "unknown",
+        ),
+    },
+    "refund_destination_details_br_bank_transfer": _REFERENCE_STATUS,
+    "refund_destination_details_card": _REFERENCE_STATUS,
+    "refund_destination_details_eu_bank_transfer": _REFERENCE_STATUS,
+    "refund_destination_details_gb_bank_transfer": _REFERENCE_STATUS,
+    "refund_destination_details_jp_bank_transfer": _REFERENCE_STATUS,
+    "refund_destination_details_mx_bank_transfer": _REFERENCE_STATUS,
+    "refund_destination_details_th_bank_transfer": _REFERENCE_STATUS,
+    "refund_destination_details_us_bank_transfer": _REFERENCE_STATUS,
+    "setup_intent": {
+        # The declared reading, not a documented exhaustive set.
+        "usage": ("on_session", "off_session"),
+    },
+}
+
+#: The validator's table: the six `DOC_ONLY_ENUMS` field paths plus every
+#: pass-2 field above. The pair count is pinned by
+#: `test_enum_overrides_are_exactly_the_generated_set`, not by prose here,
+#: so enrolling or removing a field cannot leave this comment stale.
+ENUM_OVERRIDES: dict[str, dict[str, tuple[str, ...]]] = {
+    obj: {**DOC_ONLY_ENUMS.get(obj, {}), **EXTRA_DOC_ONLY_ENUMS.get(obj, {})}
+    for obj in sorted(DOC_ONLY_ENUMS.keys() | EXTRA_DOC_ONLY_ENUMS.keys())
+}
+
+#: The override pairs that are this project's reading rather than Stripe's
+#: documentation, so a reviewer can find every declared assumption in one place.
+DECLARED_OVERRIDES: frozenset[tuple[str, str]] = frozenset({("setup_intent", "usage")})
 
 REF_PATTERN = re.compile(r"#/components/schemas/([A-Za-z0-9_.\-]+)")
 TAG_PATTERN = re.compile(r"<[^>]+>")
@@ -421,14 +619,251 @@ def _harvest_refs(node: Any, out: set[str]) -> None:
             _harvest_refs(item, out)
 
 
-# --- Artifact construction ----------------------------------------------------
+# --- The schema-conformance rule set -----------------------------------------
+
+# Keys a structural rule keeps: everything else in a schema node (description,
+# title, maxLength, format, pattern, x-*) is documentation or input-side
+# constraint, not output shape.
+_RULE_IGNORED_KEYS = frozenset(
+    {
+        "description",
+        "title",
+        "maxLength",
+        "format",
+        "pattern",
+        "x-stripeBypassValidation",
+        "x-resourceId",
+        "x-expandableFields",
+        "x-expansionResources",
+    }
+)
+
+_RULE_ENUM_KINDS = (str, bool)
+
+
+def _normalize_rule(node: Any) -> Any:
+    """One spec schema node as a structural rule the validator can walk.
+
+    Rule shapes (plain JSON data, so the artifact stays canonical-dumpable):
+    ``ref`` (a schema name, resolved against the rules table at validate
+    time), ``any`` (union members — an unexpanded id string and an expanded
+    object both pass), ``t``/``nul``/``enum``, ``items``, ``props``+``req``
+    (a *closed* property set), ``map`` (an open ``additionalProperties`` map
+    such as ``metadata``; ``null`` means "anything goes" — the reading of
+    ``additionalProperties: true``, while ``false`` stays closed and leaves
+    no ``map`` key at all). ``None`` also means "accept anything" — the
+    honest reading of any node shape the normalizer does not recognize.
+    """
+    if not isinstance(node, dict):
+        return None
+    if "$ref" in node:
+        match = REF_PATTERN.fullmatch(node["$ref"])
+        return {"ref": match.group(1)} if match else None
+    if "allOf" in node:
+        msg = "an allOf outside x-expansionResources reached the rule normalizer"
+        raise GenerationError(msg)
+    if "anyOf" in node:
+        members = [
+            member
+            for member in (_normalize_rule(child) for child in node["anyOf"])
+            if member is not None
+        ]
+        union: dict[str, Any] = {"any": members}
+        if node.get("nullable"):
+            union["nul"] = True
+        return union
+    rule: dict[str, Any] = {}
+    if node.get("nullable"):
+        rule["nul"] = True
+    if isinstance(node.get("type"), str):
+        rule["t"] = node["type"]
+    if isinstance(node.get("enum"), list):
+        rule["enum"] = node["enum"]
+    if "items" in node:
+        items = _normalize_rule(node["items"])
+        if items is not None:
+            rule["items"] = items
+    if isinstance(node.get("properties"), dict):
+        rule["props"] = {name: _normalize_rule(child) for name, child in node["properties"].items()}
+        if node.get("required"):
+            rule["req"] = node["required"]
+    if "additionalProperties" in node:
+        extra = node["additionalProperties"]
+        if extra is False:
+            # Closed: the property set alone governs, so no ``map`` key. A
+            # node that names no properties becomes an *empty* closed set —
+            # ``props: {}``, never a bare ``t: object``, which the validator
+            # reads as open under JSON Schema semantics.
+            rule.setdefault("props", {})
+            rule.pop("map", None)
+        elif extra is True:
+            rule["map"] = None
+        elif isinstance(extra, dict):
+            rule["map"] = _normalize_rule(extra)
+        else:
+            msg = f"unrecognized additionalProperties shape: {extra!r}"
+            raise GenerationError(msg)
+    return rule or None
+
+
+def _rule_refs(node: Any, out: set[str]) -> None:
+    if isinstance(node, dict):
+        if "ref" in node:
+            out.add(node["ref"])
+        for value in node.values():
+            _rule_refs(value, out)
+    elif isinstance(node, list):
+        for member in node:
+            _rule_refs(member, out)
+
+
+def _assert_rule_shapes(name: str, node: Any) -> None:
+    """The invariant half of the generated-rules contract: enum values are
+    only str/bool (so a validator can compare type-strictly), no union is
+    empty (the stoplist's stub promotion must have handled those), and every
+    property rule is a dict or None."""
+    if isinstance(node, dict):
+        if "enum" in node and any(type(value) not in _RULE_ENUM_KINDS for value in node["enum"]):
+            msg = f"{name}: enum carries a non-str/bool value"
+            raise GenerationError(msg)
+        if "any" in node and not node["any"]:
+            msg = f"{name}: an empty union reached the rules"
+            raise GenerationError(msg)
+        if isinstance(node.get("props"), dict):
+            for prop_rule in node["props"].values():
+                if prop_rule is not None and not isinstance(prop_rule, dict):
+                    msg = f"{name}: a property rule is neither a dict nor None"
+                    raise GenerationError(msg)
+        for value in node.values():
+            _assert_rule_shapes(name, value)
+    elif isinstance(node, list):
+        for member in node:
+            _assert_rule_shapes(name, member)
+
+
+def _build_schema_rules(bodies: dict[str, Any]) -> dict[str, Any]:
+    """The rules table: every schema reachable from a discriminated object.
+
+    Roots are the schemas whose ``object`` property pins one discriminator
+    value, plus every ``deleted_*`` stub (some are reachable only through
+    ``x-expansionResources``, which the rules drop, yet a delete response
+    must still validate against one). Everything else in the closure —
+    request-parameter schemas above all — is not an object this world can
+    return and stays out.
+    """
+    by_object: dict[str, str] = {}
+    deleted_by_object: dict[str, str] = {}
+    for name, body in sorted(bodies.items()):
+        obj = body.get("properties", {}).get("object")
+        if (
+            isinstance(obj, dict)
+            and isinstance(obj.get("enum"), list)
+            and len(obj["enum"]) == 1
+            and isinstance(obj["enum"][0], str)
+        ):
+            table = deleted_by_object if name.startswith("deleted_") else by_object
+            if obj["enum"][0] in table:
+                msg = (
+                    f"discriminator {obj['enum'][0]!r} is claimed by both "
+                    f"{table[obj['enum'][0]]!r} and {name!r}"
+                )
+                raise GenerationError(msg)
+            table[obj["enum"][0]] = name
+    if bodies and not by_object:
+        # An empty closure is a degenerate spec (a route set with no response
+        # schemas at all); a non-empty closure with no discriminated object
+        # anywhere means a spec bump nuked every `object` discriminator.
+        msg = "no discriminated object schemas found in the pruned closure"
+        raise GenerationError(msg)
+
+    rules: dict[str, Any] = {}
+
+    def harvest(name: str) -> None:
+        if name in rules or name not in bodies:
+            return
+        node = _normalize_rule(
+            {k: v for k, v in bodies[name].items() if k not in _RULE_IGNORED_KEYS}
+        )
+        rules[name] = node
+        if node is None:
+            return
+        _assert_rule_shapes(name, node)
+        found: set[str] = set()
+        _rule_refs(node, found)
+        for target in sorted(found):
+            harvest(target)
+
+    for name in sorted(by_object.values()):
+        harvest(name)
+    for name in sorted(n for n in bodies if n.startswith("deleted_")):
+        harvest(name)
+
+    dangling: set[str] = set()
+    for node in rules.values():
+        _rule_refs(node, dangling)
+    dangling -= rules.keys()
+    if dangling:
+        msg = f"schema rules carry dangling refs: {sorted(dangling)}"
+        raise GenerationError(msg)
+
+    return {
+        "by_object": by_object,
+        "deleted_by_object": deleted_by_object,
+        "rules": {name: rules[name] for name in sorted(rules)},
+    }
+
+
+# --- Artifact construction ---------------------------------------------------
 
 
 class Artifacts(NamedTuple):
     spec3_min: dict[str, Any]
     expandable: dict[str, tuple[str, ...]]
     enums: dict[str, dict[str, tuple[str, ...]]]
+    enum_overrides: dict[str, dict[str, tuple[str, ...]]]
+    declared_overrides: frozenset[tuple[str, str]]
+    schema_rules: dict[str, Any]
     event_types: frozenset[str]
+
+
+def _assert_enum_tokens_in_descriptions(
+    full_spec: dict[str, Any], table: dict[str, dict[str, tuple[str, ...]]]
+) -> None:
+    """Every hand-transcribed value must still be in the live description.
+
+    The closed sets exist only in prose, so the one drift that can happen
+    silently is Stripe rewording a description; this turns it into a
+    generation failure instead (components/data_model.md §12). Also asserts
+    each property is still a bare `string` with no machine-readable `enum`
+    — a spec bump adding one would make the hand table redundant, and that
+    is a human decision, not something to encode.
+    """
+    schemas = full_spec["components"]["schemas"]
+    for obj, fields in sorted(table.items()):
+        schema = schemas.get(obj)
+        if not isinstance(schema, dict):
+            msg = f"enum override {obj!r} has no schema in the source spec"
+            raise GenerationError(msg)
+        for field, values in sorted(fields.items()):
+            prop = schema.get("properties", {}).get(field)
+            if not isinstance(prop, dict):
+                msg = f"enum override {obj}.{field} has no property in the source spec"
+                raise GenerationError(msg)
+            if prop.get("type") != "string" or "enum" in prop:
+                msg = (
+                    f"enum override {obj}.{field} is no longer a bare string "
+                    f"without a machine-readable enum: {prop.get('type')!r}"
+                )
+                raise GenerationError(msg)
+            description = prop.get("description") or ""
+            missing = [value for value in values if value not in description]
+            if missing:
+                msg = (
+                    f"enum override {obj}.{field}: value(s) {missing} no longer "
+                    "appear in the spec's description of that field — re-read "
+                    "the prose and re-transcribe"
+                )
+                raise GenerationError(msg)
 
 
 def _filter_request_surface(trimmed: dict[str, Any], route: Route) -> dict[str, Any]:
@@ -488,11 +923,13 @@ def build_artifacts(
     full_spec: dict[str, Any], routes: Sequence[Route], event_types: frozenset[str]
 ) -> Artifacts:
     """Pure: (full spec3.json, the route table, the event-type set) -> the
-    four artifacts' in-memory contents. No filesystem I/O, so ``--check`` can
+    artifacts' in-memory contents. No filesystem I/O, so ``--check`` can
     diff without writing (components/discovery.md)."""
     if full_spec["info"]["version"] != API_VERSION:
         msg = f"spec version {full_spec['info']['version']!r} != pinned {API_VERSION!r}"
         raise GenerationError(msg)
+    _assert_enum_tokens_in_descriptions(full_spec, DOC_ONLY_ENUMS)
+    _assert_enum_tokens_in_descriptions(full_spec, EXTRA_DOC_ONLY_ENUMS)
     paths = full_spec["paths"]
     schemas = full_spec["components"]["schemas"]
 
@@ -559,6 +996,9 @@ def build_artifacts(
         spec3_min=spec3_min,
         expandable=expandable,
         enums=DOC_ONLY_ENUMS,
+        enum_overrides=ENUM_OVERRIDES,
+        declared_overrides=DECLARED_OVERRIDES,
+        schema_rules=_build_schema_rules(bodies),
         event_types=event_types,
     )
 
@@ -614,26 +1054,51 @@ def _render_expandable(artifacts: Artifacts) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _render_enums(artifacts: Artifacts) -> str:
-    docstring = _docstring(
-        "The six fields whose closed value set exists only in the spec's\n"
-        "description prose (no machine-readable `enum`), hand-transcribed from\n"
-        "resource-inventory.md's citations. The schema's CHECK constraints and\n"
-        "the conformance validator both read this, so the two cannot disagree.\n"
-        "`setup_intent.usage` is deliberately absent — an open string with a\n"
-        "documented default, not a closed set (components/discovery.md §5)."
-    )
-    lines = [
-        docstring,
-        "DOC_ONLY_ENUMS: dict[str, dict[str, tuple[str, ...]]] = {",
-    ]
-    for obj, fields in sorted(artifacts.enums.items()):
+def _render_enum_table(name: str, table: dict[str, dict[str, tuple[str, ...]]]) -> list[str]:
+    lines = [f"{name}: dict[str, dict[str, tuple[str, ...]]] = {{"]
+    for obj, fields in sorted(table.items()):
         lines.append(f'    "{obj}": {{')
         for field, values in sorted(fields.items()):
             prefix = f'        "{field}": '
             lines.append(f"{prefix}{_tuple_literal(values, prefix)},")
         lines.append("    },")
     lines.append("}")
+    return lines
+
+
+def _render_enums(artifacts: Artifacts) -> str:
+    docstring = _docstring(
+        "DOC_ONLY_ENUMS: the six fields whose closed value set exists only in\n"
+        "the spec's description prose (no machine-readable `enum`),\n"
+        "hand-transcribed from resource-inventory.md's citations. The schema's\n"
+        "CHECK constraints read this; `setup_intent.usage` is deliberately\n"
+        "absent there — an open string with a documented default, not a closed\n"
+        "set (components/discovery.md §5).\n"
+        "\n"
+        "ENUM_OVERRIDES: the schema-conformance validator's superset — those\n"
+        "six plus every further closure field whose description genuinely\n"
+        "closes its set (components/data_model.md §12's pass-2 enrollment,\n"
+        "including the copies of one enum under each schema name it takes on\n"
+        "the wire), plus `setup_intent.usage`, whose closed reading is this\n"
+        "project's declaration, not Stripe's documentation, and is marked as\n"
+        "such in DECLARED_OVERRIDES (functional spec §4). The excluded\n"
+        "candidates and their reasons are recorded in phase_plans/phase_4.md.\n"
+        "\n"
+        "Every value token is asserted at generation time to still appear in\n"
+        "the live description of its field, so a Stripe wording change fails\n"
+        "regeneration rather than silently dropping a value."
+    )
+    lines = [docstring]
+    lines += _render_enum_table("DOC_ONLY_ENUMS", artifacts.enums)
+    lines.append("")
+    lines += _render_enum_table("ENUM_OVERRIDES", artifacts.enum_overrides)
+    lines.append("")
+    lines.append("DECLARED_OVERRIDES: frozenset[tuple[str, str]] = frozenset(")
+    lines.append("    {")
+    for obj, field in sorted(artifacts.declared_overrides):
+        lines.append(f'        ("{obj}", "{field}"),')
+    lines.append("    }")
+    lines.append(")")
     return "\n".join(lines) + "\n"
 
 
@@ -770,6 +1235,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "expandable.py": _render_expandable(artifacts),
         "enums.py": _render_enums(artifacts),
         "event_types.py": _render_event_types(artifacts),
+        "schema_rules.json": _dump_canonical(artifacts.schema_rules) + "\n",
     }
 
     if args.check:

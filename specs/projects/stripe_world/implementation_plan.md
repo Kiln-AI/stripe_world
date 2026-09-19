@@ -44,7 +44,7 @@ A slice is not done until steps 3 and 4 are both green and `seahaven check` is c
 - [x] **Phase 3: Dispatcher and the four tools.** Router, `ResourceSpec` engine, `ParamSpec`,
       response construction, pagination, the Stripe error envelope, and the four tools. Exercised
       against one throwaway resource, replaced in Phase 5.
-- [ ] **Phase 4: Schema conformance harness.** Generated validation of every returned object against
+- [x] **Phase 4: Schema conformance harness.** Generated validation of every returned object against
       `spec3.min.json`, including the seven bare-`string`-but-enumerated fields. Before any real
       resource, because it constrains all of them.
 - [ ] **Phase 5: Cassette harness.** Recorder (via `stripe-python`), replayer, and

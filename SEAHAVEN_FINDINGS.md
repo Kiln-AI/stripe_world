@@ -351,3 +351,25 @@ def raising(ctx) -> dict:
 **Why it is a finding rather than our bug to fix.** The alternatives in world code are all worse: catching inside the tool (commits the partial writes the raise was supposed to discard — the exact hazard the boundary design exists to avoid), or demoting the log level from world code (world code cannot; the handler is `invoke`'s). What is wanted is small and framework-shaped: either a documented "expected exception" marker a middleware-handled class can carry (`invoke` skips or demotes the log for it), or the log moved to the chain's outer boundary so a middleware that converts an exception into a result also converts the log line. Until then this is a declared ops note for anyone running long rollouts against this world: ERROR-level entries with Stripe envelopes in the transcript are noise by construction, and the filter is "did the call return or raise."
 
 **Where the code points at it.** `src/stripeapi/middleware/stripe_envelope.py`'s `except StripeApiError` branch carries a comment referencing this entry.
+
+---
+
+### Entry 9 — `CallRecord` logs the call but not its result, so no test hook can validate what a tool actually returned
+
+**Category**: Missing capability (test-side).
+
+**Date**: 2026-09-19 (Phase 4).
+
+**What we were trying to do.** Build the schema-conformance hook the conformance component designs: after every `@pytest.mark.seahaven` test runs, walk `instance.call_log()` and validate the `body` of every `stripe_api_read` / `stripe_api_write` response in it against the pinned Stripe spec — "the resource suite *is* the corpus, automatically" (`components/conformance.md`, Public Interface).
+
+**What we expected.** That a call log entry named "every call dispatched to this instance" would carry the call's result, the way the change log carries row images — a test-side consumer reading what actually came back is the obvious second consumer of a call log after debug rendering.
+
+**What happened.** `seahaven.changes.CallRecord` carries `tool`, `arguments`, `error` and `tool_error` — and no result (`changes.py:96-142`). The docstring explains why: the record is shaped for the state document's wire boundary, where a result would be redundant with the observation the caller already holds. But that makes the log unusable for any after-the-fact consumer that did not intercept the call itself. Two alternatives were considered and rejected: stashing response bodies in `ctx.state` from the `stripe_envelope` middleware (the state document is a published wire boundary — every rollout's trace would carry the accumulated bodies), and a second logging list inside the world (test machinery inside the shipped package).
+
+**Workaround taken.** The hook wraps `seahaven.Instance.call` for each test's lifetime (a `monkeypatch` in an autouse fixture, `tests/schema_conformance/capture.py`), recording `(ordinal, tool, label, body)` for the three HTTP-shaped tool names at call time and validating at teardown. Costs: the wrapper is test-side state the framework knows nothing about, and any path that produces a response without going through `Instance.call` (none exists today; a future harness could) would be invisible to the hook.
+
+**Why it is a finding rather than our preference.** "What did this call return?" is the first question a conformance harness, a snapshot test, or a debug rendering asks, and the framework's own plugin documentation points at `inst.call_log()` as the record of what a test did. A `result` field — even opt-in, even truncated, even excluded from `to_dict` the way the workaround's records are — would make that question answerable without wrapping a framework class from test code.
+
+**Minimal reproduction.** N/A — an absence: `grep -n "result" vendor/Seahaven/src/seahaven/changes.py` over the `CallRecord` block finds nothing.
+
+**Where the code points at it.** `tests/schema_conformance/capture.py`'s module docstring and `tests/conftest.py`'s `_schema_conformance` fixture carry comments referencing this entry.

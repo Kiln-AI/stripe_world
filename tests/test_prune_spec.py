@@ -10,7 +10,10 @@ import json
 import pytest
 from tools_dev.prune_spec import (
     API_VERSION,
+    DECLARED_OVERRIDES,
     DOC_ONLY_ENUMS,
+    ENUM_OVERRIDES,
+    EXTRA_DOC_ONLY_ENUMS,
     SCHEMA_BUDGET,
     GenerationError,
     _dump_canonical,
@@ -27,11 +30,33 @@ def _ref(name: str) -> dict:
     return {"$ref": f"#/components/schemas/{name}"}
 
 
+def _apply_enum_override_schemas(schemas: dict) -> None:
+    """Give every (schema, field) pair the enum-override assertion walks a
+    live-shaped property: merged into the hand-written schemas rather than
+    replacing them (`payment_method_details_card` exists in both), with a
+    description naming every hand-transcribed value — synthesized from the
+    tables themselves so the two cannot drift apart."""
+    merged: dict[str, dict[str, tuple[str, ...]]] = {}
+    for table in (DOC_ONLY_ENUMS, EXTRA_DOC_ONLY_ENUMS):
+        for obj, fields in table.items():
+            merged.setdefault(obj, {}).update(fields)
+    for obj, fields in merged.items():
+        props = schemas.setdefault(obj, {"properties": {}})["properties"]
+        for field, values in fields.items():
+            props[field] = {
+                "type": "string",
+                "description": "Values: " + ", ".join(f"`{value}`" for value in values) + ".",
+            }
+
+
 def synthetic_spec() -> dict:
     """A spec just rich enough to trigger every transform: a stoplisted union
     member, a stoplisted direct ref, an all-stoplisted union, rail fan-out
-    properties, HTML prose, and cut operations under a real resource root."""
-    return {
+    properties, HTML prose, and cut operations under a real resource root.
+    The response schema carries an `object` discriminator (the rule builder's
+    roots) and `_apply_enum_override_schemas` adds the override fields with
+    live-shaped descriptions (the description-token assertion)."""
+    spec = {
         "openapi": "3.0.0",
         "info": {"version": API_VERSION, "title": "synthetic"},
         "paths": {
@@ -78,8 +103,9 @@ def synthetic_spec() -> dict:
                 },
                 "widget": {
                     "x-expandableFields": ["card", "klarna", "owner", "detail"],
-                    "required": ["card", "klarna"],
+                    "required": ["card"],
                     "properties": {
+                        "object": {"enum": ["widget"], "type": "string"},
                         "card": _ref("payment_method_card"),
                         "klarna": _ref("payment_method_klarna"),
                         "sepa_debit": _ref("payment_method_sepa_debit"),
@@ -94,9 +120,27 @@ def synthetic_spec() -> dict:
                             "anyOf": [_ref("transfer"), _ref("reserve_transaction")],
                             "nullable": True,
                         },
+                        # How the real spec reaches its deleted_* stubs: a
+                        # nullable union member (invoice.customer carries
+                        # deleted_customer exactly this way).
+                        "prior": {"anyOf": [_ref("deleted_widget")], "nullable": True},
                     },
                 },
-                "widget_detail": {"properties": {"note": {"type": "string"}}},
+                "deleted_widget": {
+                    "required": ["id", "object", "deleted"],
+                    "properties": {
+                        "id": {"type": "string"},
+                        "object": {"enum": ["widget"], "type": "string"},
+                        "deleted": {"enum": [True], "type": "boolean"},
+                    },
+                },
+                "widget_detail": {
+                    "properties": {
+                        "note": {"type": "string"},
+                        "meta": {"additionalProperties": {"type": "string"}, "type": "object"},
+                        "tags": {"items": {"type": "string"}, "type": "array"},
+                    }
+                },
                 "payment_method_card": {"properties": {"last4": {"type": "string"}}},
                 "payment_method_klarna": {"properties": {"dob": {"type": "string"}}},
                 "payment_method_sepa_debit": {"properties": {"iban": {"type": "string"}}},
@@ -107,6 +151,8 @@ def synthetic_spec() -> dict:
             }
         },
     }
+    _apply_enum_override_schemas(spec["components"]["schemas"])
+    return spec
 
 
 ROUTES = (
@@ -214,7 +260,15 @@ def test_stoplisted_schemas_leave_the_closure() -> None:
 
 def test_stubbed_rails_drop_from_properties_required_and_expandable() -> None:
     widget = build(synthetic_spec()).spec3_min["components"]["schemas"]["widget"]
-    assert set(widget["properties"]) == {"card", "owner", "tax", "ledger", "detail"}
+    assert set(widget["properties"]) == {
+        "object",
+        "card",
+        "owner",
+        "tax",
+        "ledger",
+        "detail",
+        "prior",
+    }
     assert widget["required"] == ["card"]
     assert tuple(widget["x-expandableFields"]) == ("card", "owner", "detail")
 
@@ -252,7 +306,130 @@ def test_two_runs_are_byte_identical() -> None:
 def test_artifacts_carry_enums_and_event_types_verbatim() -> None:
     artifacts = build(synthetic_spec())
     assert artifacts.enums == DOC_ONLY_ENUMS
+    assert artifacts.enum_overrides == ENUM_OVERRIDES
+    assert artifacts.declared_overrides == DECLARED_OVERRIDES
     assert artifacts.event_types == EVENTS
+
+
+# --- the enum-override description-token assertion ------------------------------
+
+
+def test_a_value_missing_from_the_live_description_raises() -> None:
+    spec = synthetic_spec()
+    prop = spec["components"]["schemas"]["refund"]["properties"]["status"]
+    prop["description"] = prop["description"].replace("`canceled`", "")
+    with pytest.raises(GenerationError, match="no longer"):
+        build(spec)
+
+
+def test_a_machine_enum_where_a_bare_string_was_raises() -> None:
+    spec = synthetic_spec()
+    spec["components"]["schemas"]["payout"]["properties"]["method"]["enum"] = ["standard"]
+    with pytest.raises(GenerationError, match="no longer a bare string"):
+        build(spec)
+
+
+def test_a_missing_override_schema_raises() -> None:
+    spec = synthetic_spec()
+    del spec["components"]["schemas"]["dispute"]
+    with pytest.raises(GenerationError, match="no schema"):
+        build(spec)
+
+
+# --- the schema-conformance rule set --------------------------------------------
+
+
+def test_rules_key_discriminated_roots_and_deleted_stubs() -> None:
+    rules = build(synthetic_spec()).schema_rules
+    assert rules["by_object"] == {"widget": "widget"}
+    assert rules["deleted_by_object"] == {"widget": "deleted_widget"}
+    # Only response-reachable schemas: the enum-override stubs are in the
+    # synthetic spec but nothing routes to them, so no rules for them.
+    assert set(rules["rules"]) == {
+        "widget",
+        "deleted_widget",
+        "widget_detail",
+        "payment_method_card",
+    }
+
+
+def test_rules_normalize_unions_maps_arrays_and_enums() -> None:
+    rules = build(synthetic_spec()).schema_rules["rules"]
+    assert rules["widget"]["props"]["owner"] == {"any": [{"t": "string"}], "nul": True}
+    assert rules["widget"]["props"]["object"] == {"t": "string", "enum": ["widget"]}
+    assert rules["widget_detail"]["props"]["meta"] == {
+        "t": "object",
+        "map": {"t": "string"},
+    }
+    assert rules["widget_detail"]["props"]["tags"] == {"t": "array", "items": {"t": "string"}}
+    assert rules["deleted_widget"]["props"]["deleted"] == {"t": "boolean", "enum": [True]}
+    assert rules["widget"]["req"] == ["card"]
+
+
+def test_an_allof_outside_x_keys_raises() -> None:
+    spec = synthetic_spec()
+    spec["components"]["schemas"]["widget"]["properties"]["merged"] = {
+        "allOf": [_ref("widget_detail"), {"type": "object"}]
+    }
+    with pytest.raises(GenerationError, match="allOf"):
+        build(spec)
+
+
+def test_additional_properties_false_stays_closed_and_true_stays_open() -> None:
+    spec = synthetic_spec()
+    spec["components"]["schemas"]["widget_detail"]["properties"]["shut"] = {
+        "additionalProperties": False,
+        "type": "object",
+    }
+    spec["components"]["schemas"]["widget_detail"]["properties"]["anything"] = {
+        "additionalProperties": True,
+        "type": "object",
+    }
+    rules = build(spec).schema_rules["rules"]["widget_detail"]["props"]
+    # Closed: no `map` key at all, so the (empty) property set governs.
+    assert rules["shut"] == {"t": "object", "props": {}}
+    # Open: `map` present and null, so any key is accepted.
+    assert rules["anything"] == {"t": "object", "map": None}
+
+
+def test_a_bare_additional_properties_false_node_is_a_closed_object() -> None:
+    spec = synthetic_spec()
+    spec["components"]["schemas"]["widget_detail"]["properties"]["shut"] = {
+        "additionalProperties": False
+    }
+    rules = build(spec).schema_rules["rules"]["widget_detail"]["props"]
+    # An *empty closed set*, not a bare `t: object` (which the validator
+    # reads as open) — so a spec bump introducing this shape cannot silently
+    # open a closed set.
+    assert rules["shut"] == {"props": {}}
+
+
+def test_an_unrecognized_additional_properties_shape_raises() -> None:
+    spec = synthetic_spec()
+    spec["components"]["schemas"]["widget_detail"]["properties"]["odd"] = {
+        "additionalProperties": "sometimes",
+        "type": "object",
+    }
+    with pytest.raises(GenerationError, match="additionalProperties"):
+        build(spec)
+
+
+def test_a_non_dict_property_rule_raises() -> None:
+    """The rules contract's third clause: a property rule is a dict or None.
+    `_normalize_rule` cannot produce anything else today, so the guard is
+    exercised directly — it stands against a future normalizer change."""
+    from tools_dev.prune_spec import _assert_rule_shapes
+
+    with pytest.raises(GenerationError, match="property rule"):
+        _assert_rule_shapes("widget", {"props": {"note": ["not", "a", "dict"]}})
+
+
+def test_no_discriminated_roots_raises() -> None:
+    spec = synthetic_spec()
+    del spec["components"]["schemas"]["widget"]["properties"]["object"]
+    del spec["components"]["schemas"]["deleted_widget"]
+    with pytest.raises(GenerationError, match="no discriminated object"):
+        build(spec)
 
 
 def test_expandable_takes_only_non_empty_arrays() -> None:
