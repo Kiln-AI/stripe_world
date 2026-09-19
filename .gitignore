@@ -5,3 +5,6 @@ reviews/
 # re-fetchable with the commands there. Too large to commit (~108 MB).
 research/stripe-openapi/
 research/repos/
+
+.env.agent
+.env
