@@ -208,7 +208,8 @@ is exact. That is a declared difference, not an accident.
 
 ### 3.4 Objects, and how they are stored
 
-Roughly 17–19 tables. Four objects in the closed set are deliberately *not* tables:
+23 tables — 21 Stripe plus `events` and `idempotency_keys` — counted from the finished DDL. Four
+objects in the closed set are deliberately *not* tables:
 
 - **`balance`** — no id, not listable, derivable from `balance_transaction` rows. A computed read.
 - **`line_item`**, **`credit_note_line_item`** — written once by the transaction that writes their
@@ -228,8 +229,10 @@ These apply to every routed resource and are the substance of "faithful".
 - **Every timestamp comes from `ctx.clock`.** Unix seconds, as Stripe returns them.
 - **Money is integer minor units**, matching Stripe's own convention and Seahaven's integer columns.
   No floats anywhere in the money path.
-- **`object` discriminator on every object**, and `livemode: false` everywhere — this is a test-mode
-  replica and says so.
+- **`object` discriminator on every object**, and `livemode: false` on every object that *has* the
+  field. Four in-scope objects do not carry `livemode` at this API version — `balance_transaction`,
+  `refund`, `subscription_item` and `discount` — and emitting it on those four fails schema
+  conformance.
 - **Nullability and enums follow `spec3.json`.** Including the trap the research found: `dispute.reason`,
   `payout.status`, `payout.method`, `payout.source_type`, `refund.status`,
   `balance_transaction.status` and `setup_intent.usage` — **seven fields** — are typed as bare

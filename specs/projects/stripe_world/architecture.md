@@ -180,8 +180,13 @@ redeclared per operation.
 
 ### 4.1 Tables
 
-19 tables plus two infrastructure tables. Per the functional spec, `balance` is computed,
-`line_item` / `credit_note_line_item` / `discount` are nested JSON on their parents.
+**23 tables** — 21 Stripe plus two infrastructure — 447 columns, 67 indexes, counted from the
+finished DDL rather than estimated. `balance` is computed, and `line_item` / `credit_note_line_item`
+/ `discount` are nested JSON on their parents.
+
+Earlier drafts said 19+2, and the functional spec said 17–19. Both traced to a research document that
+listed 21 resource names and then subtracted four collapsed objects that were never in the list.
+`invoices` is the widest table at 54 columns, from 78 spec properties.
 
 `001_core` customers, products, prices, coupons, promotion_codes, tax_rates
 `002_payments` payment_methods, payment_intents, charges, refunds, disputes, setup_intents, balance_transactions, payouts
@@ -189,8 +194,15 @@ redeclared per operation.
 `004_infra` events, idempotency_keys
 
 Every table is `STRICT` with an explicit primary key (the Stripe id, TEXT). Money is `INTEGER` minor
-units. Enumerated values are TEXT with a `CHECK` listing the closed set, taken from `spec/enums.py`
-so the schema and the conformance validator cannot disagree.
+units. Rates — `percent_off`, `percentage`, `effective_percentage`, `exchange_rate` — are **TEXT
+decimal literals rather than `REAL`**, read as `Decimal` and emitted so the wire value carries exactly
+the digits stored. That is what makes "no floats in the money path" literally true.
+
+Enumerated values are TEXT with a `CHECK` listing the closed set. **The schema and `spec/enums.py`
+are genuinely duplicated** — a `.sql` file is static text and cannot import Python, so an earlier
+claim that they "cannot disagree" was wrong. The guard is explicit instead:
+`test_schema_enums_match_spec` regexes every `CHECK (col IN (…))` out of `sqlite_master` and compares
+it to `enums.SCHEMA_ENUMS`.
 
 ### 4.2 Timestamps: TEXT inside, Unix seconds outside
 
@@ -232,8 +244,12 @@ a tool that slips back to `ctx.ids.uuid()` produces a UUID where Stripe expects 
 `serialize/` turns a row into an API object: field renaming, Unix-second conversion, nested JSON
 inflation, `object` discriminator, `livemode: false`, and null-vs-absent handling.
 
-Expansion is generic. `spec/expandable.py` is generated from the spec's `x-expandableFields` into
-`{object: {field: target_resource}}`. The resolver walks requested paths, enforces Stripe's depth
+Expansion is generic. `spec/expandable.py` is generated into `{object: {field: target_resource}}`,
+but **not from `x-expandableFields`** — that key lists every `$ref`/`anyOf` property, including plain
+embedded objects like `customer.address` and `dispute.evidence`, so generating from it would
+advertise `expand[]=address`, which the real API rejects. The mechanical rule is: an `anyOf`
+containing a bare `string` member is expandable; one without is embedded and always inflated. The
+same rule decides which columns hold a bare id. The resolver walks requested paths, enforces Stripe's depth
 limit, applies the `data.` prefix rule for lists, and raises Stripe's
 `"This property cannot be expanded (<field>)"` for a bad path. Unexpanded references serialize as
 the bare id string.
