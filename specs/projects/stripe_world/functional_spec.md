@@ -280,7 +280,8 @@ Non-negotiable for fidelity, and mostly not in the OpenAPI schema. Details and c
 - A replay while the first request is still in flight is `idempotency_key_in_use`. In a synchronous
   single-threaded world this is unreachable in normal operation but is modelled so the error exists.
 - Errors are cached the way Stripe caches them.
-- `request.idempotency_key` is echoed on responses.
+- `request.idempotency_key` appears on the **`Event`** object, not on the response body. The earlier
+  reading of the research overstated this.
 - Retention on the real API is a **floor, not a fixed TTL** — the documented wording is that keys are
   evicted once "at least 24 hours old". With one frozen instant, keys never expire within a rollout;
   the retention window is recorded in the conformance allow-list as a declared difference.
@@ -330,10 +331,14 @@ using bracket notation for nested and array parameters.
 
 ### 6.5 Versioning
 
-One version is served: `2026-08-26.dahlia`. The real API returns a `stripe-version` response header,
-so this world does too. The version is not an agent-facing parameter (§2.2): the world does not
-transform shapes across versions and does not pretend to. The conformance recorder pins the same
-version on every recorded request.
+One version is served: `2026-08-26.dahlia`. The version is not an agent-facing parameter (§2.2): the
+world does not transform shapes across versions and does not pretend to. The conformance recorder
+pins the same version on every recorded request.
+
+The real API returns a `stripe-version` **response header**, and this world does not — the tool
+return is `{status, body}` (§2.3) and there is no header channel. That is consistent with the surface
+we are imitating: Stripe's MCP tools return JSON, not HTTP responses, so an agent here sees exactly
+what an agent there sees. Declared in the conformance allow-list rather than left implicit.
 
 Stripe's codenames cover a run of monthly backward-compatible releases until the next breaking major
 release, so `dahlia` names a series rather than a single day's shape. Handling of a *malformed*

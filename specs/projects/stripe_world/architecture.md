@@ -269,7 +269,8 @@ pruned subset carries Stripe's MIT copyright notice in `THIRD_PARTY_LICENSES`.
 
 ### 6.1 Idempotency — middleware
 
-`middleware/idempotency.py`, registered immediately inside the error handler. It hashes
+`middleware/idempotency.py`, innermost of the three (see §7 for why it sits inside the envelope).
+It hashes
 `(path, method, canonical params)`, looks up `idempotency_keys`, and:
 
 - miss → run the call, store the response, return it;
@@ -287,10 +288,18 @@ leaving it tracked would put bookkeeping rows into every graded change log. Keys
 ### 6.2 Pagination
 
 One implementation in `dispatch/resource.py`: reverse-chronological ordering, `limit` 1–100 default
-10, mutually exclusive `starting_after` / `ending_before`, `has_more`, and the list envelope. Ordering
-is `(created DESC, id DESC)` — `created` alone is not unique under a frozen clock, and without the id
-tiebreak cursor pagination would be unstable. **This is a real consequence of the frozen clock and is
-designed for, not discovered later.**
+10, mutually exclusive `starting_after` / `ending_before`, `has_more`, and the list envelope.
+
+**Ordering is `(seq DESC)`, where `seq` is a monotonic `INTEGER` column on every listable table.**
+The obvious `(created DESC, id DESC)` is stable but *wrong*: under a frozen clock every object an
+agent creates in one episode shares one `created`, and `id` is drawn from the seeded random stream,
+so the tiebreak orders by a random value. An agent that creates three customers and lists them would
+get a stable but arbitrary order where Stripe returns newest-first — and that ordering is exactly
+what an eval inspects. Fixture rows are unaffected, since the generator writes historical timestamps,
+which is what made this easy to miss.
+
+`seq` is assigned on insert from a per-table counter. The ordering is expressed once, in `PageOrder`,
+so it is one definition and one index per table.
 
 ### 6.3 Events
 
@@ -309,11 +318,35 @@ two copies.
 
 Two distinct systems, deliberately not merged.
 
-**Stripe errors are return values.** `stripe_errors.py` defines `StripeApiError(status, type, code,
-decline_code=None, param=None, message=...)`, raised anywhere inside the dispatcher and caught at the
-dispatcher boundary, which converts it to `{"status": …, "body": {"error": {…}}}`. Agents see
-Stripe's envelope with the right HTTP status, and a declined card is an ordinary outcome rather than
-an exception. `type` is constrained to the four real wire values.
+**Stripe errors are return values, and the rule is: raise loses, return keeps.**
+
+The framework's layering makes this exact. Reading `call.py` and `instances.py`: the change-log
+session opens outermost, then the whole middleware chain, and only then does `invoke` open the
+per-call transaction around the tool function. So **every middleware runs outside the transaction and
+inside the change-log session.**
+
+- A `StripeApiError` **raised** propagates out of the tool function, which rolls the transaction back.
+  That is the right behavior for a request that should never have been accepted — a bad parameter, a
+  missing resource — and it leaves no change-log records.
+- An error status a call legitimately **earned** — a declined card, a failed invoice payment — must
+  keep its writes: the failed charge, the status change and the event are all real. Such a handler
+  never raises. It writes, then **returns** `ApiResponse(402, declined(...))`, and commits like any
+  other success.
+
+`declined()` and its siblings return a `dict` and have no raise form, so the type system carries the
+rule, with AST lint tests enforcing it. The supporting rule that makes this safe: **every handler
+finishes looking things up before its first write** — a generalisation of the parent-lookup rule
+below.
+
+**The conversion happens in `middleware/stripe_envelope.py`, not at the dispatcher boundary.** The
+dispatcher runs inside the tool, inside the transaction; catching there means the tool returns
+normally, which *commits* — silently committing the partial writes of every failed call. The catch
+must sit outside the transaction, which means it must be middleware.
+
+Middleware order is therefore `error_handler → stripe_envelope → idempotency`. Idempotency sits
+**inside** the envelope: outside it every outcome has already been flattened to a dict and the
+pre-execution/post-execution distinction that decides Stripe's error-caching carve-out has been
+erased.
 
 **Seahaven errors are authoring errors.** `errors.py` holds `ToolError` subclasses for contract
 violations — an unusable method, a malformed parameter object. `middleware/error_handler.py` follows
