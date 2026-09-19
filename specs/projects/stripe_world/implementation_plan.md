@@ -32,7 +32,7 @@ A slice is not done until steps 3 and 4 are both green and `seahaven check` is c
 
 ### Infrastructure
 
-- [ ] **Phase 1: Skeleton.** `seahaven new`, package layout, `pyproject.toml` (pinning
+- [x] **Phase 1: Skeleton.** `seahaven new`, package layout, `pyproject.toml` (pinning
       `pydantic==2.12.3`, `SEAHAVEN_FINDINGS.md` Entry 1), root `AGENTS.md` with the check commands,
       `world.py`, `errors.py`, `stripe_errors.py`, the error-handler middleware, `_ids.py`, `_time.py`,
       `_json.py`, and `empty` fixture. Ends with a green `pytest` and a clean `seahaven check` on a

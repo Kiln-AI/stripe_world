@@ -96,7 +96,9 @@ nowhere outside this module:
 def invalid_request(message: str, *, code: str | None = None, param: str | None = None,
                     status: int = 400, pre_execution: bool = False) -> StripeApiError
 def resource_missing(object_name: str, id_: str, *, param: str | None = None) -> StripeApiError
-    # 404, invalid_request_error, code="resource_missing", "No such {object_name}: '{id_}'."
+    # 404, invalid_request_error, code="resource_missing", "No such {object_name}: '{id_}'"
+    # (no trailing period — live probes return it verbatim without one; an earlier draft of this
+    # line carried a period nothing corroborates)
 def unknown_parameter(param: str) -> StripeApiError
     # 400, code="parameter_unknown", pre_execution=True, "Received unknown parameter: {param}"
 def missing_parameter(param: str) -> StripeApiError
@@ -622,7 +624,8 @@ SELECT created, id FROM <table> WHERE id = ?
   `_get_filters_for_next_page`, which passes the current page's *last* id as `starting_after`; any
   other semantics would return that row forever.
 - **Not found** → 404, `invalid_request_error`, `code: "resource_missing"`,
-  `param: "starting_after"` (or `"ending_before"`), message `No such <object>: '<id>'.` This is the
+  `param: "starting_after"` (or `"ending_before"`), message `No such <object>: '<id>'` (no
+  trailing period; see §2.1). This is the
   reading the one real datapoint supports (`stripe-node#2368`, where a cursor that stopped matching
   threw `resource_missing`), and it is the safe failure: silently returning page one for a garbage
   cursor would make an auto-paginating agent loop forever.

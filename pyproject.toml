@@ -1,0 +1,65 @@
+# uv's build backend, the one Seahaven itself is built with. Every file under
+# `src/stripeapi` travels into the wheel, not only the `.py` ones, so `schema/*.sql`
+# reaches `importlib.resources` in an installed world. `fixtures/` is outside the
+# package and deliberately does not travel: a fixture is a checkout's file.
+[build-system]
+requires = ["uv_build>=0.8.17,<0.9.0"]
+build-backend = "uv_build"
+
+[project]
+name = "seahaven-stripe-world"
+version = "0.1.0"
+description = "StripeAPI: a Seahaven world — a faithful, stateful replica of Stripe's Billing and Payments core. Not affiliated with Stripe."
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = ["seahaven~=0.0"]
+
+# The server and its client. Left out of the default install because openenv's
+# own dependency tree is large, and a world used in process never needs it.
+[project.optional-dependencies]
+serve = ["seahaven[serve]"]
+
+[dependency-groups]
+dev = ["pytest>=8", "ruff>=0.14", "ty>=0.0.1a21"]
+
+# Seahaven is unpublished; while that is true this checkout depends on the
+# framework vendored beside it rather than on the placeholder PyPI release
+# (`authoring.md`, "Before you run the `uv sync` that `seahaven new` prints").
+[tool.uv.sources]
+seahaven = { path = "vendor/Seahaven", editable = true }
+
+[tool.uv]
+# SEAHAVEN_FINDINGS.md Entry 1: the framework's pydantic>=2.13.5 floor crashes
+# `import seahaven` on the 3.14.0rc builds some environments resolve to, and
+# 2.12.3 is the version every suite here has been green on. An override rather
+# than a constraint, because a constraint cannot lower a dependency's own floor.
+# Revisit on a confirmed final-3.14 + fixed lock combination.
+override-dependencies = ["pydantic==2.12.3"]
+
+# Spelled out rather than left to the backend's default, because the module is
+# this world's name normalised the way `seahaven new` normalises it, which is not
+# always the way uv would.
+[tool.uv.build-backend]
+module-name = "stripeapi"
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests", "fixtures_src"]
+# The committed specs and research are point-in-time documents whose Python
+# fragments are prose, not code; `vendor/` has its own configuration; a frozen
+# fixture is a binary artifact.
+extend-exclude = ["specs", "research", "vendor", "fixtures"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.ty.src]
+include = ["src", "tests", "fixtures_src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# The distribution name (`seahaven-stripe-world`) is deliberately not the world's
+# package name (`stripeapi`), so the plugin's project-name heuristic cannot find
+# the world; `--seahaven-world` is its documented override for exactly this
+# layout. The CLI commands carry `--world stripeapi:world` for the same reason.
+addopts = "-q --seahaven-world stripeapi:world"

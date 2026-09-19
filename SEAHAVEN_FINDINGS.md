@@ -98,6 +98,17 @@ trap — the pydantic-version trap deserves the same treatment, in the same plac
 underlying pin is actually fixed (which per the bench note's own framing, it should be, once a
 final 3.14 + compatible pydantic combination is confirmed and the lock is updated accordingly).
 
+**Addendum, 2026-09-19 (Phase 1).** The build environment now has a final CPython (3.14.4), and on
+it `import seahaven` succeeds with the locked `pydantic==2.13.5` as well as with 2.12.3, and
+ProjectTracker's full suite is green on 2.12.3 — confirming the bench note's claim that the crash is
+an rc-interpreter interaction, not a version incompatibility. The pin is kept (per the plan) because
+it is green on both rc and final builds and nothing yet requires 2.13.x. Mechanism worth recording:
+a plain uv *constraint* cannot express this pin, because the framework's own `pydantic>=2.13.5`
+floor contradicts `==2.12.3` and the resolver correctly refuses; the working spelling is
+`[tool.uv] override-dependencies`. A downgrade pin against a transitive dependency's own floor is
+always an override, never a constraint — the error message uv gives ("no solution found") does not
+name that distinction.
+
 ---
 
 ### Entry 2 — `ctx.ids` has exactly one identifier shape (UUIDv4-text); no template or registered scheme for product-shaped ids, and nothing catches a tool that reverts to it by mistake
@@ -270,3 +281,33 @@ they describe middleware as the place to do cross-cutting work. Both are true, b
 the two is not stated anywhere, and the natural reading is wrong in a way that only shows up under
 failure. A framework that wants AI authors to get this right either wraps the chain in the
 transaction, or says plainly in `authoring.md` that a writing middleware must open its own.
+
+---
+
+### Entry 7 — A world whose distribution name differs from its package name is invisible to the CLI's project-name heuristic
+
+**Category**: Ergonomics (documented, mild).
+
+**Date**: 2026-09-19 (Phase 1).
+
+**What we were trying to do.** Name this world's distribution `seahaven-stripe-world` while its
+package and world name are `stripeapi` (the functional spec fixes both), then run `seahaven check`,
+`seahaven fixture freeze` and `pytest` the way the scaffold prints them.
+
+**What we expected.** For the CLIs to find the world from the project, as `seahaven new`'s "next:"
+block promises.
+
+**What happened.** `discover`/`find_world` normalise `[project] name` to a module name and import it
+(`cli/__init__.py:142`, `_package_name`), so every bare `seahaven` subcommand tried
+`import seahaven_stripe_world` and failed with `ModuleNotFoundError` — a message that names neither
+`--world` nor the heuristic. The override exists and is documented (`--world module:attr` for the
+CLI, `--seahaven-world` for the pytest plugin, "for a layout the convention misses"), so this is a
+works-as-documented note rather than a bug. The costs are real though: the override must be spelled
+on every CLI invocation (it now lives in this repo's `AGENTS.md` command list) and once in
+`[tool.pytest.ini_options] addopts`, and the failure mode of forgetting it is an import error that
+does not point at the fix.
+
+**Suggested fix / what Seahaven could add.** When the project-name-derived module does not exist,
+look for a `[tool.uv.build-backend] module-name` (which a scaffold with this exact layout already
+writes) before giving up — or name `--world` in the `ModuleNotFoundError` message the way
+`_import`'s other branches do.
