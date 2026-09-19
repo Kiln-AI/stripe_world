@@ -17,8 +17,8 @@ Every resource phase does the same four things, in this order:
    state transitions, registered in `routes.py`.
 3. **Probe the real API** — drive the scenarios for this slice against real test mode, record
    cassettes, and turn what actually came back into tests. **This step is how the tests get written**;
-   they are not written from our reading of the docs. See §Probing below — it has an environment
-   dependency that must be solved before Phase 5.
+   they are not written from our reading of the docs. Where a recording contradicts the functional
+   spec, the recording wins and the spec is corrected in the same phase.
 4. **Make it pass** — implement until the recorded behavior and the schema-conformance checks are
    green, and add the slice's invariant tests.
 
@@ -44,7 +44,7 @@ A slice is not done until steps 3 and 4 are both green and `seahaven check` is c
       `spec3.min.json`, including the six bare-`string`-but-enumerated fields. Before any real
       resource, because it constrains all of them.
 - [ ] **Phase 5: Cassette harness.** Recorder (via `stripe-python`), replayer, and
-      `allowed_differences.py`. **Gated on solving the probing dependency below.**
+      `allowed_differences.py`. First phase that needs a Stripe test-mode key.
 
 ### Resource slices
 
@@ -92,24 +92,24 @@ Each still touches only its own tables.
       document distilled from `SEAHAVEN_FINDINGS.md`. The findings log itself is written continuously
       from Phase 1, never reconstructed here.
 
-## Probing: an unsolved environment dependency
+## Probing: the coding environment has Stripe egress
 
-Step 3 of every resource phase talks to `api.stripe.com`, which **this environment's egress policy
-blocks**. That was a footnote when recording was one late harness task; under this plan it is on the
-critical path of every slice from Phase 6 onward.
+Step 3 of every resource phase talks to `api.stripe.com`. **The coding environment allows it**, so the
+recipe works as written: each slice records its own cassettes against real test mode and builds its
+tests from what actually came back.
 
-Three ways to solve it, to be decided before Phase 5:
+Note that the *planning* environment this spec was written in does not — its egress policy blocks
+`api.stripe.com`, `docs.stripe.com` and `stripe.com`. That is why the research phase reached Stripe's
+docs through a search MCP rather than direct fetches, and it is a property of this environment only.
+Nothing in the plan depends on it.
 
-1. Allowlist `api.stripe.com` in the environment's network policy — then the recipe works as written.
-2. Record in a different environment and commit cassettes — the loop still works, with a handoff per
-   slice.
-3. Batch the probing: record every scenario once, up front, in one session elsewhere. Cheapest on
-   handoffs, but it front-loads deciding what to probe before the slices have taught us what is
-   interesting.
+Two things hold regardless of environment:
 
-Until one is chosen, resource phases can complete steps 1, 2 and 4 against schema conformance and
-hand-written tests, with step 3 outstanding — but a slice in that state is **not done**, and the plan
-should not pretend otherwise.
+- **CI never records.** It replays committed cassettes and never opens a socket. Only a deliberate
+  re-record reaches the network.
+- **Secrets discipline.** The test-mode key is never committed and never printed. Cassettes are
+  scrubbed of keys, real emails and account identifiers before they land in git. No live-mode key is
+  ever used.
 
 ## Fixtures come late
 
