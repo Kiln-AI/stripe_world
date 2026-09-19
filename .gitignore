@@ -1,0 +1,7 @@
+.specs_skill_state/
+reviews/
+
+# Downloaded research payloads — provenance recorded in research/MANIFEST.md,
+# re-fetchable with the commands there. Too large to commit (~108 MB).
+research/stripe-openapi/
+research/repos/
