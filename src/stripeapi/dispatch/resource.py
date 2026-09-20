@@ -31,7 +31,7 @@ from stripeapi.serialize import fields
 from stripeapi.stripe_errors import invalid_request, missing_parameter, resource_missing
 
 if TYPE_CHECKING:
-    from stripeapi.dispatch.params import ParamSpec
+    from stripeapi.dispatch.params import Param, ParamSpec
 
 __all__ = [
     "BY_OBJECT",
@@ -64,7 +64,7 @@ class ListFilter:
 
     name: str  # the query parameter: "email", "created", "status"
     column: str
-    kind: Literal["exact", "range", "literal"]
+    kind: Literal["exact", "range", "literal", "boolean", "in", "json"]
     choices: tuple[str, ...] = ()
     id_prefixes: tuple[str, ...] = ()
     required: bool = False  # `subscription` on GET /v1/subscription_items
@@ -79,6 +79,9 @@ class ListFilter:
     # answers "No such customer", query-side, unlike a path id's 404. Bind
     # checks only the prefix; existence is a table read, and bind reads none.
     references: str | None = None
+    # A `kind="json"` filter's accepted subfields, as body-shaped `Param`s:
+    # `prices?recurring[interval]=month` is one of these.
+    sub_shape: tuple[Param, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +91,22 @@ class DeleteSpec:
     mode: Literal["soft", "hard"]
     requires_status: tuple[str, ...] = ()  # ("draft",) for invoices
     status_column: str = "status"
+    # 0/1 columns the soft delete zeroes before the deleted-event snapshot is
+    # taken: `product.deleted` carries `active: false` and `coupon.deleted`
+    # carries `valid: false` (both recorded, Phase 7) — the snapshot is the
+    # post-write row, not the row as it was read.
+    zero_columns: tuple[str, ...] = ()
+    # What a later retrieve of the tombstoned row answers. Stripe is
+    # per-resource inconsistent here (both recorded, Phase 7): a deleted
+    # customer retrieves as the three-key stub, a deleted product or coupon
+    # is a 404 `resource_missing` naming the path id.
+    deleted_retrieve: Literal["stub", "missing"] = "stub"
+    # A refusal that depends on other rows, raised before any write: the
+    # engine's own `requires_status` covers the row's own state, and this
+    # covers everything else (a product with attached prices refuses its
+    # delete, recorded in cassette 07). Raising is correct — nothing has
+    # been written yet.
+    guard: Callable[[seahaven.Ctx, Mapping[str, Any]], None] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,6 +138,11 @@ class ResourceSpec:
     collection_url: str  # "/v1/customers"
     serializer: Serializer
     columns: tuple[str, ...]  # the SELECT list; data_model.md owns it
+    # How `create` mints the row's id. None — the default — draws
+    # `_ids.stripe_id(ctx, id_prefix)`; the one resource whose id is
+    # caller-suppliable and unprefixed (coupon) overrides it, because
+    # `stripe_id` refuses the empty prefix by design.
+    mint_id: Callable[[seahaven.Ctx, str | None], str] | None = None
     # The `param` a missing path id names, when live Stripe does not use the
     # placeholder: it is per-resource inconsistent (probed: customers and
     # charges say "id"; prices and payment_methods keep the placeholder;
@@ -426,6 +450,24 @@ def list_(ctx: seahaven.Ctx, req: Request) -> dict[str, Any]:
             for op, bound in value.items():
                 where.append(f"{flt.column} {_RANGE_SQL[op]} ?")
                 binds.append(bound)
+        elif flt.kind == "boolean":
+            where.append(f"{flt.column} = ?")
+            binds.append(int(value))
+        elif flt.kind == "in":
+            # An array-valued filter (`products?ids[]=`, `prices?lookup_keys[]=`):
+            # membership in the column, empty page for an empty array.
+            if value:
+                placeholders = ", ".join("?" for _ in value)
+                where.append(f"{flt.column} IN ({placeholders})")
+                binds.extend(value)
+            else:
+                where.append("1 = 0")
+        elif flt.kind == "json":
+            # A filter over one JSON object column (`prices?recurring[interval]=`):
+            # each present subfield becomes one `json_extract` comparison.
+            for sub_key, sub_value in value.items():
+                where.append(f"json_extract({flt.column}, '$.{sub_key}') = ?")
+                binds.append(sub_value)
         else:
             where.append(f"{flt.column} = ?")
             binds.append(value)
@@ -473,6 +515,12 @@ def retrieve(ctx: seahaven.Ctx, req: Request) -> dict[str, Any]:
     else:
         row = _lookup.require_row(ctx, spec.table, _display_name(spec), id_, param=error_param)
     if spec.delete is not None and spec.delete.mode == "soft" and row.get("deleted") == 1:
+        if spec.delete.deleted_retrieve == "missing":
+            # Probed (Phase 7): a deleted product or coupon is a 404 on
+            # retrieve — `No such product: 'prod_…'` — while a deleted
+            # customer retrieves as the three-key stub (also probed). The
+            # knob carries the split; customers keep the default.
+            raise resource_missing(_display_name(spec), id_, param=error_param)
         return fields.deleted_stub(spec.object, id_)
     return spec.serializer(ctx, row)
 
@@ -495,7 +543,11 @@ def create(ctx: seahaven.Ctx, req: Request) -> dict[str, Any]:
     """
     spec = _spec_of(req)
     cols: dict[str, Any] = {
-        "id": _ids.stripe_id(ctx, spec.id_prefix),
+        "id": (
+            _ids.stripe_id(ctx, spec.id_prefix)
+            if spec.mint_id is None
+            else spec.mint_id(ctx, req.params.get("id"))
+        ),
         "x_seq": _seq.next_seq(ctx, spec.table),
         "created": ctx.clock.iso(),
     }
@@ -533,9 +585,33 @@ def update(ctx: seahaven.Ctx, req: Request) -> dict[str, Any]:
     fresh = _lookup.require_row(ctx, spec.table, _display_name(spec), id_, param=error_param)
     new = spec.serializer(ctx, fresh)
     if spec.updated_event is not None:
-        previous = {key: value for key, value in old.items() if new.get(key) != value}
+        previous = _previous_attributes(old, new)
         events.emit_event(ctx, type=spec.updated_event, obj=new, previous=previous or None)
     return new
+
+
+def _previous_attributes(old: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
+    """The changed keys' prior values, with `metadata` diffed per key.
+
+    Stripe's own `previous_attributes` shows only the metadata keys that
+    changed — `metadata: {"a": null}` for a newly-set key, the old value for
+    a changed or removed one (recorded on `product.updated` and
+    `coupon.updated`, Phase 7 probe) — not the whole prior map, which is
+    what a naive field-level diff would put there.
+    """
+    previous: dict[str, Any] = {}
+    for key, value in old.items():
+        fresh = new.get(key)
+        if fresh == value:
+            continue
+        if key == "metadata" and isinstance(value, dict) and isinstance(fresh, dict):
+            per_key = {k: v for k, v in value.items() if fresh.get(k) != v}
+            per_key.update({k: None for k in fresh if k not in value})
+            if per_key:
+                previous["metadata"] = per_key
+        else:
+            previous[key] = value
+    return previous
 
 
 def delete(ctx: seahaven.Ctx, req: Request) -> dict[str, Any]:
@@ -561,6 +637,8 @@ def delete(ctx: seahaven.Ctx, req: Request) -> dict[str, Any]:
         raise invalid_request(
             f"This {spec.object} cannot be deleted in its current state.", param=path_param
         )
+    if delete_spec.guard is not None:
+        delete_spec.guard(ctx, row)
     # The event is emitted AFTER the write, like create and update, per the
     # cross-cutting rule "after every row for that change is written"
     # (`components/cross_cutting.md` §3.4.2). This is the deliberately settled
@@ -573,11 +651,25 @@ def delete(ctx: seahaven.Ctx, req: Request) -> dict[str, Any]:
     # events`, step for `type=customer.deleted`). Emission order is therefore
     # unobservable through the snapshot and is fixed by the rule instead.
     if delete_spec.mode == "soft":
-        ctx.db.execute(f"UPDATE {spec.table} SET deleted = 1 WHERE id = ?", id_)
+        if delete_spec.zero_columns:
+            assignments = ", ".join(f"{column} = 0" for column in delete_spec.zero_columns)
+            ctx.db.execute(f"UPDATE {spec.table} SET deleted = 1, {assignments} WHERE id = ?", id_)
+        else:
+            ctx.db.execute(f"UPDATE {spec.table} SET deleted = 1 WHERE id = ?", id_)
     else:
         ctx.db.execute(f"DELETE FROM {spec.table} WHERE id = ?", id_)
     if spec.deleted_event is not None:
-        events.emit_event(ctx, type=spec.deleted_event, obj=spec.serializer(ctx, row))
+        # `zero_columns` flips serialized fields (`product.active`,
+        # `coupon.valid`) and the snapshot must show them flipped
+        # (`product.deleted` carries `active: false`, `coupon.deleted`
+        # `valid: false`, both probed Phase 7), so the snapshot row is
+        # re-read after the write.
+        final = (
+            _lookup.require_row(ctx, spec.table, _display_name(spec), id_, param=error_param)
+            if delete_spec.zero_columns
+            else row
+        )
+        events.emit_event(ctx, type=spec.deleted_event, obj=spec.serializer(ctx, final))
     return fields.deleted_stub(spec.object, id_)
 
 

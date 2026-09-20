@@ -102,11 +102,17 @@ def to_api(ctx: seahaven.Ctx, fmap: FieldMap, row: Mapping[str, Any]) -> dict[st
             raise seahaven.WorldBug(msg)
         value = row[column]
         if column in fmap.timestamps:
-            out[api_name] = _time.to_unix(value)
+            # Nullable timestamp columns (`coupon.redeem_by`,
+            # `promotion_code.expires_at`) stay null; only a present value
+            # converts.
+            out[api_name] = _time.to_unix(value) if value is not None else None
         elif column in fmap.json_columns:
             out[api_name] = _json.loads(value)
         elif column in fmap.booleans:
-            out[api_name] = bool(value)
+            # A nullable boolean column (`product.shippable`) is null when
+            # unset, not false — the distinction the spec's `nullable` flag
+            # carries (data_model §8).
+            out[api_name] = bool(value) if value is not None else None
         elif column in fmap.decimals:
             # A TEXT decimal literal emitted as a JSON number of exactly the
             # digits stored (data_model rule 6): no float ever exists here.

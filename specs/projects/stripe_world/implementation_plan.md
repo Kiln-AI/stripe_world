@@ -59,8 +59,8 @@ Each still touches only its own tables.
 - [x] **Phase 6: Customers and payment methods.** `customers`, `payment_methods`. The first real
       slice; establishes the pattern every later one copies. Includes magic-card behavior on
       payment-method creation.
-- [ ] **Phase 7: Catalog.** `products`, `prices`, `coupons`, `promotion_codes`, `tax_rates`. Mostly
-      generated CRUD — the slice that proves the `ResourceSpec` engine carries its weight.
+- [x] **Phase 7: Catalog.** `products`, `prices`, `coupons`, `promotion_codes`, `tax_rates`. Mostly
+       generated CRUD — the slice that proves the `ResourceSpec` engine carries its weight.
 - [ ] **Phase 8: The money path.** `payment_intents`, `charges`. Confirm, capture, cancel. The
       headline idempotency eval becomes runnable here.
 - [ ] **Phase 9: Refunds and disputes.** Partial refunds, over-refund rejection, dispute lifecycle.

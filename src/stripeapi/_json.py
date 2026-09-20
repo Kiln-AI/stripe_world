@@ -7,8 +7,9 @@ determinism test can compare bytes rather than parsed structures).
 """
 
 import json
+from decimal import Decimal
 
-__all__ = ["dumps", "loads"]
+__all__ = ["decimal_text", "dumps", "loads"]
 
 
 def dumps(value: object) -> str:
@@ -22,3 +23,13 @@ def loads(text: str | None) -> object | None:
     if text is None:
         return None
     return json.loads(text)
+
+
+def decimal_text(value: int | float | str | Decimal) -> str:
+    """A rate parameter as the canonical TEXT decimal literal a rate column
+    stores (data_model rule 6): `10` stays `'10'`, `22.5` stays `'22.5'`,
+    `8.875` stays `'8.875'` — no exponent, no trailing zeros, no float on
+    the path. The serializer emits `json.loads(text)`, so the wire carries a
+    JSON number of exactly these digits."""
+    decimal = value if isinstance(value, Decimal) else Decimal(str(value))
+    return format(decimal.normalize(), "f")

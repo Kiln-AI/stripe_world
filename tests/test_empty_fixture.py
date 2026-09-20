@@ -28,14 +28,28 @@ def test_the_empty_fixture_is_committed(world: seahaven.World) -> None:
 def test_an_instance_of_empty_has_the_schema_and_no_rows(instance: seahaven.Instance) -> None:
     assert world_tables(instance.inspect().conn) == [
         "counters",
+        "coupons",
         "customers",
         "events",
         "payment_methods",
+        "prices",
+        "products",
+        "promotion_codes",
+        "tax_rates",
     ]
-    # No tracked table carries a row: no customer, no event, no payment method.
-    assert instance.inspect().one("SELECT count(*) AS n FROM customers") == {"n": 0}
-    assert instance.inspect().one("SELECT count(*) AS n FROM events") == {"n": 0}
-    assert instance.inspect().one("SELECT count(*) AS n FROM payment_methods") == {"n": 0}
+    # No tracked table carries a row: no customer, no event, no payment method,
+    # no catalog object.
+    for table in (
+        "customers",
+        "events",
+        "payment_methods",
+        "products",
+        "prices",
+        "coupons",
+        "promotion_codes",
+        "tax_rates",
+    ):
+        assert instance.inspect().one(f"SELECT count(*) AS n FROM {table}") == {"n": 0}
 
 
 def test_the_counters_seed_is_present_and_untracked(instance: seahaven.Instance) -> None:

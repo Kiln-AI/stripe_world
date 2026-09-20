@@ -94,7 +94,7 @@ def test_the_stub_and_request_prefixes_mint_too(minting: seahaven.World) -> None
             assert len(minted) == len(prefix) + 24
 
 
-def test_coupon_ids_are_caller_suppliable_or_eight_uppercase(probe: Probe) -> None:
+def test_coupon_ids_are_caller_suppliable_or_eight_alphanumeric(probe: Probe) -> None:
     def mint_coupon(ctx: seahaven.Ctx, supplied: str | None) -> str:
         return coupon_id(ctx, supplied)
 
@@ -103,4 +103,7 @@ def test_coupon_ids_are_caller_suppliable_or_eight_uppercase(probe: Probe) -> No
         assert instance.call("mint_coupon", supplied="TEN_OFF") == "TEN_OFF"
         generated = instance.call("mint_coupon", supplied=None)
         assert len(generated) == 8
-        assert all(c in string.ascii_uppercase + string.digits for c in generated)
+        # Mixed case, matching the recorded minted ids (`hbzb1NEf`) — the
+        # uppercase-only shape the data-model design guessed was corrected by
+        # the Phase 7 recording.
+        assert all(c in string.ascii_letters + string.digits for c in generated)

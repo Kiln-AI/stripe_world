@@ -105,9 +105,11 @@ def stripe_id(ctx: seahaven.Ctx, prefix: str) -> str:
 def coupon_id(ctx: seahaven.Ctx, supplied: str | None) -> str:
     """Coupons are the one resource whose id is caller-suppliable and unprefixed.
 
-    Returns `supplied` if given, else an 8-character uppercase-alphanumeric
-    token — the shape of Stripe's own generated coupon ids, e.g. `Z4OV52SU`.
+    Returns `supplied` if given, else an 8-character alphanumeric token —
+    mixed case: the recording shows `hbzb1NEf`, `dj30FOe5` (Phase 7 probe,
+    2026-09-20), not the uppercase-only shape `components/data_model.md` §2
+    guessed. The recording wins.
     """
     if supplied is not None:
         return supplied
-    return "".join(ctx.ids.random.choice(string.ascii_uppercase + string.digits) for _ in range(8))
+    return "".join(ctx.ids.random.choice(string.ascii_letters + string.digits) for _ in range(8))

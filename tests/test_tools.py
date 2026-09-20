@@ -33,10 +33,11 @@ def test_a_non_object_params_is_refused_before_the_dispatcher(
 
 
 def test_the_read_tool_cannot_reach_a_post_only_route(instance: seahaven.Instance) -> None:
-    """A `POST`-only path through the read tool is the router's 405, not a
-    tool-contract error — the verb was legal, the URL was not."""
+    """A `POST`-only path through the read tool is the router's unrecognized
+    404, not a tool-contract error — the verb was legal, the URL was not."""
     result = instance.call("stripe_api_read", path="/v1/charges/ch_1/capture")
-    assert result["status"] == 405
+    assert result["status"] == 404
+    assert result["body"]["error"]["message"].startswith("Unrecognized request URL")
 
 
 def test_call_stripe_reaches_every_verb(instance: seahaven.Instance) -> None:
@@ -78,10 +79,17 @@ def seahaven_world_tool_description(name: str) -> str:
 def test_the_wired_surface_is_small_and_named() -> None:
     """What is served end to end: the customers phase's thirteen routes (five
     core customers, six payment_methods, two customer-scoped payment-method
-    reads). The rest are routed data awaiting their resource phases, and
-    calling one is an honest `INTERNAL` naming the op (see `test_dispatch.py`)."""
+    reads) plus the catalog phase's twenty-two (five products, four prices,
+    five coupons, four promotion_codes, four tax_rates). The rest are routed
+    data awaiting their resource phases, and calling one is an honest
+    `INTERNAL` naming the op (see `test_dispatch.py`)."""
     wired = [route.op_id for route in _all_routes() if route.params is not None]
     assert wired == [
+        "GetCoupons",
+        "PostCoupons",
+        "GetCouponsCoupon",
+        "PostCouponsCoupon",
+        "DeleteCouponsCoupon",
         "GetCustomers",
         "PostCustomers",
         "GetCustomersCustomer",
@@ -95,6 +103,23 @@ def test_the_wired_surface_is_small_and_named() -> None:
         "PostPaymentMethodsPaymentMethod",
         "PostPaymentMethodsPaymentMethodAttach",
         "PostPaymentMethodsPaymentMethodDetach",
+        "GetPrices",
+        "PostPrices",
+        "GetPricesPrice",
+        "PostPricesPrice",
+        "GetProducts",
+        "PostProducts",
+        "GetProductsId",
+        "PostProductsId",
+        "DeleteProductsId",
+        "GetPromotionCodes",
+        "PostPromotionCodes",
+        "GetPromotionCodesPromotionCode",
+        "PostPromotionCodesPromotionCode",
+        "GetTaxRates",
+        "PostTaxRates",
+        "GetTaxRatesTaxRate",
+        "PostTaxRatesTaxRate",
     ]
 
 

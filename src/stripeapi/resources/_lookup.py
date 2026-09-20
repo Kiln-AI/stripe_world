@@ -5,7 +5,9 @@ Every handler that writes a child row `SELECT`s its parent first
 `DbError` and reach the agent as `INTERNAL`, instead of the actionable 404
 Stripe sends. This module is that family, plus `subject`, the one-line helper
 the eight legacy alias handlers use to read their subject id under whichever
-placeholder name the pattern spelled (`components/dispatcher.md` §3.1.3).
+placeholder name the pattern spelled (`components/dispatcher.md` §3.1.3), and
+`merge_json_map`, the one shape of engine-update fix-up three catalog
+resources share.
 
 It deliberately takes a table and an object name rather than a `ResourceSpec`:
 sitting below the engine in the import order is what keeps the cycle away.
@@ -16,9 +18,10 @@ from typing import Any
 
 import seahaven
 
+from stripeapi import _json
 from stripeapi.stripe_errors import resource_missing
 
-__all__ = ["require_live_row", "require_row", "subject"]
+__all__ = ["merge_json_map", "require_live_row", "require_row", "subject"]
 
 
 def require_row(
@@ -79,3 +82,33 @@ def subject(req: Mapping[str, str], *names: str) -> str:
         if name in req:
             return req[name]
     raise seahaven.WorldBug(f"none of {names!r} present in the path parameters")
+
+
+def merge_json_map(
+    ctx: seahaven.Ctx,
+    table: str,
+    id: str,
+    column: str,
+    update: Mapping[str, Any],
+    *,
+    drop: tuple[str, ...] = (),
+) -> str:
+    """The stored JSON object at `table.id.column`, merged per key with
+    `update`, as canonical JSON text.
+
+    The engine dumps dict parameters to JSON text before a normalizer sees
+    them, so every resource whose update merges a map-shaped column
+    (`coupons.currency_options`, `prices.currency_options`,
+    `promotion_codes.restrictions`) reads the validated dict off the request
+    and does this against the stored row — the map-level analogue of
+    metadata's per-key merge. `drop` names stored keys to remove first: the
+    sub-keys that replace rather than merge.
+    """
+    row = ctx.db.one(f"SELECT {column} FROM {table} WHERE id = ?", id)
+    if row is None:  # the engine looked this row up moments ago
+        raise seahaven.WorldBug(f"merge_json_map: row {table}/{id!r} vanished under the engine")
+    loaded: object = _json.loads(row[column])
+    current: dict = loaded if isinstance(loaded, dict) else {}
+    for key in drop:
+        current.pop(key, None)
+    return _json.dumps({**current, **update})

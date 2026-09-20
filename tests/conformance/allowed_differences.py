@@ -108,6 +108,96 @@ def _no_such_customer_modulo_id(recorded: Any, replayed: Any) -> bool:
     return bool(_NO_SUCH_CUSTOMER.fullmatch(recorded) and _NO_SUCH_CUSTOMER.fullmatch(replayed))
 
 
+#: The unrecognized-URL message: the real body continues with Stripe's
+#: docs/support pointers after the path; this world emits the quoted form
+#: alone. Both sides' variable content is the `<METHOD>: <path>` pair, which
+#: embeds freshly minted ids when the mismatch step names a real object.
+_UNRECOGNIZED_LONG = re.compile(
+    r"^Unrecognized request URL \((?:GET|POST|DELETE): .*\)\. "
+    r"Please see https://stripe\.com/docs or we can help at https://support\.stripe\.com/\.$"
+)
+_UNRECOGNIZED_SHORT = re.compile(r"^Unrecognized request URL \((?:GET|POST|DELETE): .*\)\.$")
+
+
+def _unrecognized_url_modulo_suffix(recorded: Any, replayed: Any) -> bool:
+    if not isinstance(recorded, str) or not isinstance(replayed, str):
+        return False
+    return bool(_UNRECOGNIZED_LONG.fullmatch(recorded) and _UNRECOGNIZED_SHORT.fullmatch(replayed))
+
+
+#: The prices lookup-key conflict names the holding price's id — its whole
+#: variable content (probed, Phase 7). Same narrowing idea as the customer
+#: form above.
+_PRICE_LOOKUP_CONFLICT = re.compile(
+    r"^A price \(`price_[A-Za-z0-9]+`\) already uses that lookup key\.$"
+)
+
+
+def _price_lookup_conflict_modulo_id(recorded: Any, replayed: Any) -> bool:
+    if not isinstance(recorded, str) or not isinstance(replayed, str):
+        return False
+    return bool(
+        _PRICE_LOOKUP_CONFLICT.fullmatch(recorded) and _PRICE_LOOKUP_CONFLICT.fullmatch(replayed)
+    )
+
+
+#: Any other `No such <object>: '<id>'` message — the same id-only rule for
+#: the resources whose messages were recorded later (products, coupons,
+#: promotion codes, tax rates; Phase 7). Form-only comparison, so a message
+#: that differs in anything but the id still fails.
+_NO_SUCH_OBJECT = re.compile(r"^No such [a-zA-Z][a-zA-Z ]+: '[A-Za-z0-9_.\-']+'$")
+
+
+def _no_such_object_modulo_id(recorded: Any, replayed: Any) -> bool:
+    if not isinstance(recorded, str) or not isinstance(replayed, str):
+        return False
+    return bool(_NO_SUCH_OBJECT.fullmatch(recorded) and _NO_SUCH_OBJECT.fullmatch(replayed))
+
+
+def _both_prefixed_ids(*prefixes: str) -> Callable[[Any, Any], bool]:
+    """A reference-valued field predicate: both sides are freshly minted ids
+    of the given shape, never equal — the `**.id` rule on the field name a
+    reference lands on."""
+
+    def check(recorded: Any, replayed: Any) -> bool:
+        return (
+            isinstance(recorded, str)
+            and isinstance(replayed, str)
+            and recorded.startswith(prefixes)
+            and replayed.startswith(prefixes)
+        )
+
+    return check
+
+
+#: A minted promotion-code `code`: eight uppercase alphanumerics per side
+#: (recorded `BFDACGQS`; ours draws the same shape from the seeded stream).
+_MINTED_CODE = re.compile(r"^[A-Z0-9]{8}$")
+
+
+def _both_minted_codes(recorded: Any, replayed: Any) -> bool:
+    return (
+        isinstance(recorded, str)
+        and isinstance(replayed, str)
+        and bool(_MINTED_CODE.fullmatch(recorded))
+        and bool(_MINTED_CODE.fullmatch(replayed))
+    )
+
+
+#: A minted coupon id: eight mixed-case alphanumerics per side (recorded
+#: `hbzb1NEf`).
+_MINTED_COUPON = re.compile(r"^[A-Za-z0-9]{8}$")
+
+
+def _both_minted_coupon_ids(recorded: Any, replayed: Any) -> bool:
+    return (
+        isinstance(recorded, str)
+        and isinstance(replayed, str)
+        and bool(_MINTED_COUPON.fullmatch(recorded))
+        and bool(_MINTED_COUPON.fullmatch(replayed))
+    )
+
+
 ALLOWED_DIFFERENCES: list[AllowedDifference] = [
     AllowedDifference(
         "**.id",
@@ -183,6 +273,106 @@ ALLOWED_DIFFERENCES: list[AllowedDifference] = [
         "`No such customer: '<cus_id>'` form on both sides; every other "
         "message stays byte-exact.",
         predicate=_no_such_customer_modulo_id,
+    ),
+    AllowedDifference(
+        "**.error.message",
+        "The same id-only rule for every other `No such <object>: '<id>'` "
+        "message (recorded for products, coupons, promotion codes and tax "
+        "rates, Phase 7): form-only comparison, id-shaped on both sides.",
+        predicate=_no_such_object_modulo_id,
+    ),
+    AllowedDifference(
+        "**.error.message",
+        "The unrecognized-URL 404 (recorded in cassette 07 on both a method "
+        "mismatch and an unknown path): the real message continues with "
+        "Stripe's docs/support pointers, which this world has no dashboard "
+        "to source, so it emits the quoted form alone. Predicate mode admits "
+        "exactly the long form recorded and the short form replayed; the "
+        "`<METHOD>: <path>` pair itself still carries any minted ids.",
+        predicate=_unrecognized_url_modulo_suffix,
+    ),
+    AllowedDifference(
+        "**.updated",
+        "A product's `updated` is a timestamp with the same clock reason as "
+        "`created` (data_model §4.2 names the pair); the instance clock and "
+        "the record-time wall clock are different instants.",
+    ),
+    AllowedDifference(
+        "**.error.message",
+        "The prices lookup-key conflict names the holding price's id — "
+        "the `**.id` rule in its second message-shaped disguise (probed, "
+        "Phase 7). Predicate mode admits exactly the `A price (…)` form on "
+        "both sides.",
+        predicate=_price_lookup_conflict_modulo_id,
+    ),
+    # --- the catalog's reference-valued fields (Phase 7) ---
+    AllowedDifference(
+        "**.default_price",
+        "A product's default price carries a freshly minted id "
+        "(architecture.md §4.4): the `**.id` rule on the field a reference "
+        "lands on, predicated to id-shaped pairs so a real divergence still "
+        "fails.",
+        predicate=_both_prefixed_ids("price_"),
+    ),
+    AllowedDifference(
+        "**.product",
+        "A price's product reference carries a freshly minted id — the "
+        "`**.id` rule again, predicated to `prod_`-shaped pairs.",
+        predicate=_both_prefixed_ids("prod_"),
+    ),
+    AllowedDifference(
+        "**.promotion.coupon",
+        "The coupon nested under `promotion` is a reference whose value is "
+        "minted per instance — the `**.id` rule on the pinned version's "
+        "nested spelling, narrowed to minted-shape pairs so a caller-supplied "
+        "coupon id still compares byte-exact.",
+        predicate=_both_minted_coupon_ids,
+    ),
+    AllowedDifference(
+        "**.code",
+        "A promotion code's minted `code` is eight uppercase alphanumerics "
+        "drawn per instance (recorded `BFDACGQS`); caller-supplied codes "
+        "compare byte-exact and never reach this entry.",
+        predicate=_both_minted_codes,
+    ),
+    # The three fields the live product body carries that the pinned spec
+    # does not declare (recorded, Phase 7): this world emits the spec's
+    # property set — the same ruling as `shared_payment_granted_token`.
+    AllowedDifference(
+        "**.attributes",
+        "The live product body carries `attributes: []`, a legacy field the "
+        "pinned spec no longer declares; the spec is the authority for "
+        "shape, so this world omits it.",
+        predicate=lambda recorded, replayed: recorded == [] and replayed is None,
+    ),
+    AllowedDifference(
+        "**.tax_details",
+        "The live product body carries a `tax_details` object (mirroring "
+        "`tax_code`) the pinned spec does not declare; omitted here for the "
+        "same reason as `attributes`.",
+        predicate=lambda recorded, replayed: replayed is None,
+    ),
+    AllowedDifference(
+        "body.type",
+        'The live product body carries `type: "service"`, undeclared at '
+        "the pinned version. Path-scoped rather than `**` because `type` is "
+        "a real, compared field on price bodies; the predicate admits only "
+        "the product's constant.",
+        predicate=lambda recorded, replayed: recorded == "service" and replayed is None,
+    ),
+    AllowedDifference(
+        "body.data[*].type",
+        "The list-bodies form of the product `type` entry above: same "
+        "constant, same reason, scoped so price lists still compare their "
+        "`type` byte-exact.",
+        predicate=lambda recorded, replayed: recorded == "service" and replayed is None,
+    ),
+    AllowedDifference(
+        "**.recurring.trial_period_days",
+        "The live `price.recurring` carries `trial_period_days`, which the "
+        "pinned spec does not declare on `recurring`; omitted here like every "
+        "other undeclared live field.",
+        predicate=lambda recorded, replayed: replayed is None,
     ),
     # Scenario 6's attachment refusal: the recorded decline envelope carries
     # network chatter and a form-boundary artifact this world deliberately
@@ -289,6 +479,48 @@ STRUCTURAL_DIFFERENCES: list[str] = [
     "Token card expiries are frozen at the recorded (9, 2027): real Stripe "
     "rolls a token's default expiry forward with wall time, and a frozen "
     "clock cannot follow (billing/magic_cards.py::TOKEN_EXPIRY).",
+    "The catalog's stored-only fields: `coupon.applies_to`, "
+    "`coupon.currency_options` and `price.currency_options` are accepted "
+    "parameters that no recorded response body carries at the pinned "
+    "version, and a tiered price's `tiers` never appears either (probed, "
+    "Phase 7). They are stored for the billing phases to read and never "
+    "serialized; an undeclared-in-response reading would fail schema "
+    "conformance the other way.",
+    "Rate float normalization: real Stripe serializes a whole-number rate "
+    "as a float (`percent_off: 10.0`, `percentage: 20.0`), and this world "
+    "emits the exact digits stored (`10`, `20`). Both are JSON numbers and "
+    "compare equal under the replay diff; the textual difference is Ruby "
+    "serialization, not a different value.",
+    "Boolean list filters arrive as JSON booleans here and as form-encoded "
+    "strings on the wire (`active=true`): the recorded refusals for "
+    "string-typed booleans (`Invalid boolean: 'false'`) do not exist on this "
+    "surface, which type-checks instead (functional spec §2.2 — the "
+    "scalar-stringification declaration, narrowed to the catalog's filters).",
+    "The map-parameter currency refusal: an unsupported or malformed key "
+    "answers `Invalid currency: <key>. Stripe currently supports these "
+    "currencies: …` with Stripe's full ordered 154-code list (probed live, "
+    "Phase 7). This world reproduces the message from a constant transcribed "
+    "from that same probe (`dispatch/params.py`). A cassette step would bind "
+    "the transcription — the replay diffs Stripe's live message against the "
+    "constant, exactly like any other verbatim message — and it is declined "
+    "as a maintenance choice: the list churns with Stripe's currency "
+    "support, and a committed step would turn every churn into a cassette "
+    "re-record. The transcription's freshness is therefore this declared "
+    "property, not a replay-checked one.",
+    "Price amount XOR: a `unit_amount_decimal` together with any "
+    "`currency_options[<cur>][unit_amount]` refuses on the real API (`You may "
+    "only specify one of these parameters: …`, probed live, Phase 7); this "
+    "world accepts and stores both. Recording the refusal would need a "
+    "dedicated cassette step beside the legal carrier (an integer "
+    "`unit_amount` with currency_options, which cassette 07 records), so the "
+    "guard is declared here pending a later phase's recording slot.",
+    "Method-mismatch responses: a verb a path does not carry answers 404 "
+    "`Unrecognized request URL` on the real API (recorded in cassette 07 on "
+    "DELETE /v1/prices/{price} and on an unknown path, Phase 7). The status "
+    "and the quoted form match; the real message then continues with "
+    "Stripe's docs/support pointers, which this world has no dashboard to "
+    "source — the suffix is the predicated `**.error.message` entry above, "
+    "not a silent pass.",
 ]
 
 # --- Matching --------------------------------------------------------------------

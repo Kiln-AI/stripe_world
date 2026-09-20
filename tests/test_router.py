@@ -1,4 +1,5 @@
-"""The trie: precedence, backtracking, and the 404/405 distinction.
+"""The trie: precedence, backtracking, and the joint (method, path) match
+with its single 404 answer.
 
 These run against the real compiled `ROUTER` — the same instance the tools
 dispatch through — plus small synthetic tables for the malformed-entry
@@ -79,13 +80,18 @@ def test_unknown_path_is_404() -> None:
     assert error.message == "Unrecognized request URL (GET: /v1/widgets)."
 
 
-def test_method_mismatch_is_405_not_404() -> None:
+def test_method_mismatch_is_the_unrecognized_404() -> None:
+    """A path that exists under other verbs but not this one answers the same
+    404 as an unknown path — probed live at the pinned version (Phase 7:
+    DELETE on /v1/prices/{price}, which carries GET and POST, answered 404
+    `Unrecognized request URL`), superseding the 405 the dispatcher design
+    had to declare as a guess."""
     from stripeapi.dispatch.router import ROUTER
 
     with pytest.raises(StripeApiError) as raised:
         ROUTER.match("GET", "/v1/charges/ch_1/capture")
-    assert raised.value.status == 405
-    assert raised.value.message == "Not allowed: GET /v1/charges/ch_1/capture"
+    assert raised.value.status == 404
+    assert raised.value.message == "Unrecognized request URL (GET: /v1/charges/ch_1/capture)."
 
 
 def test_trailing_slash_is_404() -> None:

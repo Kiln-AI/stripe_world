@@ -1,0 +1,1344 @@
+{
+  "scenario": "probe_catalog_events",
+  "description": "Catalog event shapes: per-key metadata previous_attributes, the flipped delete snapshots, the transfer's holder-first price.updated pair, default_price_data's event order, and the deleted-customer stub.",
+  "recorded_at": "2026-09-20T04:30:05+00:00",
+  "stripe_version_pin": "2026-08-26.dahlia",
+  "steps": [
+    {
+      "seq": 0,
+      "method": "POST",
+      "path": "/v1/products",
+      "path_refs": {},
+      "params": {
+        "name": "probe events",
+        "metadata": {
+          "seed": "1"
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": "product",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "prod_VICnKesNwG8N10",
+        "object": "product",
+        "active": true,
+        "attributes": [],
+        "created": 1789878602,
+        "default_price": null,
+        "description": null,
+        "images": [],
+        "livemode": false,
+        "marketing_features": [],
+        "metadata": {
+          "seed": "1"
+        },
+        "name": "probe events",
+        "package_dimensions": null,
+        "shippable": null,
+        "statement_descriptor": null,
+        "tax_code": null,
+        "tax_details": null,
+        "type": "service",
+        "unit_label": null,
+        "updated": 1789878603,
+        "url": null
+      }
+    },
+    {
+      "seq": 1,
+      "method": "POST",
+      "path": "/v1/products/{id}",
+      "path_refs": {
+        "id": {
+          "step": "product",
+          "field": "id"
+        }
+      },
+      "params": {
+        "description": "d",
+        "metadata": {
+          "a": "1"
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "prod_VICnKesNwG8N10",
+        "object": "product",
+        "active": true,
+        "attributes": [],
+        "created": 1789878602,
+        "default_price": null,
+        "description": "d",
+        "images": [],
+        "livemode": false,
+        "marketing_features": [],
+        "metadata": {
+          "a": "1",
+          "seed": "1"
+        },
+        "name": "probe events",
+        "package_dimensions": null,
+        "shippable": null,
+        "statement_descriptor": null,
+        "tax_code": null,
+        "tax_details": null,
+        "type": "service",
+        "unit_label": null,
+        "updated": 1789878603,
+        "url": null
+      }
+    },
+    {
+      "seq": 2,
+      "method": "DELETE",
+      "path": "/v1/products/{id}",
+      "path_refs": {
+        "id": {
+          "step": "product",
+          "field": "id"
+        }
+      },
+      "params": {},
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "prod_VICnKesNwG8N10",
+        "object": "product",
+        "deleted": true
+      }
+    },
+    {
+      "seq": 3,
+      "method": "GET",
+      "path": "/v1/events",
+      "path_refs": {},
+      "params": {
+        "type": "product.created",
+        "limit": 1
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "object": "list",
+        "data": [
+          {
+            "id": "evt_1UHcO7HIBYZYyePrzU3UN3bT",
+            "object": "event",
+            "api_version": "2026-08-26.dahlia",
+            "created": 1789878603,
+            "data": {
+              "object": {
+                "id": "prod_VICnKesNwG8N10",
+                "object": "product",
+                "active": true,
+                "attributes": [],
+                "created": 1789878602,
+                "default_price": null,
+                "description": null,
+                "images": [],
+                "livemode": false,
+                "marketing_features": [],
+                "metadata": {
+                  "seed": "1"
+                },
+                "name": "probe events",
+                "package_dimensions": null,
+                "shippable": null,
+                "statement_descriptor": null,
+                "tax_code": null,
+                "tax_details": null,
+                "type": "service",
+                "unit_label": null,
+                "updated": 1789878603,
+                "url": null
+              }
+            },
+            "livemode": false,
+            "pending_webhooks": 0,
+            "request": {
+              "id": "req_Z1lD9SnQRoIjxh",
+              "idempotency_key": "eff318df-f9b3-6010-6eda-25b0946df159"
+            },
+            "type": "product.created"
+          }
+        ],
+        "has_more": true,
+        "url": "/v1/events"
+      }
+    },
+    {
+      "seq": 4,
+      "method": "GET",
+      "path": "/v1/events",
+      "path_refs": {},
+      "params": {
+        "type": "product.updated",
+        "limit": 1
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "object": "list",
+        "data": [
+          {
+            "id": "evt_1UHcO7HIBYZYyePrza4yaC2t",
+            "object": "event",
+            "api_version": "2026-08-26.dahlia",
+            "created": 1789878603,
+            "data": {
+              "object": {
+                "id": "prod_VICnKesNwG8N10",
+                "object": "product",
+                "active": true,
+                "attributes": [],
+                "created": 1789878602,
+                "default_price": null,
+                "description": "d",
+                "images": [],
+                "livemode": false,
+                "marketing_features": [],
+                "metadata": {
+                  "a": "1",
+                  "seed": "1"
+                },
+                "name": "probe events",
+                "package_dimensions": null,
+                "shippable": null,
+                "statement_descriptor": null,
+                "tax_code": null,
+                "tax_details": null,
+                "type": "service",
+                "unit_label": null,
+                "updated": 1789878603,
+                "url": null
+              },
+              "previous_attributes": {
+                "description": null,
+                "metadata": {
+                  "a": null
+                }
+              }
+            },
+            "livemode": false,
+            "pending_webhooks": 0,
+            "request": {
+              "id": "req_qilJqgArBLHO2H",
+              "idempotency_key": "8b3695b0-d968-968f-e23f-ed1c4d2961c0"
+            },
+            "type": "product.updated"
+          }
+        ],
+        "has_more": true,
+        "url": "/v1/events"
+      }
+    },
+    {
+      "seq": 5,
+      "method": "GET",
+      "path": "/v1/events",
+      "path_refs": {},
+      "params": {
+        "type": "product.deleted",
+        "limit": 1
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "object": "list",
+        "data": [
+          {
+            "id": "evt_1UHcO7HIBYZYyePr5CNHNuUK",
+            "object": "event",
+            "api_version": "2026-08-26.dahlia",
+            "created": 1789878603,
+            "data": {
+              "object": {
+                "id": "prod_VICnKesNwG8N10",
+                "object": "product",
+                "active": false,
+                "attributes": [],
+                "created": 1789878602,
+                "default_price": null,
+                "description": "d",
+                "images": [],
+                "livemode": false,
+                "marketing_features": [],
+                "metadata": {
+                  "a": "1",
+                  "seed": "1"
+                },
+                "name": "probe events",
+                "package_dimensions": null,
+                "shippable": null,
+                "statement_descriptor": null,
+                "tax_code": null,
+                "tax_details": null,
+                "type": "service",
+                "unit_label": null,
+                "updated": 1789878603,
+                "url": null
+              }
+            },
+            "livemode": false,
+            "pending_webhooks": 0,
+            "request": {
+              "id": "req_Q9Gh6eT67mKByS",
+              "idempotency_key": null
+            },
+            "type": "product.deleted"
+          }
+        ],
+        "has_more": true,
+        "url": "/v1/events"
+      }
+    },
+    {
+      "seq": 6,
+      "method": "POST",
+      "path": "/v1/products",
+      "path_refs": {},
+      "params": {
+        "name": "probe dpd",
+        "default_price_data": {
+          "currency": "usd",
+          "unit_amount": 1500
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": "priced",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "prod_VICnPyOOt7r9rj",
+        "object": "product",
+        "active": true,
+        "attributes": [],
+        "created": 1789878603,
+        "default_price": "price_1UHcO7HIBYZYyePrcIfwPiLL",
+        "description": null,
+        "images": [],
+        "livemode": false,
+        "marketing_features": [],
+        "metadata": {},
+        "name": "probe dpd",
+        "package_dimensions": null,
+        "shippable": null,
+        "statement_descriptor": null,
+        "tax_code": null,
+        "tax_details": null,
+        "type": "service",
+        "unit_label": null,
+        "updated": 1789878603,
+        "url": null
+      }
+    },
+    {
+      "seq": 7,
+      "method": "GET",
+      "path": "/v1/events",
+      "path_refs": {},
+      "params": {
+        "type": "product.created",
+        "limit": 1
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "object": "list",
+        "data": [
+          {
+            "id": "evt_1UHcO7HIBYZYyePrgqRPnP4S",
+            "object": "event",
+            "api_version": "2026-08-26.dahlia",
+            "created": 1789878603,
+            "data": {
+              "object": {
+                "id": "prod_VICnPyOOt7r9rj",
+                "object": "product",
+                "active": true,
+                "attributes": [],
+                "created": 1789878603,
+                "default_price": "price_1UHcO7HIBYZYyePrcIfwPiLL",
+                "description": null,
+                "images": [],
+                "livemode": false,
+                "marketing_features": [],
+                "metadata": {},
+                "name": "probe dpd",
+                "package_dimensions": null,
+                "shippable": null,
+                "statement_descriptor": null,
+                "tax_code": null,
+                "tax_details": null,
+                "type": "service",
+                "unit_label": null,
+                "updated": 1789878603,
+                "url": null
+              }
+            },
+            "livemode": false,
+            "pending_webhooks": 0,
+            "request": {
+              "id": "req_MMVQAx0MUVZsrS",
+              "idempotency_key": "cc5609a4-4172-1f14-afec-ce177dd70679"
+            },
+            "type": "product.created"
+          }
+        ],
+        "has_more": true,
+        "url": "/v1/events"
+      }
+    },
+    {
+      "seq": 8,
+      "method": "GET",
+      "path": "/v1/events",
+      "path_refs": {},
+      "params": {
+        "type": "price.created",
+        "limit": 1
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "object": "list",
+        "data": [
+          {
+            "id": "evt_1UHcO7HIBYZYyePr5uHKFbK3",
+            "object": "event",
+            "api_version": "2026-08-26.dahlia",
+            "created": 1789878603,
+            "data": {
+              "object": {
+                "id": "price_1UHcO7HIBYZYyePrcIfwPiLL",
+                "object": "price",
+                "active": true,
+                "billing_scheme": "per_unit",
+                "created": 1789878603,
+                "currency": "usd",
+                "custom_unit_amount": null,
+                "livemode": false,
+                "lookup_key": null,
+                "metadata": {},
+                "nickname": null,
+                "product": "prod_VICnPyOOt7r9rj",
+                "recurring": null,
+                "tax_behavior": "unspecified",
+                "tiers_mode": null,
+                "transform_quantity": null,
+                "type": "one_time",
+                "unit_amount": 1500,
+                "unit_amount_decimal": "1500"
+              }
+            },
+            "livemode": false,
+            "pending_webhooks": 0,
+            "request": {
+              "id": "req_MMVQAx0MUVZsrS",
+              "idempotency_key": "cc5609a4-4172-1f14-afec-ce177dd70679"
+            },
+            "type": "price.created"
+          }
+        ],
+        "has_more": true,
+        "url": "/v1/events"
+      }
+    },
+    {
+      "seq": 9,
+      "method": "POST",
+      "path": "/v1/prices",
+      "path_refs": {},
+      "params": {
+        "currency": "usd",
+        "unit_amount": 999,
+        "product": {
+          "$ref": {
+            "step": "priced",
+            "field": "id"
+          }
+        },
+        "lookup_key": "probe2609200430"
+      },
+      "idempotency_key": null,
+      "binds_as": "holder",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "price_1UHcO7HIBYZYyePrbYmTKGxD",
+        "object": "price",
+        "active": true,
+        "billing_scheme": "per_unit",
+        "created": 1789878603,
+        "currency": "usd",
+        "custom_unit_amount": null,
+        "livemode": false,
+        "lookup_key": "probe2609200430",
+        "metadata": {},
+        "nickname": null,
+        "product": "prod_VICnPyOOt7r9rj",
+        "recurring": null,
+        "tax_behavior": "unspecified",
+        "tiers_mode": null,
+        "transform_quantity": null,
+        "type": "one_time",
+        "unit_amount": 999,
+        "unit_amount_decimal": "999"
+      }
+    },
+    {
+      "seq": 10,
+      "method": "POST",
+      "path": "/v1/prices",
+      "path_refs": {},
+      "params": {
+        "currency": "usd",
+        "unit_amount": 555,
+        "product": {
+          "$ref": {
+            "step": "priced",
+            "field": "id"
+          }
+        },
+        "lookup_key": "probe2609200430",
+        "transfer_lookup_key": true
+      },
+      "idempotency_key": null,
+      "binds_as": "transferee",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "price_1UHcO8HIBYZYyePrGP6ARFru",
+        "object": "price",
+        "active": true,
+        "billing_scheme": "per_unit",
+        "created": 1789878603,
+        "currency": "usd",
+        "custom_unit_amount": null,
+        "livemode": false,
+        "lookup_key": "probe2609200430",
+        "metadata": {},
+        "nickname": null,
+        "product": "prod_VICnPyOOt7r9rj",
+        "recurring": null,
+        "tax_behavior": "unspecified",
+        "tiers_mode": null,
+        "transform_quantity": null,
+        "type": "one_time",
+        "unit_amount": 555,
+        "unit_amount_decimal": "555"
+      }
+    },
+    {
+      "seq": 11,
+      "method": "GET",
+      "path": "/v1/events",
+      "path_refs": {},
+      "params": {
+        "type": "price.updated",
+        "limit": 2
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "object": "list",
+        "data": [
+          {
+            "id": "evt_1UHcO8HIBYZYyePr2rMnG14r",
+            "object": "event",
+            "api_version": "2026-08-26.dahlia",
+            "created": 1789878604,
+            "data": {
+              "object": {
+                "id": "price_1UHcO7HIBYZYyePrbYmTKGxD",
+                "object": "price",
+                "active": true,
+                "billing_scheme": "per_unit",
+                "created": 1789878603,
+                "currency": "usd",
+                "custom_unit_amount": null,
+                "livemode": false,
+                "lookup_key": null,
+                "metadata": {},
+                "nickname": null,
+                "product": "prod_VICnPyOOt7r9rj",
+                "recurring": null,
+                "tax_behavior": "unspecified",
+                "tiers_mode": null,
+                "transform_quantity": null,
+                "type": "one_time",
+                "unit_amount": 999,
+                "unit_amount_decimal": "999"
+              },
+              "previous_attributes": {
+                "lookup_key": "probe2609200430"
+              }
+            },
+            "livemode": false,
+            "pending_webhooks": 0,
+            "request": {
+              "id": "req_WCbVoUjDcxSbVh",
+              "idempotency_key": "fbb17e3d-f63b-9121-442a-03332ca35149"
+            },
+            "type": "price.updated"
+          },
+          {
+            "id": "evt_1UHcO2HIBYZYyePrUkAO2vHD",
+            "object": "event",
+            "api_version": "2026-08-26.dahlia",
+            "created": 1789878598,
+            "data": {
+              "object": {
+                "id": "price_1UHcO0HIBYZYyePr3V3IfGSN",
+                "object": "price",
+                "active": true,
+                "billing_scheme": "per_unit",
+                "created": 1789878596,
+                "currency": "usd",
+                "custom_unit_amount": null,
+                "livemode": false,
+                "lookup_key": null,
+                "metadata": {},
+                "nickname": null,
+                "product": "prod_VICnw5PPTZj3vS",
+                "recurring": null,
+                "tax_behavior": "unspecified",
+                "tiers_mode": null,
+                "transform_quantity": null,
+                "type": "one_time",
+                "unit_amount": 555,
+                "unit_amount_decimal": "555"
+              },
+              "previous_attributes": {
+                "lookup_key": "s07-key"
+              }
+            },
+            "livemode": false,
+            "pending_webhooks": 0,
+            "request": {
+              "id": "req_eQU0HNBO4xpRXk",
+              "idempotency_key": "40054a76-97c8-cdc3-2695-98562736b224"
+            },
+            "type": "price.updated"
+          }
+        ],
+        "has_more": true,
+        "url": "/v1/events"
+      }
+    },
+    {
+      "seq": 12,
+      "method": "POST",
+      "path": "/v1/coupons",
+      "path_refs": {},
+      "params": {
+        "percent_off": 10,
+        "duration": "once"
+      },
+      "idempotency_key": null,
+      "binds_as": "coupon",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "LbmhVlL2",
+        "object": "coupon",
+        "amount_off": null,
+        "created": 1789878604,
+        "currency": null,
+        "duration": "once",
+        "duration_in_months": null,
+        "livemode": false,
+        "max_redemptions": null,
+        "metadata": {},
+        "name": null,
+        "percent_off": 10.0,
+        "redeem_by": null,
+        "times_redeemed": 0,
+        "valid": true
+      }
+    },
+    {
+      "seq": 13,
+      "method": "POST",
+      "path": "/v1/coupons",
+      "path_refs": {},
+      "params": {
+        "id": "PROBE2609200430",
+        "percent_off": 10,
+        "duration": "forever"
+      },
+      "idempotency_key": null,
+      "binds_as": "custom",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "PROBE2609200430",
+        "object": "coupon",
+        "amount_off": null,
+        "created": 1789878604,
+        "currency": null,
+        "duration": "forever",
+        "duration_in_months": null,
+        "livemode": false,
+        "max_redemptions": null,
+        "metadata": {},
+        "name": null,
+        "percent_off": 10.0,
+        "redeem_by": null,
+        "times_redeemed": 0,
+        "valid": true
+      }
+    },
+    {
+      "seq": 14,
+      "method": "POST",
+      "path": "/v1/coupons",
+      "path_refs": {},
+      "params": {
+        "id": "PROBE2609200430",
+        "percent_off": 5,
+        "duration": "once"
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 400,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "error": {
+          "code": "resource_already_exists",
+          "doc_url": "https://stripe.com/docs/error-codes/resource-already-exists",
+          "message": "Coupon already exists.",
+          "request_log_url": "<redacted:request_log_url>",
+          "type": "invalid_request_error"
+        }
+      }
+    },
+    {
+      "seq": 15,
+      "method": "POST",
+      "path": "/v1/promotion_codes",
+      "path_refs": {},
+      "params": {
+        "promotion": {
+          "type": "coupon",
+          "coupon": {
+            "$ref": {
+              "step": "coupon",
+              "field": "id"
+            }
+          }
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": "promo",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "promo_1UHcO8HIBYZYyeProuFHrlP9",
+        "object": "promotion_code",
+        "active": true,
+        "code": "2J5F7MOB",
+        "created": 1789878604,
+        "customer": null,
+        "customer_account": null,
+        "expires_at": null,
+        "livemode": false,
+        "max_redemptions": null,
+        "metadata": {},
+        "promotion": {
+          "coupon": "LbmhVlL2",
+          "type": "coupon"
+        },
+        "restrictions": {
+          "first_time_transaction": false,
+          "minimum_amount": null,
+          "minimum_amount_currency": null
+        },
+        "times_redeemed": 0
+      }
+    },
+    {
+      "seq": 16,
+      "method": "POST",
+      "path": "/v1/promotion_codes/{promotion_code}",
+      "path_refs": {
+        "promotion_code": {
+          "step": "promo",
+          "field": "id"
+        }
+      },
+      "params": {
+        "active": false
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "promo_1UHcO8HIBYZYyeProuFHrlP9",
+        "object": "promotion_code",
+        "active": false,
+        "code": "2J5F7MOB",
+        "created": 1789878604,
+        "customer": null,
+        "customer_account": null,
+        "expires_at": null,
+        "livemode": false,
+        "max_redemptions": null,
+        "metadata": {},
+        "promotion": {
+          "coupon": "LbmhVlL2",
+          "type": "coupon"
+        },
+        "restrictions": {
+          "first_time_transaction": false,
+          "minimum_amount": null,
+          "minimum_amount_currency": null
+        },
+        "times_redeemed": 0
+      }
+    },
+    {
+      "seq": 17,
+      "method": "GET",
+      "path": "/v1/events",
+      "path_refs": {},
+      "params": {
+        "type": "promotion_code.updated",
+        "limit": 1
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "object": "list",
+        "data": [
+          {
+            "id": "evt_1UHcO8HIBYZYyePrq72F2Y0Q",
+            "object": "event",
+            "api_version": "2026-08-26.dahlia",
+            "created": 1789878604,
+            "data": {
+              "object": {
+                "id": "promo_1UHcO8HIBYZYyeProuFHrlP9",
+                "object": "promotion_code",
+                "active": false,
+                "code": "2J5F7MOB",
+                "created": 1789878604,
+                "customer": null,
+                "customer_account": null,
+                "expires_at": null,
+                "livemode": false,
+                "max_redemptions": null,
+                "metadata": {},
+                "promotion": {
+                  "coupon": "LbmhVlL2",
+                  "type": "coupon"
+                },
+                "restrictions": {
+                  "first_time_transaction": false,
+                  "minimum_amount": null,
+                  "minimum_amount_currency": null
+                },
+                "times_redeemed": 0
+              },
+              "previous_attributes": {
+                "active": true
+              }
+            },
+            "livemode": false,
+            "pending_webhooks": 0,
+            "request": {
+              "id": "req_hulG53SEDsvC06",
+              "idempotency_key": "d0ef89c5-9909-249d-826c-e16f078fa93d"
+            },
+            "type": "promotion_code.updated"
+          }
+        ],
+        "has_more": true,
+        "url": "/v1/events"
+      }
+    },
+    {
+      "seq": 18,
+      "method": "POST",
+      "path": "/v1/coupons/{coupon}",
+      "path_refs": {
+        "coupon": {
+          "step": "coupon",
+          "field": "id"
+        }
+      },
+      "params": {
+        "name": "renamed",
+        "metadata": {
+          "k": "v"
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "LbmhVlL2",
+        "object": "coupon",
+        "amount_off": null,
+        "created": 1789878604,
+        "currency": null,
+        "duration": "once",
+        "duration_in_months": null,
+        "livemode": false,
+        "max_redemptions": null,
+        "metadata": {
+          "k": "v"
+        },
+        "name": "renamed",
+        "percent_off": 10.0,
+        "redeem_by": null,
+        "times_redeemed": 0,
+        "valid": true
+      }
+    },
+    {
+      "seq": 19,
+      "method": "DELETE",
+      "path": "/v1/coupons/{coupon}",
+      "path_refs": {
+        "coupon": {
+          "step": "coupon",
+          "field": "id"
+        }
+      },
+      "params": {},
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "LbmhVlL2",
+        "object": "coupon",
+        "deleted": true
+      }
+    },
+    {
+      "seq": 20,
+      "method": "GET",
+      "path": "/v1/events",
+      "path_refs": {},
+      "params": {
+        "type": "coupon.updated",
+        "limit": 1
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "object": "list",
+        "data": [
+          {
+            "id": "evt_1UHcO8HIBYZYyePrFrBcn67k",
+            "object": "event",
+            "api_version": "2026-08-26.dahlia",
+            "created": 1789878604,
+            "data": {
+              "object": {
+                "id": "LbmhVlL2",
+                "object": "coupon",
+                "amount_off": null,
+                "created": 1789878604,
+                "currency": null,
+                "duration": "once",
+                "duration_in_months": null,
+                "livemode": false,
+                "max_redemptions": null,
+                "metadata": {
+                  "k": "v"
+                },
+                "name": "renamed",
+                "percent_off": 10.0,
+                "redeem_by": null,
+                "times_redeemed": 0,
+                "valid": true
+              },
+              "previous_attributes": {
+                "metadata": {
+                  "k": null
+                },
+                "name": null
+              }
+            },
+            "livemode": false,
+            "pending_webhooks": 0,
+            "request": {
+              "id": "req_OTDaoQ8mO7d1c9",
+              "idempotency_key": "4afd42f7-b8b0-df59-25d3-626206a1d631"
+            },
+            "type": "coupon.updated"
+          }
+        ],
+        "has_more": true,
+        "url": "/v1/events"
+      }
+    },
+    {
+      "seq": 21,
+      "method": "GET",
+      "path": "/v1/events",
+      "path_refs": {},
+      "params": {
+        "type": "coupon.deleted",
+        "limit": 1
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "object": "list",
+        "data": [
+          {
+            "id": "evt_1UHcO9HIBYZYyePrl7RZ6rvu",
+            "object": "event",
+            "api_version": "2026-08-26.dahlia",
+            "created": 1789878604,
+            "data": {
+              "object": {
+                "id": "LbmhVlL2",
+                "object": "coupon",
+                "amount_off": null,
+                "created": 1789878604,
+                "currency": null,
+                "duration": "once",
+                "duration_in_months": null,
+                "livemode": false,
+                "max_redemptions": null,
+                "metadata": {
+                  "k": "v"
+                },
+                "name": "renamed",
+                "percent_off": 10.0,
+                "redeem_by": null,
+                "times_redeemed": 0,
+                "valid": false
+              }
+            },
+            "livemode": false,
+            "pending_webhooks": 0,
+            "request": {
+              "id": "req_EwEfBL2fxy1Vtq",
+              "idempotency_key": null
+            },
+            "type": "coupon.deleted"
+          }
+        ],
+        "has_more": true,
+        "url": "/v1/events"
+      }
+    },
+    {
+      "seq": 22,
+      "method": "POST",
+      "path": "/v1/tax_rates",
+      "path_refs": {},
+      "params": {
+        "display_name": "probe",
+        "inclusive": false,
+        "percentage": 10
+      },
+      "idempotency_key": null,
+      "binds_as": "tax_rate",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "txr_1UHcO9HIBYZYyePrQzdJaemJ",
+        "object": "tax_rate",
+        "active": true,
+        "country": null,
+        "created": 1789878605,
+        "description": null,
+        "display_name": "probe",
+        "effective_percentage": 10.0,
+        "flat_amount": null,
+        "inclusive": false,
+        "jurisdiction": null,
+        "jurisdiction_level": null,
+        "livemode": false,
+        "metadata": {},
+        "percentage": 10.0,
+        "rate_type": "percentage",
+        "state": null,
+        "tax_type": null
+      }
+    },
+    {
+      "seq": 23,
+      "method": "POST",
+      "path": "/v1/tax_rates/{tax_rate}",
+      "path_refs": {
+        "tax_rate": {
+          "step": "tax_rate",
+          "field": "id"
+        }
+      },
+      "params": {
+        "active": false,
+        "description": "archived"
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "txr_1UHcO9HIBYZYyePrQzdJaemJ",
+        "object": "tax_rate",
+        "active": false,
+        "country": null,
+        "created": 1789878605,
+        "description": "archived",
+        "display_name": "probe",
+        "effective_percentage": 10.0,
+        "flat_amount": null,
+        "inclusive": false,
+        "jurisdiction": null,
+        "jurisdiction_level": null,
+        "livemode": false,
+        "metadata": {},
+        "percentage": 10.0,
+        "rate_type": "percentage",
+        "state": null,
+        "tax_type": null
+      }
+    },
+    {
+      "seq": 24,
+      "method": "GET",
+      "path": "/v1/events",
+      "path_refs": {},
+      "params": {
+        "type": "tax_rate.updated",
+        "limit": 1
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "object": "list",
+        "data": [
+          {
+            "id": "evt_1UHcO9HIBYZYyePrK5XZGEtq",
+            "object": "event",
+            "api_version": "2026-08-26.dahlia",
+            "created": 1789878605,
+            "data": {
+              "object": {
+                "id": "txr_1UHcO9HIBYZYyePrQzdJaemJ",
+                "object": "tax_rate",
+                "active": false,
+                "country": null,
+                "created": 1789878605,
+                "description": "archived",
+                "display_name": "probe",
+                "effective_percentage": 10.0,
+                "flat_amount": null,
+                "inclusive": false,
+                "jurisdiction": null,
+                "jurisdiction_level": null,
+                "livemode": false,
+                "metadata": {},
+                "percentage": 10.0,
+                "rate_type": "percentage",
+                "state": null,
+                "tax_type": null
+              },
+              "previous_attributes": {
+                "active": true,
+                "description": null
+              }
+            },
+            "livemode": false,
+            "pending_webhooks": 0,
+            "request": {
+              "id": "req_x825GezvT6kE1a",
+              "idempotency_key": "ab7b4384-394e-42f3-858b-ef918af007d8"
+            },
+            "type": "tax_rate.updated"
+          }
+        ],
+        "has_more": true,
+        "url": "/v1/events"
+      }
+    },
+    {
+      "seq": 25,
+      "method": "POST",
+      "path": "/v1/customers",
+      "path_refs": {},
+      "params": {
+        "email": "probe-events@conformance.stripeapi.invalid"
+      },
+      "idempotency_key": null,
+      "binds_as": "customer",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "cus_VICncmey31iM4z",
+        "object": "customer",
+        "address": null,
+        "balance": 0,
+        "created": 1789878605,
+        "currency": null,
+        "customer_account": null,
+        "default_source": null,
+        "delinquent": false,
+        "description": null,
+        "discount": null,
+        "email": "probe-events@conformance.stripeapi.invalid",
+        "invoice_prefix": "U91P6F2I",
+        "invoice_settings": {
+          "custom_fields": null,
+          "default_payment_method": null,
+          "footer": null,
+          "rendering_options": null
+        },
+        "livemode": false,
+        "metadata": {},
+        "name": null,
+        "next_invoice_sequence": 1,
+        "phone": null,
+        "preferred_locales": [],
+        "shipping": null,
+        "tax_exempt": "none",
+        "test_clock": null
+      }
+    },
+    {
+      "seq": 26,
+      "method": "DELETE",
+      "path": "/v1/customers/{customer}",
+      "path_refs": {
+        "customer": {
+          "step": "customer",
+          "field": "id"
+        }
+      },
+      "params": {},
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "cus_VICncmey31iM4z",
+        "object": "customer",
+        "deleted": true
+      }
+    },
+    {
+      "seq": 27,
+      "method": "GET",
+      "path": "/v1/customers/{customer}",
+      "path_refs": {
+        "customer": {
+          "step": "customer",
+          "field": "id"
+        }
+      },
+      "params": {},
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "cus_VICncmey31iM4z",
+        "object": "customer",
+        "deleted": true
+      }
+    },
+    {
+      "seq": 28,
+      "method": "GET",
+      "path": "/v1/events",
+      "path_refs": {},
+      "params": {
+        "type": "customer.deleted",
+        "limit": 1
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "object": "list",
+        "data": [
+          {
+            "id": "evt_1UHcO9HIBYZYyePre0ez6inT",
+            "object": "event",
+            "api_version": "2026-08-26.dahlia",
+            "created": 1789878605,
+            "data": {
+              "object": {
+                "id": "cus_VICncmey31iM4z",
+                "object": "customer",
+                "address": null,
+                "balance": 0,
+                "created": 1789878605,
+                "currency": null,
+                "customer_account": null,
+                "default_source": null,
+                "delinquent": false,
+                "description": null,
+                "discount": null,
+                "email": "probe-events@conformance.stripeapi.invalid",
+                "invoice_prefix": "U91P6F2I",
+                "invoice_settings": {
+                  "custom_fields": null,
+                  "default_payment_method": null,
+                  "footer": null,
+                  "rendering_options": null
+                },
+                "livemode": false,
+                "metadata": {},
+                "name": null,
+                "next_invoice_sequence": 1,
+                "phone": null,
+                "preferred_locales": [],
+                "shipping": null,
+                "tax_exempt": "none",
+                "test_clock": null
+              }
+            },
+            "livemode": false,
+            "pending_webhooks": 0,
+            "request": {
+              "id": "req_Z3bpaYKw4jwLPR",
+              "idempotency_key": null
+            },
+            "type": "customer.deleted"
+          }
+        ],
+        "has_more": true,
+        "url": "/v1/events"
+      }
+    }
+  ]
+}

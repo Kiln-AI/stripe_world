@@ -132,13 +132,18 @@ class Router:
                     f"route {route.op_id}: body parameter {param.name!r} is handled centrally"
                 )
         has_handler = route.handler is not None
-        has_engine = route.resource is not None or route.action is not None
-        if has_handler == has_engine:
+        has_action = route.action is not None
+        if has_handler == has_action:
             raise seahaven.WorldBug(
-                f"route {route.op_id} must set exactly one of handler and (resource, action)"
+                f"route {route.op_id} must set exactly one of handler and action"
             )
         if route.action is not None and route.resource is None:
             raise seahaven.WorldBug(f"route {route.op_id} sets action without resource")
+        # A handler may carry the resource with no action: prices' update is
+        # a hand-written seam (the lookup-key transfer writes a second row)
+        # that delegates to the engine's update, which resolves the spec off
+        # the route. The either-or rule this replaces would have forced the
+        # whole update to be hand-written for one preceding write.
         if route.scope is not None and route.resource is None:
             raise seahaven.WorldBug(f"route {route.op_id} sets scope without resource")
         if route.resource is not None and route.action in ("create", "update"):
@@ -175,10 +180,9 @@ class Router:
         """The route for this call.
 
         Raises `StripeApiError` 404 (`Unrecognized request URL (<METHOD>:
-        <path>).`, a wire-quoted Stripe string) when no pattern matches the
-        path at all, and 405 (`Not allowed: <METHOD> <path>`, this world's
-        declared choice) when a pattern matches but no route anywhere along
-        any matching path carries this method.
+        <path>).`, a wire-quoted Stripe string) when no route matches —
+        including the method-mismatch case, which the live API answers the
+        same way (recorded in cassette 07; see `_walk`).
         """
         route, captured = self._walk(method, path)
         return Match(route, tuple(captured))
@@ -189,41 +193,41 @@ class Router:
         direct = self._by_key.get((method, path))
         if direct is not None:
             return direct
-        hit, _, _ = self._safe_walk(method, path)
+        hit, _ = self._safe_walk(method, path)
         return hit
 
     def _walk(self, method: str, path: str) -> tuple[Route, list[str]]:
-        hit, captured, mismatch = self._safe_walk(method, path)
+        # A method mismatch is the same 404 as no match at all: recorded at
+        # the pinned version (cassette 07, step `DELETE /v1/prices/{price}` —
+        # a path that carries GET and POST), which answers 404 `Unrecognized
+        # request URL (DELETE: …)` followed by Stripe's docs/support URLs,
+        # not a 405. This supersedes the 405 shape the dispatcher design
+        # declared as a guess ("neither the 405 shape nor the
+        # method-mismatch status appears in any source the research phase
+        # reached"); the message's shorter form here is a declared
+        # allow-list difference.
+        hit, captured = self._safe_walk(method, path)
         if hit is not None:
             return hit, captured
-        if mismatch:
-            raise invalid_request(f"Not allowed: {method} {path}", status=405, pre_execution=True)
         raise invalid_request(
             f"Unrecognized request URL ({method}: {path}).", status=404, pre_execution=True
         )
 
-    def _safe_walk(self, method: str, path: str) -> tuple[Route | None, list[str], bool]:
+    def _safe_walk(self, method: str, path: str) -> tuple[Route | None, list[str]]:
         """Depth-first, exact before placeholder, with backtracking.
 
         Returns the route for `(method, path)` with its captured segments, or
-        `(None, …, mismatch)` where `mismatch` says some terminal matched the
-        path but not the verb — the 405 case. Depth is at most six segments
-        and each node has at most two children, so the walk is bounded by
+        `(None, …)` when nothing matches. Depth is at most six segments and
+        each node has at most two children, so the walk is bounded by
         structure rather than by table size.
         """
         stripped = path.lstrip("/")
         segments = stripped.split("/") if stripped else []
         captured: list[str] = []
-        method_mismatch = False
 
         def walk(node: _Node, index: int) -> Route | None:
-            nonlocal method_mismatch
             if index == len(segments):
-                if method in node.routes:
-                    return node.routes[method]
-                if node.routes:
-                    method_mismatch = True
-                return None
+                return node.routes.get(method)
             segment = segments[index]
             if segment in node.exact:  # exact first, always
                 hit = walk(node.exact[segment], index + 1)
@@ -238,7 +242,7 @@ class Router:
             return None
 
         hit = walk(self._root, 0)
-        return hit, captured, method_mismatch
+        return hit, captured
 
 
 ROUTER: Final = Router(routes.ALL)

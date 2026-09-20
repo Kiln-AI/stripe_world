@@ -28,9 +28,9 @@ Files: `dispatch/router.py`, `dispatch/routes.py`, `dispatch/resource.py`, `disp
 3. **Validates parameters.** Against *our* `ParamSpec` allowlists, not against `spec3.json`, because
    Stripe rejects unknown parameters and that needs a closed set we control
    ([`architecture.md`](../architecture.md) §3.3).
-4. **Serves the generated CRUD operations.** 77 of the 148 have no handler function at all: the
+4. **Serves the generated CRUD operations.** 74 of the 148 have no handler function at all: the
    `ResourceSpec` engine answers them.
-5. **Invokes the 71 hand-written handlers** with one uniform signature.
+5. **Invokes the 74 hand-written handlers** with one uniform signature.
 6. **Builds the response.** Expansion, the list envelope, the status code, and the conversion of a
    raised `StripeApiError` into Stripe's error envelope — including the rollback that must go with
    it.
@@ -95,8 +95,8 @@ is validate → touch one row (or one page of rows) of one table → serialize* 
 | `payment_intents` | 11 | 2 | 9 |
 | `payment_methods` | 6 | 4 | 2 |
 | `payouts` | 6 | 3 | 3 |
-| `prices` | 4 | 4 | 0 |
-| `products` | 5 | 5 | 0 |
+| `prices` | 4 | 2 | 2 |
+| `products` | 5 | 4 | 1 |
 | `promotion_codes` | 4 | 4 | 0 |
 | `refunds` | 5 | 3 | 2 |
 | `setup_intents` | 7 | 2 | 5 |
@@ -104,22 +104,26 @@ is validate → touch one row (or one page of rows) of one table → serialize* 
 | `subscription_schedules` | 6 | 2 | 4 |
 | `subscriptions` | 8 | 2 | 6 |
 | `tax_rates` | 4 | 4 | 0 |
-| **Total** | **148** | **77** | **71** |
+| **Total** | **148** | **74** | **74** |
 
-**77 generated, 71 hand-written**, not 95/53. The estimate went wrong by assuming every
+**74 generated, 74 hand-written**, not 95/53. The original census put this at 77/71; Phase 7's
+recordings moved three operations across the line — prices' create and update (the `product_data`
+row and the lookup-key transfer are second-row writes) and products' create (`default_price_data`
+writes the price row before the product's created-event snapshot) — which is the §3.5 rule working
+as intended, not drift from it. The estimate went wrong by assuming every
 `POST /v1/<collection>` is a generated create. It is not: `POST /v1/charges`, `/v1/refunds`,
 `/v1/payouts`, `/v1/payment_intents`, `/v1/setup_intents`, `/v1/subscriptions`,
 `/v1/subscription_items`, `/v1/subscription_schedules`, `/v1/invoices` and `/v1/credit_notes` each
 move money, start a status machine, or build lines across two tables. Ten of the twenty-two
 collections have a hand-written create, and `invoices` alone contributes 14 hand-written operations.
 
-71 routes do not mean 71 functions: eight routes are aliases sharing a handler with a canonical route
-(§3.1.3), so **63 distinct hand-written functions**. That is the number the implementation plan
+74 routes do not mean 74 functions: eight routes are aliases sharing a handler with a canonical route
+(§3.1.3), so **66 distinct hand-written functions**. That is the number the implementation plan
 should budget against.
 
-This correction matters beyond bookkeeping. 71 hand-written operations at roughly four to six of them
-per resource module is the real shape of phases 2–6, and a plan built on "~53, mostly small state
-transitions" would under-budget `invoices` by a factor of three.
+This correction matters beyond bookkeeping. 74 hand-written operations at roughly four to six of them
+per resource module is the real shape of the resource phases, and a plan built on "~53, mostly small
+state transitions" would under-budget `invoices` by a factor of three.
 
 ## 2. Public Interface
 
@@ -248,9 +252,9 @@ class Router:
         """The route for this call.
 
         Raises StripeApiError(404, "invalid_request_error", message="Unrecognized request URL
-        (<METHOD>: <path>).") when no pattern matches the path at all, and
-        StripeApiError(405, "invalid_request_error", message="Not allowed: <METHOD> <path>")
-        when a pattern matches but carries no route for this method."""
+        (<METHOD>: <path>).") when no route matches — including the method-mismatch case, which
+        the live API answers the same way (recorded in cassette 07; the message's docs/support
+        tail is a declared allow-list difference)."""
 
     def resolve(self, method: str, path: str) -> Route | None:
         """`match` without the raising, for discovery.md's use of a concrete path."""
@@ -292,9 +296,14 @@ class Route:
     alias_of: str | None = None       # the op_id this one delegates to
 ```
 
-**`handler is None` is the definition of "generated".** That is the rule the count in §1.3 is built
-on, it is one attribute to read, and `test_router.py::test_generated_count_is_77` asserts it. Exactly
-one of `handler` and `(resource, action)` is set; the other combination is a `WorldBug` at import.
+**`action is None` is the definition of "generated".** That is the rule the count in §1.3 is built
+on, it is one attribute to read, and `tests/test_tools.py::test_the_wired_surface_is_small_and_named`
+asserts the wired surface op by op. Exactly one of `handler` and `action` is set on a wired route;
+the other combination is a `WorldBug` at import. A handler *may* additionally carry `resource` with
+no `action` — Phase 7's prices update is the precedent: a hand-written seam (the lookup-key transfer
+writes a second row) that delegates to the engine's update, which resolves the spec off the route.
+Without that allowance the seam would have to duplicate the engine's whole update for one preceding
+write.
 
 `op_id` is the spec's `operationId` verbatim (`PostCustomersCustomerBalanceTransactions`), which is
 what makes discovery's "index ≡ route table" test a set comparison rather than a path-normalisation
@@ -434,8 +443,11 @@ return the column dict it should write instead. A normalizer may derive columns 
 a reference. It may **not** write another table, emit an event, or change the response. Anything that
 needs to is a hand-written handler, and the review question for a pull request is exactly that
 sentence. Five resources use one: `payment_methods` (magic-card interpretation),
-`promotion_codes` (coupon resolution), `invoiceitems` (price resolution), `prices` (product
-resolution), `subscription_items` (list-only, none) — and they stay generated because of it.
+`promotion_codes` (coupon resolution), `invoiceitems` (price resolution), `prices` (amount and
+product derivation), `subscription_items` (list-only, none) — and four of them stay generated
+because of it. `prices` is the exception Phase 7 proved: its create and update each write a second
+row (`product_data`, the lookup-key transfer) and emit the second row's event, which is past the
+contract twice over, so both are hand-written seams around the same column derivation.
 
 #### `ListFilter` and `DeleteSpec`
 
@@ -444,27 +456,46 @@ resolution), `subscription_items` (list-only, none) — and they stay generated 
 class ListFilter:
     name: str                              # the query parameter: "email", "created", "status"
     column: str
-    kind: Literal["exact", "range", "literal"]
+    kind: Literal["exact", "range", "literal", "boolean", "in", "json"]
     choices: tuple[str, ...] = ()
     id_prefixes: tuple[str, ...] = ()
     required: bool = False                 # `subscription` on GET /v1/subscription_items
+    empty_without: bool = False            # absent filter answers an empty page (payment_methods)
+    references: str | None = None          # the object the value must name; 400 when it does not
+    sub_shape: tuple[Param, ...] = ()      # a `json` filter's subfields (prices?recurring[interval]=)
 
 @dataclass(frozen=True, slots=True)
 class DeleteSpec:
     mode: Literal["soft", "hard"]
     requires_status: tuple[str, ...] = ()  # ("draft",) for invoices
     status_column: str = "status"
+    zero_columns: tuple[str, ...] = ()     # flipped before the deleted-event snapshot (probed:
+                                           #   product.deleted carries active: false, coupon valid:
+                                           #   false)
+    deleted_retrieve: Literal["stub", "missing"] = "stub"
+                                           # customers retrieve the three-key stub; products and
+                                           #   coupons 404 (all recorded, Phase 7)
+    guard: Callable[[seahaven.Ctx, Mapping[str, Any]], None] | None = None
+                                           # a refusal that depends on other rows, raised before
+                                           #   any write (a product with attached prices refuses
+                                           #   its delete, recorded in cassette 07)
 ```
 
-`mode` exists because Stripe has both. A deleted customer, coupon, product or invoiceitem stays
-retrievable and answers `{"id": ..., "object": ..., "deleted": true}` forever — that is `soft`, and
-`data_model.md` owns the `deleted_at` column it sets. A deleted draft invoice is gone and a later
-retrieve is a 404 — that is `hard`. Without the distinction one of the two would have to be
-hand-written for no reason other than the engine having picked a side.
+`mode` exists because Stripe has both. A soft delete keeps the row behind a `deleted` 0/1 tombstone
+(`data_model.md` owns the column); what a later retrieve answers is per-resource and recorded, which
+is why `deleted_retrieve` is a knob: a deleted **customer** retrieves the three-key
+`{"id": ..., "object": ..., "deleted": true}` stub forever, while a deleted **product or coupon**
+is a 404 `resource_missing` naming the path id (cassette 07, steps 8 and 47). A deleted draft
+invoice is gone outright and a later retrieve is a 404 too — that is `hard`. Without the
+distinctions one of these would have to be hand-written for no reason other than the engine having
+picked a side.
 
 `requires_status` is what keeps `DELETE /v1/invoices/{invoice}` generated: the only invoice-specific
 thing about it is that a non-draft invoice must be refused with
-`invalid_request_error` / `invoice_not_editable`, and that is a declaration, not a function.
+`invalid_request_error` / `invoice_not_editable`, and that is a declaration, not a function. `guard`
+generalizes that one step further — a refusal that reads *other* rows rather than the subject's own
+state (a product with attached prices, recorded in cassette 07), raised before any write so the
+rollback rule is not even engaged.
 
 #### `Request`, `Page`, `Result`, `Handler` — `dispatch/response.py`
 
@@ -507,7 +538,7 @@ always caught before it leaves `dispatch`. The dispatcher itself raises exactly 
 | Condition | status | type | code | `param` |
 |---|---|---|---|---|
 | No pattern matches the path | 404 | `invalid_request_error` | — | — |
-| Path matches, method does not | 405 | `invalid_request_error` | — | — |
+| Path matches, method does not | 404 | `invalid_request_error` | — | — |
 | Unknown parameter | 400 | `invalid_request_error` | `parameter_unknown` | the key |
 | Required parameter absent | 400 | `invalid_request_error` | `parameter_missing` | the name |
 | Wrong type / not in `choices` / out of range | 400 | `invalid_request_error` | `parameter_invalid_*` | bracket path |
@@ -520,14 +551,15 @@ The three uncoded rows are uncoded because Stripe's `code` is optional and the ~
 in [`errors.md`](../research/stripe-billing-and-payments/cross-cutting-semantics/errors.md) has no
 member for them. Inventing one would be inventing behavior.
 
-**Two of these are not settled by research and are declared, not assumed.** Neither the 405 shape nor
-the method-mismatch status appears in any source the research phase reached. We serve 405 with
-`"Not allowed: <METHOD> <path>"` and 404 with
-`"Unrecognized request URL (<METHOD>: <path>)."` — the latter is a real wire-quoted Stripe string
-([`gap-closure-2026-09-18.md`](../research/stripe-billing-and-payments/cross-cutting-semantics/gap-closure-2026-09-18.md)
-item 5), the former is our choice. Both go into
-`tests/conformance/allowed_differences.py` as declared items, and a tenth conformance scenario is
-added: *a known path with an unsupported verb*.
+**The method-mismatch row was declared and is now recorded.** The design originally served 405 with
+`"Not allowed: <METHOD> <path>"`, declared as a guess ("neither the 405 shape nor the
+method-mismatch status appears in any source the research phase reached"). Cassette 07's steps —
+DELETE on `/v1/prices/{price}`, a path carrying GET and POST, and a GET of an unrouted path —
+settled it: both answer **404** `Unrecognized request URL (<METHOD>: <path>). Please see
+https://stripe.com/docs or we can help at https://support.stripe.com/.`, one shape for mismatch and
+miss alike. The recording wins on status and quoted form; this world emits the quoted form without
+the docs/support tail (no dashboard to source it), which is the predicated `**.error.message` entry
+in the allow-list, not a silent pass.
 
 ## 3. Internal Design Approach
 
@@ -559,7 +591,7 @@ world that will not construct — the same failure mode Seahaven gives a malform
 
 #### 3.1.3 Aliases
 
-Eight of the 71 hand-written routes are legacy aliases that Stripe still serves and that the 148
+Eight of the 74 hand-written routes are legacy aliases that Stripe still serves and that the 148
 therefore includes. They set `alias_of` and share their canonical route's `handler`; they do not get
 a second implementation.
 
@@ -634,13 +666,10 @@ Depth-first, exact before placeholder, with backtracking, and matching on `(meth
 ```
 match(method, path):
     segments = path.strip("/").split("/")
-    method_mismatch_seen = False
 
     walk(node, i):                       # recursive; depth ≤ 6, so recursion is fine
         if i == len(segments):
-            if method in node.routes: return node.routes[method]
-            if node.routes:            method_mismatch_seen = True
-            return None
+            return node.routes.get(method)
         seg = segments[i]
         if seg in node.exact:                       # exact first, always
             hit = walk(node.exact[seg], i + 1)
@@ -652,8 +681,7 @@ match(method, path):
 
     hit = walk(root, 0)
     if hit is not None:            return Match(hit, captured)
-    if method_mismatch_seen:       raise StripeApiError(405, ...)
-    raise StripeApiError(404, ...)
+    raise StripeApiError(404, ...)   # no match AND method mismatch, alike
 ```
 
 Three things that pseudocode settles:
@@ -675,13 +703,15 @@ the message that tells the agent what is wrong. The cost is bounded: depth 6, at
 per node, no route longer than six segments.
 
 **Method mismatch versus no match.** The walk succeeds only at a terminal carrying the requested
-method; a terminal that matches the path but not the method sets `method_mismatch_seen` and the
-search *continues*. So `POST /v1/credit_notes/preview` does not 405 on the `preview` terminal — it
+method; a terminal that matches the path but not the method simply fails, and the search
+*continues*. So `POST /v1/credit_notes/preview` does not fail on the `preview` terminal — it
 backtracks to the placeholder and matches `PostCreditNotesId`, which is what an agent updating a
-credit note called `preview` deserves. Only when nothing anywhere carries the method does the 405
-surface. Architecture §3.2 asks for "a path that matches with a different method is Stripe's method
-error, not a 404", and this is the precise version of that: *no route for the method anywhere along
-any matching path*.
+credit note called `preview` deserves. When nothing anywhere carries the method, the mismatch is
+answered exactly as no match is: the 404 `Unrecognized request URL` (recorded in cassette 07 on
+`DELETE /v1/prices/{price}`, a path carrying GET and POST — the 405 this section once specified was
+a declared guess that the recording corrected; see §2.5's note). Architecture §3.2 asks for "a path
+that matches with a different method is Stripe's method error, not a 404", and the recording is the
+authority over that sketch: there is no distinct method error on this surface.
 
 An empty segment (`//`, or a trailing slash) never matches a placeholder, so `/v1/customers/` is a
 404 rather than a retrieve of the customer with the empty id. A query string is not our problem:
@@ -804,8 +834,8 @@ engine never imports a resource module; it works entirely from `req.route.resour
 The rule that decides what it serves, stated once so a reviewer can apply it: **an operation is
 generated when its whole behavior is validate → touch one row, or one page of rows, of one table →
 serialize.** An operation that moves money, drives a status machine, writes a second table, or
-computes rather than reads is hand-written. §1.3's 77/71 is that rule applied to all 148, and
-`test_router.py` asserts the two counts so the split cannot drift.
+computes rather than reads is hand-written. §1.3's 74/74 is that rule applied to all 148, and
+`tests/test_tools.py` asserts the wired surface op by op so the split cannot drift.
 
 #### 3.5.1 `list`
 
@@ -838,10 +868,11 @@ a table.
 #### 3.5.2 `retrieve`
 
 Parent lookup if scoped, `SELECT` by primary key (plus `scope.column = ?`), `resource_missing` on
-miss with the path parameter's own name in `param`, serialize. For a `soft`-deleted row the engine
-returns the `{"id", "object", "deleted": true}` stub rather than the full object, because that is
-what Stripe answers for a deleted customer and it is what the schema conformance validator will
-expect.
+miss with the path parameter's own name in `param`, serialize. For a `soft`-deleted row what the
+engine answers is `DeleteSpec.deleted_retrieve`'s business (§2.4): the `{"id", "object",
+"deleted": true}` stub for a deleted customer — the shape the schema conformance validator expects —
+or a 404 `resource_missing` for the resources Stripe 404s (products and coupons, recorded in
+cassette 07).
 
 #### 3.5.3 `create`
 
@@ -863,9 +894,13 @@ through `MetadataUpdate.apply` over the current value. `before_update` if declar
 #### 3.5.5 `delete`
 
 Retrieve first. If `DeleteSpec.requires_status` and the row's status is not in it, raise the declared
-refusal. `soft` sets `deleted_at = ctx.clock.iso()`; `hard` issues `DELETE FROM`. Both answer
+refusal; then `guard`, if declared, runs before any write — it reads other rows (a product's
+attached prices), so raising here is rollback-free by construction. `soft` sets the `deleted` 0/1
+tombstone (and zeroes any `zero_columns` in the same UPDATE, so the deleted-event snapshot carries
+them flipped); `hard` issues `DELETE FROM`. Both answer
 `{"id": ..., "object": ..., "deleted": true}` with status 200 — Stripe's delete response carries no
-other field, which is why those routes set `ParamSpec.expand = False`.
+other field, which is why those routes set `ParamSpec.expand = False`. What a later *retrieve* of a
+tombstoned row answers is `deleted_retrieve`'s business (§2.4), not the delete response's.
 
 Five of the eleven `DELETE` routes are engine-served this way: `coupons`, `customers`, `invoiceitems`,
 `invoices` and `products`. The other six are hand-written: the subscription cancel and its
@@ -1057,8 +1092,8 @@ visible.
 
 Four, stated here rather than designed around silently.
 
-**1. The 95/53 split is wrong; it is 77/71.** §1.3 has the count and the reason. The consequence is
-for [`implementation_plan.md`](../implementation_plan.md), which should budget 63 distinct
+**1. The 95/53 split is wrong; it is 74/74.** §1.3 has the count and the reason. The consequence is
+for [`implementation_plan.md`](../implementation_plan.md), which should budget 66 distinct
 hand-written functions, 14 of them in `invoices` alone.
 
 **2. "No operation gets a hand-written list endpoint" is not achievable as an absolute.** Four routed
@@ -1113,11 +1148,11 @@ asserted through `inst.inspect()` and `inst.change_log()`.
 | Test | Verifies |
 |---|---|
 | `test_route_count_is_148` | `len(routes.ALL) == 148`. The scope-drift tripwire; becomes 155 when search lands |
-| `test_generated_count_is_77` | exactly 77 routes have `handler is None` |
-| `test_hand_written_count_is_71` | exactly 71 have a handler, and they resolve to 63 distinct functions |
+| `test_generated_count_is_74` | exactly 74 routes have `action is None` |
+| `test_hand_written_count_is_74` | exactly 74 have a handler, and they resolve to 66 distinct functions |
 | `test_every_op_id_is_in_spec3` | every `Route.op_id` exists in `spec3.min.json`, with the same method and path |
 | `test_no_duplicate_method_pattern` | no `(method, pattern)` appears twice |
-| `test_route_shape_is_exclusive` | every route has `handler` xor `(resource, action)` |
+| `test_route_shape_is_exclusive` | every route has `handler` xor `action` (a handler may also carry `resource`, per §2.4) |
 | `test_param_spec_path_matches_pattern` | `ParamSpec.path` equals the pattern's placeholders, in order |
 | `test_central_params_never_redeclared` | no `ParamSpec.body` names `expand`, `limit`, `starting_after`, `ending_before` or `metadata` |
 | `test_alias_targets_exist` | every `alias_of` names a real `op_id`, and the alias shares its handler |
@@ -1134,8 +1169,8 @@ asserted through `inst.inspect()` and `inst.change_log()`.
 | `test_two_placeholder_names_share_one_node` | `/v1/subscriptions/{subscription_exposed_id}/discount` and `/v1/subscriptions/{subscription}/resume` both match, each binding its own name |
 | `test_credit_note_placeholder_names_share_one_node` | same for `{credit_note}/lines` and `{id}/void` |
 | `test_unknown_path_is_404` | `GET /v1/widgets` → 404, `invalid_request_error`, no `code` |
-| `test_method_mismatch_is_405` | `DELETE /v1/charges/ch_1` → 405, not 404 |
-| `test_method_mismatch_prefers_a_placeholder_route` | `POST /v1/credit_notes/preview` → `PostCreditNotesId` (200-path), not a 405 on the literal terminal |
+| `test_method_mismatch_is_the_unrecognized_404` | `GET /v1/charges/ch_1/capture` → the same 404 `Unrecognized request URL` as an unknown path (recorded in cassette 07) |
+| `test_method_mismatch_prefers_a_placeholder_route` | `POST /v1/credit_notes/preview` → `PostCreditNotesId` (200-path), not a failure on the literal terminal |
 | `test_trailing_slash_is_404` | `GET /v1/customers/` does not retrieve the empty-id customer |
 | `test_empty_segment_is_404` | `GET /v1/customers//balance_transactions` is a 404 |
 | `test_every_pattern_round_trips` | for all 148, substituting a plausible id for each placeholder matches back to that same route |
@@ -1194,7 +1229,7 @@ asserted through `inst.inspect()` and `inst.change_log()`.
 | `test_bad_expand_path_is_400` | `expand=["nope"]` → 400 `invalid_request_error` |
 | `test_idempotency_key_echoed` | `request.idempotency_key` appears on the body |
 | `test_read_tool_refuses_a_write_verb` | `stripe_api_write(method="GET", …)` is a Seahaven `ArgumentError` → the world's `INVALID_INPUT`, not a Stripe envelope |
-| `test_read_tool_cannot_reach_a_post_route` | `stripe_api_read` on a `POST`-only path is a 405 |
+| `test_read_tool_cannot_reach_a_post_route` | `stripe_api_read` on a `POST`-only path is the router's 404 |
 | `test_call_stripe_reaches_every_route` | the unregistered escape hatch dispatches all three verbs |
 | `test_no_tool_returns_bytes_or_set` | every route's body survives `json.dumps` |
 
@@ -1204,7 +1239,7 @@ asserted through `inst.inspect()` and `inst.change_log()`.
 |---|---|
 | `test_error_type_is_one_of_four` | across every error this component can raise, `type` ∈ the four wire values |
 | `test_404_body_shape` | `{"error": {"type": "invalid_request_error", "message": …}}` with no invented `code` |
-| `test_405_body_shape` | same, status 405 — and the test cites the allow-list entry, since this is our choice, not Stripe's documented behavior |
+| `test_404_message_is_the_recorded_form` | the 404 message is the quoted `Unrecognized request URL` form; the real body's docs/support tail is the declared allow-list difference |
 | `test_param_is_present_on_every_parameter_error` | every `parameter_*` error names a `param` |
 
 ### Where these tests sit relative to the architecture's table

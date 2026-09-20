@@ -65,9 +65,11 @@ Kind = Literal[
     "id",
     "literal",
     "object",
+    "map",
     "array",
     "range",
     "timestamp",
+    "int_literal",
 ]
 
 #: The five parameters lifted out of `Request.params` (§3.4 of the dispatcher
@@ -104,7 +106,7 @@ class Param:
     maximum: int | None = None
     max_length: int | None = None
     shape: tuple[Param, ...] = ()  # kind="object"
-    item: Param | None = None  # kind="array"
+    item: Param | None = None  # kind="array"; the per-currency value for "map"
     unset_with_empty_string: bool = False  # Stripe's "" means "clear this field"
     column: str | None = None  # None means the column shares the name
 
@@ -261,6 +263,17 @@ def _check(
             high = "∞" if param.maximum is None else param.maximum
             raise _invalid("integer", path, f"Invalid integer: {value}; must be {low} to {high}")
         return value
+    if kind == "int_literal":
+        # An integer-or-literal union: `tiers[].up_to` is a count or the
+        # string `inf` on the wire. A string must be one of `choices`; an
+        # integer takes the plain integer checks above.
+        if isinstance(value, str):
+            if value not in param.choices:
+                raise _invalid("string", path, _choices_message(path, param.choices))
+            return value
+        if not isinstance(value, int) or isinstance(value, bool):
+            raise _invalid("integer", path, f"Invalid integer: {value}")
+        return value
     if kind == "boolean":
         if not isinstance(value, bool):
             raise _invalid("boolean", path, f"Invalid boolean: {value!r}")
@@ -286,7 +299,9 @@ def _check(
     if kind == "range":
         return _check_range(param, value, path)
     if kind == "object":
-        return _check_object(param, value, path)
+        return _check_object(param, value, path, id_status)
+    if kind == "map":
+        return _check_map(param, value, path, id_status)
     if kind == "array":
         if not isinstance(value, list):
             raise _invalid("array", path, f"Invalid array: {value!r}")
@@ -344,6 +359,229 @@ def _check_object(param: Param, value: object, path: str, id_status: int = 400) 
     return out
 
 
+#: The currency codes a map parameter accepts, transcribed in Stripe's own
+#: order from the live `Invalid currency` refusal at the pinned version
+#: (Phase 7 probe; see `_check_map` for why it is a constant and not a
+#: cassette step).
+_SUPPORTED_MAP_CURRENCIES_TEXT = (
+    "usd, aed, afn, all, amd, ang, aoa, ars, aud, awg, azn, bam, bbd, bdt"
+    ", bgn, bhd, bif, bmd, bnd, bob, brl, bsd, bwp, byn, bzd, cad, cdf, chf"
+    ", clp, cny, cop, crc, cve, czk, djf, dkk, dop, dzd, egp, etb, eur, fjd"
+    ", fkp, gbp, gel, gip, gmd, gnf, gtq, gyd, hkd, hnl, hrk, htg, huf, idr"
+    ", ils, inr, isk, jmd, jod, jpy, kes, kgs, khr, kmf, krw, kwd, kyd, kzt"
+    ", lak, lbp, lkr, lrd, lsl, mad, mdl, mga, mkd, mmk, mnt, mop, mur, mvr"
+    ", mwk, mxn, myr, mzn, nad, ngn, nio, nok, npr, nzd, omr, pab, pen, pgk"
+    ", php, pkr, pln, pyg, qar, ron, rsd, rub, rwf, sar, sbd, scr, sek, sgd"
+    ", shp, sle, sos, srd, std, szl, thb, tjs, tnd, top, try, ttd, twd, tzs"
+    ", uah, ugx, uyu, uzs, vnd, vuv, wst, xaf, xcd, xcg, xof, xpf, yer, zar"
+    ", zmw, usdc, eurc, usdt, open_usd, btn, ghs, eek, lvl, svc, vef, ltl, sll"
+    ", mro"
+)
+
+_SUPPORTED_MAP_CURRENCIES = frozenset(
+    (
+        "usd",
+        "aed",
+        "afn",
+        "all",
+        "amd",
+        "ang",
+        "aoa",
+        "ars",
+        "aud",
+        "awg",
+        "azn",
+        "bam",
+        "bbd",
+        "bdt",
+        "bgn",
+        "bhd",
+        "bif",
+        "bmd",
+        "bnd",
+        "bob",
+        "brl",
+        "bsd",
+        "bwp",
+        "byn",
+        "bzd",
+        "cad",
+        "cdf",
+        "chf",
+        "clp",
+        "cny",
+        "cop",
+        "crc",
+        "cve",
+        "czk",
+        "djf",
+        "dkk",
+        "dop",
+        "dzd",
+        "egp",
+        "etb",
+        "eur",
+        "fjd",
+        "fkp",
+        "gbp",
+        "gel",
+        "gip",
+        "gmd",
+        "gnf",
+        "gtq",
+        "gyd",
+        "hkd",
+        "hnl",
+        "hrk",
+        "htg",
+        "huf",
+        "idr",
+        "ils",
+        "inr",
+        "isk",
+        "jmd",
+        "jod",
+        "jpy",
+        "kes",
+        "kgs",
+        "khr",
+        "kmf",
+        "krw",
+        "kwd",
+        "kyd",
+        "kzt",
+        "lak",
+        "lbp",
+        "lkr",
+        "lrd",
+        "lsl",
+        "mad",
+        "mdl",
+        "mga",
+        "mkd",
+        "mmk",
+        "mnt",
+        "mop",
+        "mur",
+        "mvr",
+        "mwk",
+        "mxn",
+        "myr",
+        "mzn",
+        "nad",
+        "ngn",
+        "nio",
+        "nok",
+        "npr",
+        "nzd",
+        "omr",
+        "pab",
+        "pen",
+        "pgk",
+        "php",
+        "pkr",
+        "pln",
+        "pyg",
+        "qar",
+        "ron",
+        "rsd",
+        "rub",
+        "rwf",
+        "sar",
+        "sbd",
+        "scr",
+        "sek",
+        "sgd",
+        "shp",
+        "sle",
+        "sos",
+        "srd",
+        "std",
+        "szl",
+        "thb",
+        "tjs",
+        "tnd",
+        "top",
+        "try",
+        "ttd",
+        "twd",
+        "tzs",
+        "uah",
+        "ugx",
+        "uyu",
+        "uzs",
+        "vnd",
+        "vuv",
+        "wst",
+        "xaf",
+        "xcd",
+        "xcg",
+        "xof",
+        "xpf",
+        "yer",
+        "zar",
+        "zmw",
+        "usdc",
+        "eurc",
+        "usdt",
+        "open_usd",
+        "btn",
+        "ghs",
+        "eek",
+        "lvl",
+        "svc",
+        "vef",
+        "ltl",
+        "sll",
+        "mro",
+    )
+)
+
+
+def _check_map(param: Param, value: object, path: str, id_status: int = 400) -> dict[str, Any]:
+    """A currency-keyed map (`currency_options[eur][amount_off]=…`): every key
+    a supported three-letter currency code in lowercase, every value checked
+    against `item`. The per-currency object is bracket-addressed on the wire,
+    so nested `param` spellings come out as `currency_options[eur][amount_off]`.
+
+    The refusals are probed live at the pinned version (Phase 7): a non-object
+    answers `Invalid object`; a key whose lowercase form is a supported code
+    answers the `Currencies must be lowercase … Use 'eur' instead of 'EUR'`
+    hint; anything else answers `Invalid currency: <key>. Stripe currently
+    supports these currencies: …` with the full ordered list. The list below is
+    transcribed from that live probe (154 codes). A cassette step would bind
+    it — the replay diffs Stripe's live message against this constant, the
+    same check every other verbatim message gets — and it is declined anyway
+    as a maintenance choice: the list churns with Stripe's currency support,
+    and a committed step would turn every such churn into a cassette
+    re-record. The freshness of the transcription is therefore a declared
+    property, recorded in allowed_differences.py, not a replay-checked one.
+    """
+    if not isinstance(value, dict):
+        raise invalid_request("Invalid object", param=path, pre_execution=True)
+    if param.item is None:
+        raise seahaven.WorldBug(f"map parameter {path!r} declares no item param")
+    out: dict[str, Any] = {}
+    for key, item in value.items():
+        lowered = key.lower()
+        if key != lowered and key.lower() in _SUPPORTED_MAP_CURRENCIES:
+            raise invalid_request(
+                f"Currencies must be lowercase when used as keys in a map. "
+                f"Use `{lowered}` instead of `{key}`.",
+                param=path,
+                pre_execution=True,
+            )
+        if lowered not in _SUPPORTED_MAP_CURRENCIES:
+            raise invalid_request(
+                f"Invalid currency: {key}. Stripe currently supports these currencies: "
+                f"{_SUPPORTED_MAP_CURRENCIES_TEXT}.",
+                param=path,
+                pre_execution=True,
+            )
+        out[lowered] = _check(param.item, item, _bracket(path, lowered), id_status)
+    return out
+
+
 def _metadata_update(raw: object) -> MetadataUpdate:
     """The whole-parameter validation and parse of `metadata`."""
     if raw == "" or raw == {}:  # the wire spelling and the JSON spelling both clear
@@ -384,6 +622,9 @@ _LIST_FILTER_KIND: Final[dict[str, Kind]] = {
     "exact": "string",
     "range": "range",
     "literal": "literal",
+    "boolean": "boolean",
+    "in": "array",
+    "json": "object",
 }
 _list_filter_cache: dict[str, tuple[Param, ...]] = {}
 
@@ -397,8 +638,14 @@ def _list_filter_params(resource: ResourceSpec) -> tuple[Param, ...]:
             # is checked here (at 400 — query side), while *existence* is the
             # engine's `references` lookup, which bind never does.
             kind = _LIST_FILTER_KIND[flt.kind]
+            item: Param | None = None
+            shape: tuple[Param, ...] = ()
             if kind == "string" and flt.id_prefixes:
                 kind = "id"
+            elif kind == "array":
+                item = Param(name="", kind="id" if flt.id_prefixes else "string")
+            elif kind == "object":
+                shape = flt.sub_shape
             params.append(
                 Param(
                     name=flt.name,
@@ -406,6 +653,8 @@ def _list_filter_params(resource: ResourceSpec) -> tuple[Param, ...]:
                     choices=flt.choices,
                     id_prefixes=flt.id_prefixes,
                     required=flt.required,
+                    item=item,
+                    shape=shape,
                 )
             )
         cached = tuple(params)

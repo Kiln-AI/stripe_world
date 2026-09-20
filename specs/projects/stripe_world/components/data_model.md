@@ -294,7 +294,7 @@ in shape and simpler to assert.
 | `payment_method` | `pm_` | |
 | `product` | `prod_` | |
 | `price` | `price_` | |
-| `coupon` | *(none)* | Caller-suppliable; otherwise 8 uppercase alphanumerics, e.g. `Z4OV52SU`. The one unprefixed id in the world. |
+| `coupon` | *(none)* | Caller-suppliable; otherwise 8 mixed-case alphanumerics, e.g. `hbzb1NEf` (Phase 7 recording; the design's first guess of uppercase-only was corrected by it). The one unprefixed id in the world. |
 | `promotion_code` | `promo_` | Distinct from the human-facing `code` field. |
 | `tax_rate` | `txr_` | |
 | `payment_intent` | `pi_` | |
@@ -429,10 +429,12 @@ CREATE TABLE prices (
 CREATE UNIQUE INDEX prices_by_seq ON prices (x_seq DESC);
 CREATE INDEX prices_by_product ON prices (product, x_seq DESC);
 CREATE INDEX prices_by_active  ON prices (active, x_seq DESC);
--- Stripe enforces lookup_key uniqueness among live prices only; transferring a key
--- archives the old price. A partial unique index says exactly that, and a partial
--- index is legal here because its predicate reads no clock.
-CREATE UNIQUE INDEX prices_lookup_key ON prices (lookup_key) WHERE lookup_key IS NOT NULL AND active = 1;
+-- Lookup-key uniqueness. Phase 7's recording corrected the design's
+-- live-only reading: the conflict fires even when the holder is inactive,
+-- so the uniqueness is over every holder. `transfer_lookup_key` dodges it
+-- by *clearing* the holder's key (an empty-string update also clears one,
+-- probed) — the holder keeps `active` as it was; nothing is archived.
+CREATE UNIQUE INDEX prices_lookup_key ON prices (lookup_key) WHERE lookup_key IS NOT NULL;
 
 CREATE TABLE coupons (
     id                 TEXT PRIMARY KEY,
@@ -480,10 +482,19 @@ CREATE TABLE promotion_codes (
     times_redeemed  INTEGER NOT NULL DEFAULT 0
 ) STRICT;
 
+-- Phase 7's recording settled the wire shape at the pinned version: there is
+-- no top-level `coupon` field and no top-level `coupon` parameter. The
+-- reference is nested under `promotion: {type: "coupon", coupon: <id>}` —
+-- an embedded wrapper (never expandable itself) around an expandable coupon
+-- reference (`expand[]=promotion.coupon`, probed). The column above is the
+-- bare id; the serializer dresses it at the edge. Uniqueness of a `code`
+-- holds among active codes ("An active promotion code with `code: X`
+-- already exists.", probed).
 CREATE UNIQUE INDEX promotion_codes_by_seq  ON promotion_codes (x_seq DESC);
 CREATE INDEX promotion_codes_by_code     ON promotion_codes (code, x_seq DESC);
 CREATE INDEX promotion_codes_by_coupon   ON promotion_codes (coupon, x_seq DESC);
 CREATE INDEX promotion_codes_by_customer ON promotion_codes (customer, x_seq DESC);
+CREATE UNIQUE INDEX promotion_codes_active_code ON promotion_codes (code) WHERE active = 1;
 
 CREATE TABLE tax_rates (
     id                   TEXT PRIMARY KEY,
@@ -1624,11 +1635,14 @@ Named tests, all through `instance.call(...)` or `inst.inspect()` unless stated.
    description only links to a docs page, and the inventory already flags it as a gap. It is `NOT
    NULL` with no `CHECK`. The world will write `charge`, `refund`, `dispute`, `payout`, `fee` and
    `payout_reversal`; whether those strings are exactly right is unverified and goes to a cassette.
-2. **Retrieve-after-delete for `product` and `coupon`.** The tombstone decision in §3.3 is grounded in
-   the `deleted_product` / `deleted_coupon` union members existing, but whether the real API returns
-   the stub or a `404` on a subsequent retrieve is not settled by any source on disk. The tables carry
-   the column either way; the handler behavior is a conformance scenario and an allow-list entry
-   until a cassette exists.
+2. **Retrieve-after-delete for `product` and `coupon` — settled by Phase 7's recording.** The
+   tombstone decision in §3.3 is grounded in the `deleted_product` / `deleted_coupon` union members
+   existing, and the recording settles what a subsequent retrieve answers: a **404**
+   `resource_missing` naming the path id — for both products and coupons, while a deleted *customer*
+   retrieves as the three-key stub (probed both ways, Phase 7). The split is carried by
+   `DeleteSpec.deleted_retrieve`; the delete-event snapshots also carry the flipped column
+   (`product.active: false`, `coupon.valid: false`), which is why both deletes zero a column before
+   the snapshot row is re-read.
 3. **`invoiceitem.quantity_decimal` is `required` and non-nullable but has no documented default.**
-   `'1'` is the chosen default; a cassette should confirm Stripe does not return `'1.0'` or a
-   higher-precision form.
+    `'1'` is the chosen default; a cassette should confirm Stripe does not return `'1.0'` or a
+    higher-precision form.
