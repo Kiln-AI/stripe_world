@@ -195,3 +195,40 @@ CREATE TABLE disputes (
 CREATE UNIQUE INDEX disputes_by_seq        ON disputes (x_seq DESC);
 CREATE INDEX disputes_by_charge         ON disputes (charge, x_seq DESC);
 CREATE INDEX disputes_by_payment_intent ON disputes (payment_intent, x_seq DESC);
+
+-- setup_intents (Phase 10, probed 2026-09-20). mandate / single_use_mandate /
+-- latest_attempt are scope-boundary stubs (data_model §4): latest_attempt
+-- mints a `setatt_…` id on every confirm attempt, the two mandate columns
+-- stay NULL on the card rail (recorded), and none of the three ever resolves
+-- to an object. attach_to_self is a stored column the recorded wire never
+-- carries; the serializer leaves it unmapped.
+CREATE TABLE setup_intents (
+    id                     TEXT PRIMARY KEY,
+    x_seq                  INTEGER NOT NULL,
+    created                TEXT NOT NULL,
+    attach_to_self         INTEGER NOT NULL DEFAULT 0 CHECK (attach_to_self IN (0, 1)),
+    automatic_payment_methods TEXT CHECK (automatic_payment_methods IS NULL OR (json_valid(automatic_payment_methods) AND json_type(automatic_payment_methods) = 'object')),
+    cancellation_reason    TEXT CHECK (cancellation_reason IS NULL OR cancellation_reason IN ('abandoned', 'duplicate', 'requested_by_customer')),
+    client_secret          TEXT,
+    customer               TEXT REFERENCES customers (id),
+    description            TEXT,
+    flow_directions        TEXT CHECK (flow_directions IS NULL OR (json_valid(flow_directions) AND json_type(flow_directions) = 'array')),
+    last_setup_error       TEXT CHECK (last_setup_error IS NULL OR (json_valid(last_setup_error) AND json_type(last_setup_error) = 'object')),
+    latest_attempt         TEXT,      -- stub: `setatt_…`, never resolved
+    mandate                TEXT,      -- stub: `mandate_…`, never resolved
+    metadata               TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata) AND json_type(metadata) = 'object'),
+    next_action            TEXT CHECK (next_action IS NULL OR (json_valid(next_action) AND json_type(next_action) = 'object')),
+    payment_method         TEXT REFERENCES payment_methods (id),
+    payment_method_options TEXT CHECK (payment_method_options IS NULL OR (json_valid(payment_method_options) AND json_type(payment_method_options) = 'object')),
+    payment_method_types   TEXT NOT NULL DEFAULT '["card"]' CHECK (json_valid(payment_method_types) AND json_type(payment_method_types) = 'array'),
+    single_use_mandate     TEXT,      -- stub
+    status                 TEXT NOT NULL CHECK (status IN
+                               ('canceled','processing','requires_action','requires_confirmation',
+                                'requires_payment_method','succeeded')),
+    -- doc-only enum: description names on_session / off_session, default off_session
+    usage                  TEXT NOT NULL DEFAULT 'off_session' CHECK (usage IN ('on_session', 'off_session'))
+) STRICT;
+
+CREATE UNIQUE INDEX setup_intents_by_seq        ON setup_intents (x_seq DESC);
+CREATE INDEX setup_intents_by_customer       ON setup_intents (customer, x_seq DESC);
+CREATE INDEX setup_intents_by_payment_method ON setup_intents (payment_method, x_seq DESC);

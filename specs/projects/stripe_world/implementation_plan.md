@@ -64,7 +64,7 @@ Each still touches only its own tables.
 - [x] **Phase 8: The money path.** `payment_intents`, `charges`. Confirm, capture, cancel. The
       headline idempotency eval becomes runnable here.
 - [x] **Phase 9: Refunds and disputes.** Partial refunds, over-refund rejection, dispute lifecycle.
-- [ ] **Phase 10: Setup intents.**
+- [x] **Phase 10: Setup intents.**
 - [ ] **Phase 11: Ledger and payouts.** `balance_transactions`, computed `balance`, `payouts`. The
       ledger invariants land here.
 - [ ] **Phase 12: Subscriptions.** `subscriptions`, `subscription_items`, the eight-status machine.

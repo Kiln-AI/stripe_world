@@ -216,8 +216,9 @@ def _idempotency_mismatch_modulo_key(recorded: Any, replayed: Any) -> bool:
     )
 
 
-#: A client secret embeds its intent's minted id plus a random suffix.
-_CLIENT_SECRET = re.compile(r"^pi_[A-Za-z0-9]+_secret_[A-Za-z0-9]+$")
+#: A client secret embeds its intent's minted id plus a random suffix —
+#: PaymentIntent and SetupIntent alike.
+_CLIENT_SECRET = re.compile(r"^(?:pi|seti)_[A-Za-z0-9]+_secret_[A-Za-z0-9]+$")
 
 
 def _both_client_secrets(recorded: Any, replayed: Any) -> bool:
@@ -382,6 +383,38 @@ def _message_modulo_id(pattern: re.Pattern[str]) -> Callable[[Any, Any], bool]:
         )
 
     return check
+
+
+#: The setup-intent ownership refusals name both ids they turn on (all
+#: recorded verbatim, Phase 10, at create, update and confirm): the
+#: wrong-customer spelling and the customerless one.
+_SETI_DOES_NOT_BELONG = re.compile(
+    r"^The PaymentMethod pm_[A-Za-z0-9]+ does not belong to the Customer you "
+    r"supplied cus_[A-Za-z0-9]+\. Please use this PaymentMethod with the "
+    r"Customer that it belongs to instead\.$"
+)
+_SETI_SUPPLIED_BELONGS = re.compile(
+    r"^The payment method supplied \(pm_[A-Za-z0-9]+\) belongs to the "
+    r"Customer cus_[A-Za-z0-9]+\. Please include the Customer in the `customer` "
+    r"parameter on the SetupIntent\.$"
+)
+
+
+def _seti_ownership_modulo_ids(recorded: Any, replayed: Any) -> bool:
+    return (
+        isinstance(recorded, str)
+        and isinstance(replayed, str)
+        and (
+            bool(
+                _SETI_DOES_NOT_BELONG.fullmatch(recorded)
+                and _SETI_DOES_NOT_BELONG.fullmatch(replayed)
+            )
+            or bool(
+                _SETI_SUPPLIED_BELONGS.fullmatch(recorded)
+                and _SETI_SUPPLIED_BELONGS.fullmatch(replayed)
+            )
+        )
+    )
 
 
 #: The dispute settle collapse (Phase 9): live test mode resolves the magic
@@ -1028,6 +1061,62 @@ ALLOWED_DIFFERENCES: list[AllowedDifference] = [
         scenario="05_refunds_disputes",
         predicate=lambda recorded, replayed: (
             (recorded is False and replayed is True) or (recorded is True and replayed is False)
+        ),
+    ),
+    # --- the setup-intents block (Phase 10) ---
+    AllowedDifference(
+        "**.latest_attempt",
+        "The setup attempt stub is a freshly minted `setatt_…` id on every "
+        "confirm attempt (recorded, cassette 10) — the id rule on the field, "
+        "predicated to setatt_-shaped pairs.",
+        predicate=_both_prefixed_ids("setatt_"),
+    ),
+    AllowedDifference(
+        "**.error.network_advice_code",
+        "The expired-card setup decline carries the issuer's network advice "
+        "code beside its network decline code; network chatter is omitted "
+        "here like the money path's declines.",
+        predicate=lambda recorded, replayed: replayed is None,
+    ),
+    AllowedDifference(
+        "**.last_setup_error.advice_code",
+        "`last_setup_error`'s network chatter (recorded `try_again_later` / "
+        "`confirm_card_data`), omitted here — the same ruling as the money "
+        "path's `last_payment_error`.",
+        predicate=lambda recorded, replayed: replayed is None,
+    ),
+    AllowedDifference(
+        "**.last_setup_error.network_advice_code",
+        "`last_setup_error`'s network chatter, omitted here.",
+        predicate=lambda recorded, replayed: replayed is None,
+    ),
+    AllowedDifference(
+        "**.last_setup_error.network_decline_code",
+        "`last_setup_error`'s issuer decline code, omitted here.",
+        predicate=lambda recorded, replayed: replayed is None,
+    ),
+    AllowedDifference(
+        "**.error.message",
+        "The setup-intent ownership refusals name the PaymentMethod and the "
+        "Customer — the id-only rule, both recorded spellings (probed "
+        "verbatim at create, update and confirm, Phase 10).",
+        predicate=_seti_ownership_modulo_ids,
+    ),
+    # The recording account's Dashboard fills an unpinned SetupIntent's
+    # payment_method_types with five rails beside card (recorded: card,
+    # bancontact, klarna, link, pix, satispay) — a wider fill than the
+    # PaymentIntent's one-extra-rail shape the global entry admits, so the
+    # bare-create divergence is scoped here.
+    AllowedDifference(
+        "**.payment_method_types",
+        "The Dashboard configuration fills an unpinned SetupIntent's types "
+        "with five rails beside this world's `['card']` default (recorded, "
+        "cassette 10's one unpinned create); a pinned list still compares "
+        "byte-exact, which is why every other step pins one.",
+        scenario="10_setup_intents",
+        predicate=lambda recorded, replayed: (
+            recorded == ["card", "bancontact", "klarna", "link", "pix", "satispay"]
+            and replayed == ["card"]
         ),
     ),
     # Scenario 3 exists to record what a malformed Stripe-Version answers.

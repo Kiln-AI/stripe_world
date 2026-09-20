@@ -140,6 +140,45 @@ def test_a_pruned_target_reference_is_a_no_op(instance: seahaven.Instance) -> No
     assert result["body"]["default_source"] is None
 
 
+def test_expansion_off_a_setup_intent(instance: seahaven.Instance) -> None:
+    """The setup-intent slice's reference edges (Phase 10): `payment_method`
+    and `customer` inflate through the registered resources, and the
+    `setatt_` attempt stub validates but inflates nothing (a pruned
+    target)."""
+    cus = created(instance)
+    pm = instance.call(
+        "stripe_api_write",
+        method="POST",
+        path="/v1/payment_methods",
+        params={"type": "card", "card": {"token": "tok_visa"}},
+    )["body"]["id"]
+    instance.call(
+        "stripe_api_write",
+        method="POST",
+        path=f"/v1/payment_methods/{pm}/attach",
+        params={"customer": cus},
+    )
+    seti = instance.call(
+        "stripe_api_write",
+        method="POST",
+        path="/v1/setup_intents",
+        params={"customer": cus, "payment_method": pm, "confirm": True},
+    )["body"]
+    result = expand_on(
+        instance,
+        f"/v1/setup_intents/{seti['id']}",
+        "payment_method",
+        "customer",
+        "latest_attempt",
+    )
+    assert result["status"] == 200
+    assert result["body"]["payment_method"]["id"] == pm
+    assert result["body"]["payment_method"]["customer"] == cus
+    assert result["body"]["customer"]["id"] == cus
+    # the stub never resolves: the minted id stays a bare string
+    assert result["body"]["latest_attempt"] == seti["latest_attempt"]
+
+
 def test_a_dangling_reference_is_a_world_bug() -> None:
     """The engine emitted an id from a row it just read; a missing target row
     is a schema or write bug, not something an agent did

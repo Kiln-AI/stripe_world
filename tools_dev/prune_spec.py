@@ -178,8 +178,11 @@ KEEP_RAILS = frozenset({"card", "us_bank_account", "link"})
 # resource-inventory.md's citations of the spec's own description prose. These
 # cannot be regex-extracted reliably (components/discovery.md §5); a cited
 # hand transcription pinned by test is the honest mechanism.
-# `setup_intent.usage` is deliberately absent: it is an open, forward-compatible
-# string with a documented default, not a closed set.
+# `setup_intent.usage` is not among them: its closed set is this project's
+# declaration, not the spec's prose, so it lives in the validator's table
+# below under DECLARED_OVERRIDES — while the DDL still carries its CHECK,
+# per data_model.md §12's seven-row table (Phase 10's recording: the
+# parameter itself is dead at the pinned version, accepted and ignored).
 DOC_ONLY_ENUMS: dict[str, dict[str, tuple[str, ...]]] = {
     "balance_transaction": {
         # resource-inventory.md, balance_transaction.status.
@@ -228,10 +231,12 @@ DOC_ONLY_ENUMS: dict[str, dict[str, tuple[str, ...]]] = {
 # prose without being phrased as an exhaustive set, whose closed reading is
 # this project's declaration (functional spec §4), recorded in
 # DECLARED_OVERRIDES and in Phase 5's conformance allow-list, not presented
-# as documented fact. The DDL keeps discovery.md §5's ruling:
-# `setup_intent.usage` stays an unconstrained column; only the validator
-# closes it. Fields the pass found whose prose does *not* close the set are
-# recorded, with reasons, in phase_plans/phase_4.md.
+# as documented fact. The DDL carries its CHECK like the six above
+# (data_model.md §12's seven-row table); Phase 10's recording adds that the
+# parameter itself is dead at the pinned version — accepted and ignored,
+# `off_session` emitted every time — so the CHECK governs what may be
+# stored, never what a caller sent. Fields the pass found whose prose does
+# *not* close the set are recorded, with reasons, in phase_plans/phase_4.md.
 # "Status of the reference on the refund. This can be `pending`, `available`
 # or `unavailable`." — one sentence shared verbatim by all eight
 # refund_destination_details_* schemas' reference_status fields.
@@ -1134,9 +1139,11 @@ def _render_enums(artifacts: Artifacts) -> str:
         "DOC_ONLY_ENUMS: the six fields whose closed value set exists only in\n"
         "the spec's description prose (no machine-readable `enum`),\n"
         "hand-transcribed from resource-inventory.md's citations. The schema's\n"
-        "CHECK constraints read this; `setup_intent.usage` is deliberately\n"
-        "absent there — an open string with a documented default, not a closed\n"
-        "set (components/discovery.md §5).\n"
+        "CHECK constraints read this; `setup_intent.usage` is not one of the\n"
+        "six — its closed set is this project's declaration — but its DDL\n"
+        "CHECK ships all the same (data_model.md §12's seven-row table), and\n"
+        "Phase 10's recording adds that the parameter itself is dead at the\n"
+        "pinned version: accepted and ignored, `off_session` every time.\n"
         "\n"
         "ENUM_OVERRIDES: the schema-conformance validator's superset — those\n"
         "six plus every further closure field whose description genuinely\n"

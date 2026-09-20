@@ -1442,6 +1442,12 @@ The six the brief names, with the exact description each set is read from:
 | `balance_transaction.status` | `string`, REQ | `available, pending` | "which are either `available` or `pending`" |
 | `setup_intent.usage` | `string`, REQ | `on_session, off_session` | "Use `on_session` if … Use `off_session` if …", default `off_session` |
 
+**Recording correction (Phase 10, 2026-09-20):** the `usage` *parameter* is dead at the pinned
+version — live test mode accepts `on_session`, and even invalid strings, with 200 and answers
+`off_session` on every body, create and update alike (cassette 10). The emitted value is therefore
+always `off_session`; the column keeps its `CHECK` (the closed set still governs what may be
+stored) and the parameter is accepted-and-ignored.
+
 Each of the seven rows above becomes a `CHECK (col IN (…))` in the DDL, written out above. **Note
 that is seven fields, not six** — the brief and functional spec §4 count `payout.status`/`method`/
 `source_type` as one entry; there are three distinct `payout` fields, so the total is seven, from six

@@ -1,0 +1,3380 @@
+{
+  "scenario": "10_setup_intents",
+  "description": "Setup intents: the created body's defaults (the dead usage parameter included), ownership refusals at create, update and confirm, confirm success with auto-attach, the returned-402 declines whose rows survive, the missing-method and wrong-state refusals, cancel with its reason, verify_microdeposits' refusal, the lists and the missing id.",
+  "recorded_at": "2026-09-20T16:39:19+00:00",
+  "stripe_version_pin": "2026-08-26.dahlia",
+  "steps": [
+    {
+      "seq": 0,
+      "method": "POST",
+      "path": "/v1/customers",
+      "path_refs": {},
+      "params": {
+        "email": "s10@conformance.stripeapi.invalid",
+        "description": "scenario 10",
+        "metadata": {
+          "probe": "s10"
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": "customer",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "cus_VIOY4LwwrstX3k",
+        "object": "customer",
+        "address": null,
+        "balance": 0,
+        "created": 1789922350,
+        "currency": null,
+        "customer_account": null,
+        "default_source": null,
+        "delinquent": false,
+        "description": "scenario 10",
+        "discount": null,
+        "email": "s10@conformance.stripeapi.invalid",
+        "invoice_prefix": "XJOQ3XGY",
+        "invoice_settings": {
+          "custom_fields": null,
+          "default_payment_method": null,
+          "footer": null,
+          "rendering_options": null
+        },
+        "livemode": false,
+        "metadata": {
+          "probe": "s10"
+        },
+        "name": null,
+        "next_invoice_sequence": 1,
+        "phone": null,
+        "preferred_locales": [],
+        "shipping": null,
+        "tax_exempt": "none",
+        "test_clock": null
+      }
+    },
+    {
+      "seq": 1,
+      "method": "POST",
+      "path": "/v1/customers",
+      "path_refs": {},
+      "params": {
+        "email": "s10b@conformance.stripeapi.invalid",
+        "description": "scenario 10 other"
+      },
+      "idempotency_key": null,
+      "binds_as": "other",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "cus_VIOYHEDSFMFUW5",
+        "object": "customer",
+        "address": null,
+        "balance": 0,
+        "created": 1789922350,
+        "currency": null,
+        "customer_account": null,
+        "default_source": null,
+        "delinquent": false,
+        "description": "scenario 10 other",
+        "discount": null,
+        "email": "s10b@conformance.stripeapi.invalid",
+        "invoice_prefix": "6QL624QG",
+        "invoice_settings": {
+          "custom_fields": null,
+          "default_payment_method": null,
+          "footer": null,
+          "rendering_options": null
+        },
+        "livemode": false,
+        "metadata": {},
+        "name": null,
+        "next_invoice_sequence": 1,
+        "phone": null,
+        "preferred_locales": [],
+        "shipping": null,
+        "tax_exempt": "none",
+        "test_clock": null
+      }
+    },
+    {
+      "seq": 2,
+      "method": "POST",
+      "path": "/v1/payment_methods",
+      "path_refs": {},
+      "params": {
+        "type": "card",
+        "card": {
+          "token": "tok_visa"
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": "visa",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "pm_1UHnljHIBYZYyePrVRAUWQVl",
+        "object": "payment_method",
+        "allow_redisplay": "unspecified",
+        "billing_details": {
+          "address": {
+            "city": null,
+            "country": null,
+            "line1": null,
+            "line2": null,
+            "postal_code": null,
+            "state": null
+          },
+          "email": null,
+          "name": null,
+          "phone": null,
+          "tax_id": null
+        },
+        "card": {
+          "brand": "visa",
+          "checks": {
+            "address_line1_check": null,
+            "address_postal_code_check": null,
+            "cvc_check": "unchecked"
+          },
+          "country": "US",
+          "display_brand": "visa",
+          "exp_month": 9,
+          "exp_year": 2027,
+          "fingerprint": "OiMHMa3aYsyDbc1P",
+          "funding": "credit",
+          "generated_from": null,
+          "last4": "4242",
+          "networks": {
+            "available": [
+              "visa"
+            ],
+            "preferred": null
+          },
+          "regulated_status": "unregulated",
+          "three_d_secure_usage": {
+            "supported": true
+          },
+          "wallet": null
+        },
+        "created": 1789922351,
+        "customer": null,
+        "customer_account": null,
+        "livemode": false,
+        "metadata": {},
+        "shared_payment_granted_token": null,
+        "type": "card"
+      }
+    },
+    {
+      "seq": 3,
+      "method": "POST",
+      "path": "/v1/payment_methods/{payment_method}/attach",
+      "path_refs": {
+        "payment_method": {
+          "step": "visa",
+          "field": "id"
+        }
+      },
+      "params": {
+        "customer": {
+          "$ref": {
+            "step": "customer",
+            "field": "id"
+          }
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "pm_1UHnljHIBYZYyePrVRAUWQVl",
+        "object": "payment_method",
+        "allow_redisplay": "unspecified",
+        "billing_details": {
+          "address": {
+            "city": null,
+            "country": null,
+            "line1": null,
+            "line2": null,
+            "postal_code": null,
+            "state": null
+          },
+          "email": null,
+          "name": null,
+          "phone": null,
+          "tax_id": null
+        },
+        "card": {
+          "brand": "visa",
+          "checks": {
+            "address_line1_check": null,
+            "address_postal_code_check": null,
+            "cvc_check": "pass"
+          },
+          "country": "US",
+          "display_brand": "visa",
+          "exp_month": 9,
+          "exp_year": 2027,
+          "fingerprint": "OiMHMa3aYsyDbc1P",
+          "funding": "credit",
+          "generated_from": null,
+          "last4": "4242",
+          "networks": {
+            "available": [
+              "visa"
+            ],
+            "preferred": null
+          },
+          "regulated_status": "unregulated",
+          "three_d_secure_usage": {
+            "supported": true
+          },
+          "wallet": null
+        },
+        "created": 1789922351,
+        "customer": "cus_VIOY4LwwrstX3k",
+        "customer_account": null,
+        "livemode": false,
+        "metadata": {},
+        "shared_payment_granted_token": null,
+        "type": "card"
+      }
+    },
+    {
+      "seq": 4,
+      "method": "POST",
+      "path": "/v1/setup_intents",
+      "path_refs": {},
+      "params": {},
+      "idempotency_key": null,
+      "binds_as": "bare",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "seti_1UHnljHIBYZYyePrNwXIFf6o",
+        "object": "setup_intent",
+        "allowed_payment_method_types": null,
+        "application": null,
+        "automatic_payment_methods": {
+          "allow_redirects": "always",
+          "enabled": true
+        },
+        "cancellation_reason": null,
+        "client_secret": "seti_1UHnljHIBYZYyePrNwXIFf6o_secret_VIOY7ZgPeKUkpxLzq8qHxEmsM2H8Ymb",
+        "created": 1789922351,
+        "customer": null,
+        "customer_account": null,
+        "description": null,
+        "excluded_payment_method_types": null,
+        "flow_directions": null,
+        "last_setup_error": null,
+        "latest_attempt": null,
+        "livemode": false,
+        "managed_payments": {
+          "enabled": false
+        },
+        "mandate": null,
+        "metadata": {},
+        "next_action": null,
+        "on_behalf_of": null,
+        "payment_method": null,
+        "payment_method_configuration_details": {
+          "id": "pmc_1UHQNLHIBYZYyePr0ZNBvN4m",
+          "parent": null
+        },
+        "payment_method_options": {
+          "card": {
+            "mandate_options": null,
+            "network": null,
+            "request_three_d_secure": "automatic"
+          }
+        },
+        "payment_method_types": [
+          "card",
+          "bancontact",
+          "klarna",
+          "link",
+          "pix",
+          "satispay"
+        ],
+        "single_use_mandate": null,
+        "status": "requires_payment_method",
+        "usage": "off_session"
+      }
+    },
+    {
+      "seq": 5,
+      "method": "GET",
+      "path": "/v1/setup_intents/{intent}",
+      "path_refs": {
+        "intent": {
+          "step": "bare",
+          "field": "id"
+        }
+      },
+      "params": {},
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "seti_1UHnljHIBYZYyePrNwXIFf6o",
+        "object": "setup_intent",
+        "allowed_payment_method_types": null,
+        "application": null,
+        "automatic_payment_methods": {
+          "allow_redirects": "always",
+          "enabled": true
+        },
+        "cancellation_reason": null,
+        "client_secret": "seti_1UHnljHIBYZYyePrNwXIFf6o_secret_VIOY7ZgPeKUkpxLzq8qHxEmsM2H8Ymb",
+        "created": 1789922351,
+        "customer": null,
+        "customer_account": null,
+        "description": null,
+        "excluded_payment_method_types": null,
+        "flow_directions": null,
+        "last_setup_error": null,
+        "latest_attempt": null,
+        "livemode": false,
+        "managed_payments": {
+          "enabled": false
+        },
+        "mandate": null,
+        "metadata": {},
+        "next_action": null,
+        "on_behalf_of": null,
+        "payment_method": null,
+        "payment_method_configuration_details": {
+          "id": "pmc_1UHQNLHIBYZYyePr0ZNBvN4m",
+          "parent": null
+        },
+        "payment_method_options": {
+          "card": {
+            "mandate_options": null,
+            "network": null,
+            "request_three_d_secure": "automatic"
+          }
+        },
+        "payment_method_types": [
+          "card",
+          "bancontact",
+          "klarna",
+          "link",
+          "pix",
+          "satispay"
+        ],
+        "single_use_mandate": null,
+        "status": "requires_payment_method",
+        "usage": "off_session"
+      }
+    },
+    {
+      "seq": 6,
+      "method": "POST",
+      "path": "/v1/setup_intents",
+      "path_refs": {},
+      "params": {
+        "usage": "on_session",
+        "payment_method_types": [
+          "card"
+        ]
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "seti_1UHnlkHIBYZYyePr4Lhfzgg3",
+        "object": "setup_intent",
+        "allowed_payment_method_types": null,
+        "application": null,
+        "automatic_payment_methods": null,
+        "cancellation_reason": null,
+        "client_secret": "seti_1UHnlkHIBYZYyePr4Lhfzgg3_secret_VIOYJVmQgLkDaE5wZ3FLLzsQhCZaeqc",
+        "created": 1789922352,
+        "customer": null,
+        "customer_account": null,
+        "description": null,
+        "excluded_payment_method_types": null,
+        "flow_directions": null,
+        "last_setup_error": null,
+        "latest_attempt": null,
+        "livemode": false,
+        "managed_payments": {
+          "enabled": false
+        },
+        "mandate": null,
+        "metadata": {},
+        "next_action": null,
+        "on_behalf_of": null,
+        "payment_method": null,
+        "payment_method_configuration_details": null,
+        "payment_method_options": {
+          "card": {
+            "mandate_options": null,
+            "network": null,
+            "request_three_d_secure": "automatic"
+          }
+        },
+        "payment_method_types": [
+          "card"
+        ],
+        "single_use_mandate": null,
+        "status": "requires_payment_method",
+        "usage": "off_session"
+      }
+    },
+    {
+      "seq": 7,
+      "method": "POST",
+      "path": "/v1/setup_intents",
+      "path_refs": {},
+      "params": {
+        "customer": {
+          "$ref": {
+            "step": "customer",
+            "field": "id"
+          }
+        },
+        "payment_method": {
+          "$ref": {
+            "step": "visa",
+            "field": "id"
+          }
+        },
+        "payment_method_types": [
+          "card"
+        ]
+      },
+      "idempotency_key": null,
+      "binds_as": "with_pm",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "seti_1UHnlkHIBYZYyePrkKlKDei4",
+        "object": "setup_intent",
+        "allowed_payment_method_types": null,
+        "application": null,
+        "automatic_payment_methods": null,
+        "cancellation_reason": null,
+        "client_secret": "seti_1UHnlkHIBYZYyePrkKlKDei4_secret_VIOYbEtu4aJOFLyJ7Pxi6CbeqFBCEpz",
+        "created": 1789922352,
+        "customer": "cus_VIOY4LwwrstX3k",
+        "customer_account": null,
+        "description": null,
+        "excluded_payment_method_types": null,
+        "flow_directions": null,
+        "last_setup_error": null,
+        "latest_attempt": null,
+        "livemode": false,
+        "managed_payments": {
+          "enabled": false
+        },
+        "mandate": null,
+        "metadata": {},
+        "next_action": null,
+        "on_behalf_of": null,
+        "payment_method": "pm_1UHnljHIBYZYyePrVRAUWQVl",
+        "payment_method_configuration_details": null,
+        "payment_method_options": {
+          "card": {
+            "mandate_options": null,
+            "network": null,
+            "request_three_d_secure": "automatic"
+          }
+        },
+        "payment_method_types": [
+          "card"
+        ],
+        "single_use_mandate": null,
+        "status": "requires_confirmation",
+        "usage": "off_session"
+      }
+    },
+    {
+      "seq": 8,
+      "method": "POST",
+      "path": "/v1/setup_intents",
+      "path_refs": {},
+      "params": {
+        "customer": {
+          "$ref": {
+            "step": "other",
+            "field": "id"
+          }
+        },
+        "payment_method": {
+          "$ref": {
+            "step": "visa",
+            "field": "id"
+          }
+        },
+        "payment_method_types": [
+          "card"
+        ]
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 400,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "error": {
+          "message": "The PaymentMethod pm_1UHnljHIBYZYyePrVRAUWQVl does not belong to the Customer you supplied cus_VIOYHEDSFMFUW5. Please use this PaymentMethod with the Customer that it belongs to instead.",
+          "param": "payment_method",
+          "request_log_url": "<redacted:request_log_url>",
+          "type": "invalid_request_error"
+        }
+      }
+    },
+    {
+      "seq": 9,
+      "method": "POST",
+      "path": "/v1/setup_intents",
+      "path_refs": {},
+      "params": {
+        "payment_method": {
+          "$ref": {
+            "step": "visa",
+            "field": "id"
+          }
+        },
+        "payment_method_types": [
+          "card"
+        ]
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 400,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "error": {
+          "message": "The payment method supplied (pm_1UHnljHIBYZYyePrVRAUWQVl) belongs to the Customer cus_VIOY4LwwrstX3k. Please include the Customer in the `customer` parameter on the SetupIntent.",
+          "param": "payment_method",
+          "request_log_url": "<redacted:request_log_url>",
+          "type": "invalid_request_error"
+        }
+      }
+    },
+    {
+      "seq": 10,
+      "method": "POST",
+      "path": "/v1/setup_intents/{intent}/confirm",
+      "path_refs": {
+        "intent": {
+          "step": "with_pm",
+          "field": "id"
+        }
+      },
+      "params": {},
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "seti_1UHnlkHIBYZYyePrkKlKDei4",
+        "object": "setup_intent",
+        "allowed_payment_method_types": null,
+        "application": null,
+        "automatic_payment_methods": null,
+        "cancellation_reason": null,
+        "client_secret": "seti_1UHnlkHIBYZYyePrkKlKDei4_secret_VIOYbEtu4aJOFLyJ7Pxi6CbeqFBCEpz",
+        "created": 1789922352,
+        "customer": "cus_VIOY4LwwrstX3k",
+        "customer_account": null,
+        "description": null,
+        "excluded_payment_method_types": null,
+        "flow_directions": null,
+        "last_setup_error": null,
+        "latest_attempt": "setatt_1UHnlkHIBYZYyePrisdDPinv",
+        "livemode": false,
+        "managed_payments": {
+          "enabled": false
+        },
+        "mandate": null,
+        "metadata": {},
+        "next_action": null,
+        "on_behalf_of": null,
+        "payment_method": "pm_1UHnljHIBYZYyePrVRAUWQVl",
+        "payment_method_configuration_details": null,
+        "payment_method_options": {
+          "card": {
+            "mandate_options": null,
+            "network": null,
+            "request_three_d_secure": "automatic"
+          }
+        },
+        "payment_method_types": [
+          "card"
+        ],
+        "single_use_mandate": null,
+        "status": "succeeded",
+        "usage": "off_session"
+      }
+    },
+    {
+      "seq": 11,
+      "method": "POST",
+      "path": "/v1/setup_intents/{intent}/confirm",
+      "path_refs": {
+        "intent": {
+          "step": "with_pm",
+          "field": "id"
+        }
+      },
+      "params": {},
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 400,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "error": {
+          "code": "setup_intent_unexpected_state",
+          "doc_url": "https://stripe.com/docs/error-codes/setup-intent-unexpected-state",
+          "message": "You cannot confirm this SetupIntent because it has already succeeded.",
+          "request_log_url": "<redacted:request_log_url>",
+          "setup_intent": {
+            "id": "seti_1UHnlkHIBYZYyePrkKlKDei4",
+            "object": "setup_intent",
+            "allowed_payment_method_types": null,
+            "application": null,
+            "automatic_payment_methods": null,
+            "cancellation_reason": null,
+            "client_secret": "seti_1UHnlkHIBYZYyePrkKlKDei4_secret_VIOYbEtu4aJOFLyJ7Pxi6CbeqFBCEpz",
+            "created": 1789922352,
+            "customer": "cus_VIOY4LwwrstX3k",
+            "customer_account": null,
+            "description": null,
+            "excluded_payment_method_types": null,
+            "flow_directions": null,
+            "last_setup_error": null,
+            "latest_attempt": "setatt_1UHnlkHIBYZYyePrisdDPinv",
+            "livemode": false,
+            "managed_payments": {
+              "enabled": false
+            },
+            "mandate": null,
+            "metadata": {},
+            "next_action": null,
+            "on_behalf_of": null,
+            "payment_method": "pm_1UHnljHIBYZYyePrVRAUWQVl",
+            "payment_method_configuration_details": null,
+            "payment_method_options": {
+              "card": {
+                "mandate_options": null,
+                "network": null,
+                "request_three_d_secure": "automatic"
+              }
+            },
+            "payment_method_types": [
+              "card"
+            ],
+            "single_use_mandate": null,
+            "status": "succeeded",
+            "usage": "off_session"
+          },
+          "type": "invalid_request_error"
+        }
+      }
+    },
+    {
+      "seq": 12,
+      "method": "POST",
+      "path": "/v1/setup_intents/{intent}/cancel",
+      "path_refs": {
+        "intent": {
+          "step": "with_pm",
+          "field": "id"
+        }
+      },
+      "params": {},
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 400,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "error": {
+          "code": "setup_intent_unexpected_state",
+          "doc_url": "https://stripe.com/docs/error-codes/setup-intent-unexpected-state",
+          "message": "You cannot cancel this SetupIntent because it has a status of succeeded. Only a SetupIntent with one of the following statuses may be canceled: `requires_payment_method`, `requires_confirmation`, or `requires_action`.",
+          "request_log_url": "<redacted:request_log_url>",
+          "setup_intent": {
+            "id": "seti_1UHnlkHIBYZYyePrkKlKDei4",
+            "object": "setup_intent",
+            "allowed_payment_method_types": null,
+            "application": null,
+            "automatic_payment_methods": null,
+            "cancellation_reason": null,
+            "client_secret": "seti_1UHnlkHIBYZYyePrkKlKDei4_secret_VIOYbEtu4aJOFLyJ7Pxi6CbeqFBCEpz",
+            "created": 1789922352,
+            "customer": "cus_VIOY4LwwrstX3k",
+            "customer_account": null,
+            "description": null,
+            "excluded_payment_method_types": null,
+            "flow_directions": null,
+            "last_setup_error": null,
+            "latest_attempt": "setatt_1UHnlkHIBYZYyePrisdDPinv",
+            "livemode": false,
+            "managed_payments": {
+              "enabled": false
+            },
+            "mandate": null,
+            "metadata": {},
+            "next_action": null,
+            "on_behalf_of": null,
+            "payment_method": "pm_1UHnljHIBYZYyePrVRAUWQVl",
+            "payment_method_configuration_details": null,
+            "payment_method_options": {
+              "card": {
+                "mandate_options": null,
+                "network": null,
+                "request_three_d_secure": "automatic"
+              }
+            },
+            "payment_method_types": [
+              "card"
+            ],
+            "single_use_mandate": null,
+            "status": "succeeded",
+            "usage": "off_session"
+          },
+          "type": "invalid_request_error"
+        }
+      }
+    },
+    {
+      "seq": 13,
+      "method": "POST",
+      "path": "/v1/setup_intents/{intent}",
+      "path_refs": {
+        "intent": {
+          "step": "with_pm",
+          "field": "id"
+        }
+      },
+      "params": {
+        "description": "after the fact"
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "seti_1UHnlkHIBYZYyePrkKlKDei4",
+        "object": "setup_intent",
+        "allowed_payment_method_types": null,
+        "application": null,
+        "automatic_payment_methods": null,
+        "cancellation_reason": null,
+        "client_secret": "seti_1UHnlkHIBYZYyePrkKlKDei4_secret_VIOYbEtu4aJOFLyJ7Pxi6CbeqFBCEpz",
+        "created": 1789922352,
+        "customer": "cus_VIOY4LwwrstX3k",
+        "customer_account": null,
+        "description": "after the fact",
+        "excluded_payment_method_types": null,
+        "flow_directions": null,
+        "last_setup_error": null,
+        "latest_attempt": "setatt_1UHnlkHIBYZYyePrisdDPinv",
+        "livemode": false,
+        "managed_payments": {
+          "enabled": false
+        },
+        "mandate": null,
+        "metadata": {},
+        "next_action": null,
+        "on_behalf_of": null,
+        "payment_method": "pm_1UHnljHIBYZYyePrVRAUWQVl",
+        "payment_method_configuration_details": null,
+        "payment_method_options": {
+          "card": {
+            "mandate_options": null,
+            "network": null,
+            "request_three_d_secure": "automatic"
+          }
+        },
+        "payment_method_types": [
+          "card"
+        ],
+        "single_use_mandate": null,
+        "status": "succeeded",
+        "usage": "off_session"
+      }
+    },
+    {
+      "seq": 14,
+      "method": "POST",
+      "path": "/v1/setup_intents/{intent}",
+      "path_refs": {
+        "intent": {
+          "step": "with_pm",
+          "field": "id"
+        }
+      },
+      "params": {
+        "payment_method": {
+          "$ref": {
+            "step": "visa",
+            "field": "id"
+          }
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 400,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "error": {
+          "code": "setup_intent_unexpected_state",
+          "doc_url": "https://stripe.com/docs/error-codes/setup-intent-unexpected-state",
+          "message": "You cannot update this SetupIntent because it has already succeeded.",
+          "request_log_url": "<redacted:request_log_url>",
+          "setup_intent": {
+            "id": "seti_1UHnlkHIBYZYyePrkKlKDei4",
+            "object": "setup_intent",
+            "allowed_payment_method_types": null,
+            "application": null,
+            "automatic_payment_methods": null,
+            "cancellation_reason": null,
+            "client_secret": "seti_1UHnlkHIBYZYyePrkKlKDei4_secret_VIOYbEtu4aJOFLyJ7Pxi6CbeqFBCEpz",
+            "created": 1789922352,
+            "customer": "cus_VIOY4LwwrstX3k",
+            "customer_account": null,
+            "description": "after the fact",
+            "excluded_payment_method_types": null,
+            "flow_directions": null,
+            "last_setup_error": null,
+            "latest_attempt": "setatt_1UHnlkHIBYZYyePrisdDPinv",
+            "livemode": false,
+            "managed_payments": {
+              "enabled": false
+            },
+            "mandate": null,
+            "metadata": {},
+            "next_action": null,
+            "on_behalf_of": null,
+            "payment_method": "pm_1UHnljHIBYZYyePrVRAUWQVl",
+            "payment_method_configuration_details": null,
+            "payment_method_options": {
+              "card": {
+                "mandate_options": null,
+                "network": null,
+                "request_three_d_secure": "automatic"
+              }
+            },
+            "payment_method_types": [
+              "card"
+            ],
+            "single_use_mandate": null,
+            "status": "succeeded",
+            "usage": "off_session"
+          },
+          "type": "invalid_request_error"
+        }
+      }
+    },
+    {
+      "seq": 15,
+      "method": "POST",
+      "path": "/v1/setup_intents/{intent}",
+      "path_refs": {
+        "intent": {
+          "step": "with_pm",
+          "field": "id"
+        }
+      },
+      "params": {
+        "metadata": {
+          "k": "v"
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "seti_1UHnlkHIBYZYyePrkKlKDei4",
+        "object": "setup_intent",
+        "allowed_payment_method_types": null,
+        "application": null,
+        "automatic_payment_methods": null,
+        "cancellation_reason": null,
+        "client_secret": "seti_1UHnlkHIBYZYyePrkKlKDei4_secret_VIOYbEtu4aJOFLyJ7Pxi6CbeqFBCEpz",
+        "created": 1789922352,
+        "customer": "cus_VIOY4LwwrstX3k",
+        "customer_account": null,
+        "description": "after the fact",
+        "excluded_payment_method_types": null,
+        "flow_directions": null,
+        "last_setup_error": null,
+        "latest_attempt": "setatt_1UHnlkHIBYZYyePrisdDPinv",
+        "livemode": false,
+        "managed_payments": {
+          "enabled": false
+        },
+        "mandate": null,
+        "metadata": {
+          "k": "v"
+        },
+        "next_action": null,
+        "on_behalf_of": null,
+        "payment_method": "pm_1UHnljHIBYZYyePrVRAUWQVl",
+        "payment_method_configuration_details": null,
+        "payment_method_options": {
+          "card": {
+            "mandate_options": null,
+            "network": null,
+            "request_three_d_secure": "automatic"
+          }
+        },
+        "payment_method_types": [
+          "card"
+        ],
+        "single_use_mandate": null,
+        "status": "succeeded",
+        "usage": "off_session"
+      }
+    },
+    {
+      "seq": 16,
+      "method": "POST",
+      "path": "/v1/customers/{customer}",
+      "path_refs": {
+        "customer": {
+          "step": "customer",
+          "field": "id"
+        }
+      },
+      "params": {
+        "invoice_settings": {
+          "default_payment_method": {
+            "$ref": {
+              "step": "visa",
+              "field": "id"
+            }
+          }
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "cus_VIOY4LwwrstX3k",
+        "object": "customer",
+        "address": null,
+        "balance": 0,
+        "created": 1789922350,
+        "currency": null,
+        "customer_account": null,
+        "default_source": null,
+        "delinquent": false,
+        "description": "scenario 10",
+        "discount": null,
+        "email": "s10@conformance.stripeapi.invalid",
+        "invoice_prefix": "XJOQ3XGY",
+        "invoice_settings": {
+          "custom_fields": null,
+          "default_payment_method": "pm_1UHnljHIBYZYyePrVRAUWQVl",
+          "footer": null,
+          "rendering_options": null
+        },
+        "livemode": false,
+        "metadata": {
+          "probe": "s10"
+        },
+        "name": null,
+        "next_invoice_sequence": 1,
+        "phone": null,
+        "preferred_locales": [],
+        "shipping": null,
+        "tax_exempt": "none",
+        "test_clock": null
+      }
+    },
+    {
+      "seq": 17,
+      "method": "POST",
+      "path": "/v1/setup_intents",
+      "path_refs": {},
+      "params": {
+        "customer": {
+          "$ref": {
+            "step": "customer",
+            "field": "id"
+          }
+        },
+        "payment_method_types": [
+          "card"
+        ]
+      },
+      "idempotency_key": null,
+      "binds_as": "with_default",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "seti_1UHnlmHIBYZYyePrHrm0iNDm",
+        "object": "setup_intent",
+        "allowed_payment_method_types": null,
+        "application": null,
+        "automatic_payment_methods": null,
+        "cancellation_reason": null,
+        "client_secret": "seti_1UHnlmHIBYZYyePrHrm0iNDm_secret_VIOYn3Xpjg7U971jGxxAjcOzvo8F60H",
+        "created": 1789922354,
+        "customer": "cus_VIOY4LwwrstX3k",
+        "customer_account": null,
+        "description": null,
+        "excluded_payment_method_types": null,
+        "flow_directions": null,
+        "last_setup_error": null,
+        "latest_attempt": null,
+        "livemode": false,
+        "managed_payments": {
+          "enabled": false
+        },
+        "mandate": null,
+        "metadata": {},
+        "next_action": null,
+        "on_behalf_of": null,
+        "payment_method": null,
+        "payment_method_configuration_details": null,
+        "payment_method_options": {
+          "card": {
+            "mandate_options": null,
+            "network": null,
+            "request_three_d_secure": "automatic"
+          }
+        },
+        "payment_method_types": [
+          "card"
+        ],
+        "single_use_mandate": null,
+        "status": "requires_payment_method",
+        "usage": "off_session"
+      }
+    },
+    {
+      "seq": 18,
+      "method": "POST",
+      "path": "/v1/setup_intents/{intent}/confirm",
+      "path_refs": {
+        "intent": {
+          "step": "with_default",
+          "field": "id"
+        }
+      },
+      "params": {},
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 400,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "error": {
+          "code": "setup_intent_unexpected_state",
+          "doc_url": "https://stripe.com/docs/error-codes/setup-intent-unexpected-state",
+          "message": "You cannot confirm this SetupIntent because it's missing a payment method. You can either update the SetupIntent with a payment method and then confirm it again, or confirm it again directly with a payment method or ConfirmationToken.",
+          "request_log_url": "<redacted:request_log_url>",
+          "setup_intent": {
+            "id": "seti_1UHnlmHIBYZYyePrHrm0iNDm",
+            "object": "setup_intent",
+            "allowed_payment_method_types": null,
+            "application": null,
+            "automatic_payment_methods": null,
+            "cancellation_reason": null,
+            "client_secret": "seti_1UHnlmHIBYZYyePrHrm0iNDm_secret_VIOYn3Xpjg7U971jGxxAjcOzvo8F60H",
+            "created": 1789922354,
+            "customer": "cus_VIOY4LwwrstX3k",
+            "customer_account": null,
+            "description": null,
+            "excluded_payment_method_types": null,
+            "flow_directions": null,
+            "last_setup_error": null,
+            "latest_attempt": null,
+            "livemode": false,
+            "managed_payments": {
+              "enabled": false
+            },
+            "mandate": null,
+            "metadata": {},
+            "next_action": null,
+            "on_behalf_of": null,
+            "payment_method": null,
+            "payment_method_configuration_details": null,
+            "payment_method_options": {
+              "card": {
+                "mandate_options": null,
+                "network": null,
+                "request_three_d_secure": "automatic"
+              }
+            },
+            "payment_method_types": [
+              "card"
+            ],
+            "single_use_mandate": null,
+            "status": "requires_payment_method",
+            "usage": "off_session"
+          },
+          "type": "invalid_request_error"
+        }
+      }
+    },
+    {
+      "seq": 19,
+      "method": "POST",
+      "path": "/v1/payment_methods",
+      "path_refs": {},
+      "params": {
+        "type": "card",
+        "card": {
+          "token": "tok_visa"
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": "visa2",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "pm_1UHnlmHIBYZYyePrCaBsSsUl",
+        "object": "payment_method",
+        "allow_redisplay": "unspecified",
+        "billing_details": {
+          "address": {
+            "city": null,
+            "country": null,
+            "line1": null,
+            "line2": null,
+            "postal_code": null,
+            "state": null
+          },
+          "email": null,
+          "name": null,
+          "phone": null,
+          "tax_id": null
+        },
+        "card": {
+          "brand": "visa",
+          "checks": {
+            "address_line1_check": null,
+            "address_postal_code_check": null,
+            "cvc_check": "unchecked"
+          },
+          "country": "US",
+          "display_brand": "visa",
+          "exp_month": 9,
+          "exp_year": 2027,
+          "fingerprint": "OiMHMa3aYsyDbc1P",
+          "funding": "credit",
+          "generated_from": null,
+          "last4": "4242",
+          "networks": {
+            "available": [
+              "visa"
+            ],
+            "preferred": null
+          },
+          "regulated_status": "unregulated",
+          "three_d_secure_usage": {
+            "supported": true
+          },
+          "wallet": null
+        },
+        "created": 1789922354,
+        "customer": null,
+        "customer_account": null,
+        "livemode": false,
+        "metadata": {},
+        "shared_payment_granted_token": null,
+        "type": "card"
+      }
+    },
+    {
+      "seq": 20,
+      "method": "POST",
+      "path": "/v1/setup_intents",
+      "path_refs": {},
+      "params": {
+        "customer": {
+          "$ref": {
+            "step": "customer",
+            "field": "id"
+          }
+        },
+        "payment_method": {
+          "$ref": {
+            "step": "visa2",
+            "field": "id"
+          }
+        },
+        "confirm": true,
+        "payment_method_types": [
+          "card"
+        ]
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "seti_1UHnlmHIBYZYyePr9BC1sPVE",
+        "object": "setup_intent",
+        "allowed_payment_method_types": null,
+        "application": null,
+        "automatic_payment_methods": null,
+        "cancellation_reason": null,
+        "client_secret": "seti_1UHnlmHIBYZYyePr9BC1sPVE_secret_VIOYqQxOZJ1syszU18KzfRZUE5YO2Ct",
+        "created": 1789922354,
+        "customer": "cus_VIOY4LwwrstX3k",
+        "customer_account": null,
+        "description": null,
+        "excluded_payment_method_types": null,
+        "flow_directions": null,
+        "last_setup_error": null,
+        "latest_attempt": "setatt_1UHnlmHIBYZYyeProQfPbFjO",
+        "livemode": false,
+        "managed_payments": {
+          "enabled": false
+        },
+        "mandate": null,
+        "metadata": {},
+        "next_action": null,
+        "on_behalf_of": null,
+        "payment_method": "pm_1UHnlmHIBYZYyePrCaBsSsUl",
+        "payment_method_configuration_details": null,
+        "payment_method_options": {
+          "card": {
+            "mandate_options": null,
+            "network": null,
+            "request_three_d_secure": "automatic"
+          }
+        },
+        "payment_method_types": [
+          "card"
+        ],
+        "single_use_mandate": null,
+        "status": "succeeded",
+        "usage": "off_session"
+      }
+    },
+    {
+      "seq": 21,
+      "method": "GET",
+      "path": "/v1/payment_methods/{payment_method}",
+      "path_refs": {
+        "payment_method": {
+          "step": "visa2",
+          "field": "id"
+        }
+      },
+      "params": {},
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "pm_1UHnlmHIBYZYyePrCaBsSsUl",
+        "object": "payment_method",
+        "allow_redisplay": "unspecified",
+        "billing_details": {
+          "address": {
+            "city": null,
+            "country": null,
+            "line1": null,
+            "line2": null,
+            "postal_code": null,
+            "state": null
+          },
+          "email": null,
+          "name": null,
+          "phone": null,
+          "tax_id": null
+        },
+        "card": {
+          "brand": "visa",
+          "checks": {
+            "address_line1_check": null,
+            "address_postal_code_check": null,
+            "cvc_check": "pass"
+          },
+          "country": "US",
+          "display_brand": "visa",
+          "exp_month": 9,
+          "exp_year": 2027,
+          "fingerprint": "OiMHMa3aYsyDbc1P",
+          "funding": "credit",
+          "generated_from": null,
+          "last4": "4242",
+          "networks": {
+            "available": [
+              "visa"
+            ],
+            "preferred": null
+          },
+          "regulated_status": "unregulated",
+          "three_d_secure_usage": {
+            "supported": true
+          },
+          "wallet": null
+        },
+        "created": 1789922354,
+        "customer": "cus_VIOY4LwwrstX3k",
+        "customer_account": null,
+        "livemode": false,
+        "metadata": {},
+        "shared_payment_granted_token": null,
+        "type": "card"
+      }
+    },
+    {
+      "seq": 22,
+      "method": "POST",
+      "path": "/v1/payment_methods",
+      "path_refs": {},
+      "params": {
+        "type": "card",
+        "card": {
+          "token": "tok_visa_chargeDeclined"
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": "decline_pm",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "pm_1UHnlnHIBYZYyePreUdCiThv",
+        "object": "payment_method",
+        "allow_redisplay": "unspecified",
+        "billing_details": {
+          "address": {
+            "city": null,
+            "country": null,
+            "line1": null,
+            "line2": null,
+            "postal_code": null,
+            "state": null
+          },
+          "email": null,
+          "name": null,
+          "phone": null,
+          "tax_id": null
+        },
+        "card": {
+          "brand": "visa",
+          "checks": {
+            "address_line1_check": null,
+            "address_postal_code_check": null,
+            "cvc_check": "unchecked"
+          },
+          "country": "US",
+          "display_brand": "visa",
+          "exp_month": 9,
+          "exp_year": 2027,
+          "fingerprint": "xslyWSy1gFnl8a4Y",
+          "funding": "credit",
+          "generated_from": null,
+          "last4": "0002",
+          "networks": {
+            "available": [
+              "visa"
+            ],
+            "preferred": null
+          },
+          "regulated_status": "unregulated",
+          "three_d_secure_usage": {
+            "supported": true
+          },
+          "wallet": null
+        },
+        "created": 1789922355,
+        "customer": null,
+        "customer_account": null,
+        "livemode": false,
+        "metadata": {},
+        "shared_payment_granted_token": null,
+        "type": "card"
+      }
+    },
+    {
+      "seq": 23,
+      "method": "POST",
+      "path": "/v1/setup_intents",
+      "path_refs": {},
+      "params": {
+        "payment_method": {
+          "$ref": {
+            "step": "decline_pm",
+            "field": "id"
+          }
+        },
+        "confirm": true,
+        "payment_method_types": [
+          "card"
+        ]
+      },
+      "idempotency_key": null,
+      "binds_as": "declined",
+      "recorded_status": 402,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "error": {
+          "advice_code": "try_again_later",
+          "code": "card_declined",
+          "decline_code": "generic_decline",
+          "doc_url": "https://stripe.com/docs/error-codes/card-declined",
+          "message": "Your card was declined.",
+          "network_decline_code": "01",
+          "payment_method": {
+            "id": "pm_1UHnlnHIBYZYyePreUdCiThv",
+            "object": "payment_method",
+            "allow_redisplay": "unspecified",
+            "billing_details": {
+              "address": {
+                "city": null,
+                "country": null,
+                "line1": null,
+                "line2": null,
+                "postal_code": null,
+                "state": null
+              },
+              "email": null,
+              "name": null,
+              "phone": null,
+              "tax_id": null
+            },
+            "card": {
+              "brand": "visa",
+              "checks": {
+                "address_line1_check": null,
+                "address_postal_code_check": null,
+                "cvc_check": "pass"
+              },
+              "country": "US",
+              "display_brand": "visa",
+              "exp_month": 9,
+              "exp_year": 2027,
+              "fingerprint": "xslyWSy1gFnl8a4Y",
+              "funding": "credit",
+              "generated_from": null,
+              "last4": "0002",
+              "networks": {
+                "available": [
+                  "visa"
+                ],
+                "preferred": null
+              },
+              "regulated_status": "unregulated",
+              "three_d_secure_usage": {
+                "supported": true
+              },
+              "wallet": null
+            },
+            "created": 1789922355,
+            "customer": null,
+            "customer_account": null,
+            "livemode": false,
+            "metadata": {},
+            "shared_payment_granted_token": null,
+            "type": "card"
+          },
+          "request_log_url": "<redacted:request_log_url>",
+          "setup_intent": {
+            "id": "seti_1UHnlnHIBYZYyePrHhcKusMP",
+            "object": "setup_intent",
+            "allowed_payment_method_types": null,
+            "application": null,
+            "automatic_payment_methods": null,
+            "cancellation_reason": null,
+            "client_secret": "seti_1UHnlnHIBYZYyePrHhcKusMP_secret_VIOYEk5rIpjPVqJy2cfnMMo3EKISjtL",
+            "created": 1789922355,
+            "customer": null,
+            "customer_account": null,
+            "description": null,
+            "excluded_payment_method_types": null,
+            "flow_directions": null,
+            "last_setup_error": {
+              "advice_code": "try_again_later",
+              "code": "card_declined",
+              "decline_code": "generic_decline",
+              "doc_url": "https://stripe.com/docs/error-codes/card-declined",
+              "message": "Your card was declined.",
+              "network_decline_code": "01",
+              "payment_method": {
+                "id": "pm_1UHnlnHIBYZYyePreUdCiThv",
+                "object": "payment_method",
+                "allow_redisplay": "unspecified",
+                "billing_details": {
+                  "address": {
+                    "city": null,
+                    "country": null,
+                    "line1": null,
+                    "line2": null,
+                    "postal_code": null,
+                    "state": null
+                  },
+                  "email": null,
+                  "name": null,
+                  "phone": null,
+                  "tax_id": null
+                },
+                "card": {
+                  "brand": "visa",
+                  "checks": {
+                    "address_line1_check": null,
+                    "address_postal_code_check": null,
+                    "cvc_check": "pass"
+                  },
+                  "country": "US",
+                  "display_brand": "visa",
+                  "exp_month": 9,
+                  "exp_year": 2027,
+                  "fingerprint": "xslyWSy1gFnl8a4Y",
+                  "funding": "credit",
+                  "generated_from": null,
+                  "last4": "0002",
+                  "networks": {
+                    "available": [
+                      "visa"
+                    ],
+                    "preferred": null
+                  },
+                  "regulated_status": "unregulated",
+                  "three_d_secure_usage": {
+                    "supported": true
+                  },
+                  "wallet": null
+                },
+                "created": 1789922355,
+                "customer": null,
+                "customer_account": null,
+                "livemode": false,
+                "metadata": {},
+                "shared_payment_granted_token": null,
+                "type": "card"
+              },
+              "type": "card_error"
+            },
+            "latest_attempt": "setatt_1UHnloHIBYZYyePrWEzs29EW",
+            "livemode": false,
+            "managed_payments": {
+              "enabled": false
+            },
+            "mandate": null,
+            "metadata": {},
+            "next_action": null,
+            "on_behalf_of": null,
+            "payment_method": null,
+            "payment_method_configuration_details": null,
+            "payment_method_options": {
+              "card": {
+                "mandate_options": null,
+                "network": null,
+                "request_three_d_secure": "automatic"
+              }
+            },
+            "payment_method_types": [
+              "card"
+            ],
+            "single_use_mandate": null,
+            "status": "requires_payment_method",
+            "usage": "off_session"
+          },
+          "type": "card_error"
+        }
+      }
+    },
+    {
+      "seq": 24,
+      "method": "GET",
+      "path": "/v1/setup_intents/{intent}",
+      "path_refs": {
+        "intent": {
+          "step": "declined",
+          "field": "error.setup_intent.id"
+        }
+      },
+      "params": {},
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "seti_1UHnlnHIBYZYyePrHhcKusMP",
+        "object": "setup_intent",
+        "allowed_payment_method_types": null,
+        "application": null,
+        "automatic_payment_methods": null,
+        "cancellation_reason": null,
+        "client_secret": "seti_1UHnlnHIBYZYyePrHhcKusMP_secret_VIOYEk5rIpjPVqJy2cfnMMo3EKISjtL",
+        "created": 1789922355,
+        "customer": null,
+        "customer_account": null,
+        "description": null,
+        "excluded_payment_method_types": null,
+        "flow_directions": null,
+        "last_setup_error": {
+          "advice_code": "try_again_later",
+          "code": "card_declined",
+          "decline_code": "generic_decline",
+          "doc_url": "https://stripe.com/docs/error-codes/card-declined",
+          "message": "Your card was declined.",
+          "network_decline_code": "01",
+          "payment_method": {
+            "id": "pm_1UHnlnHIBYZYyePreUdCiThv",
+            "object": "payment_method",
+            "allow_redisplay": "unspecified",
+            "billing_details": {
+              "address": {
+                "city": null,
+                "country": null,
+                "line1": null,
+                "line2": null,
+                "postal_code": null,
+                "state": null
+              },
+              "email": null,
+              "name": null,
+              "phone": null,
+              "tax_id": null
+            },
+            "card": {
+              "brand": "visa",
+              "checks": {
+                "address_line1_check": null,
+                "address_postal_code_check": null,
+                "cvc_check": "pass"
+              },
+              "country": "US",
+              "display_brand": "visa",
+              "exp_month": 9,
+              "exp_year": 2027,
+              "fingerprint": "xslyWSy1gFnl8a4Y",
+              "funding": "credit",
+              "generated_from": null,
+              "last4": "0002",
+              "networks": {
+                "available": [
+                  "visa"
+                ],
+                "preferred": null
+              },
+              "regulated_status": "unregulated",
+              "three_d_secure_usage": {
+                "supported": true
+              },
+              "wallet": null
+            },
+            "created": 1789922355,
+            "customer": null,
+            "customer_account": null,
+            "livemode": false,
+            "metadata": {},
+            "shared_payment_granted_token": null,
+            "type": "card"
+          },
+          "type": "card_error"
+        },
+        "latest_attempt": "setatt_1UHnloHIBYZYyePrWEzs29EW",
+        "livemode": false,
+        "managed_payments": {
+          "enabled": false
+        },
+        "mandate": null,
+        "metadata": {},
+        "next_action": null,
+        "on_behalf_of": null,
+        "payment_method": null,
+        "payment_method_configuration_details": null,
+        "payment_method_options": {
+          "card": {
+            "mandate_options": null,
+            "network": null,
+            "request_three_d_secure": "automatic"
+          }
+        },
+        "payment_method_types": [
+          "card"
+        ],
+        "single_use_mandate": null,
+        "status": "requires_payment_method",
+        "usage": "off_session"
+      }
+    },
+    {
+      "seq": 25,
+      "method": "POST",
+      "path": "/v1/payment_methods",
+      "path_refs": {},
+      "params": {
+        "type": "card",
+        "card": {
+          "token": "tok_chargeDeclinedExpiredCard"
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": "expired_pm",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "pm_1UHnloHIBYZYyePrqIw1AntP",
+        "object": "payment_method",
+        "allow_redisplay": "unspecified",
+        "billing_details": {
+          "address": {
+            "city": null,
+            "country": null,
+            "line1": null,
+            "line2": null,
+            "postal_code": null,
+            "state": null
+          },
+          "email": null,
+          "name": null,
+          "phone": null,
+          "tax_id": null
+        },
+        "card": {
+          "brand": "visa",
+          "checks": {
+            "address_line1_check": null,
+            "address_postal_code_check": null,
+            "cvc_check": "unchecked"
+          },
+          "country": "US",
+          "display_brand": "visa",
+          "exp_month": 9,
+          "exp_year": 2027,
+          "fingerprint": "62Zdz8grSoAhaoNn",
+          "funding": "credit",
+          "generated_from": null,
+          "last4": "0069",
+          "networks": {
+            "available": [
+              "visa"
+            ],
+            "preferred": null
+          },
+          "regulated_status": "unregulated",
+          "three_d_secure_usage": {
+            "supported": true
+          },
+          "wallet": null
+        },
+        "created": 1789922356,
+        "customer": null,
+        "customer_account": null,
+        "livemode": false,
+        "metadata": {},
+        "shared_payment_granted_token": null,
+        "type": "card"
+      }
+    },
+    {
+      "seq": 26,
+      "method": "POST",
+      "path": "/v1/setup_intents",
+      "path_refs": {},
+      "params": {
+        "payment_method": {
+          "$ref": {
+            "step": "expired_pm",
+            "field": "id"
+          }
+        },
+        "payment_method_types": [
+          "card"
+        ]
+      },
+      "idempotency_key": null,
+      "binds_as": "expired",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "seti_1UHnloHIBYZYyePr9etincj8",
+        "object": "setup_intent",
+        "allowed_payment_method_types": null,
+        "application": null,
+        "automatic_payment_methods": null,
+        "cancellation_reason": null,
+        "client_secret": "seti_1UHnloHIBYZYyePr9etincj8_secret_VIOYNcd9RfVL2Z5o5yXwxLrgR2Bbooq",
+        "created": 1789922356,
+        "customer": null,
+        "customer_account": null,
+        "description": null,
+        "excluded_payment_method_types": null,
+        "flow_directions": null,
+        "last_setup_error": null,
+        "latest_attempt": null,
+        "livemode": false,
+        "managed_payments": {
+          "enabled": false
+        },
+        "mandate": null,
+        "metadata": {},
+        "next_action": null,
+        "on_behalf_of": null,
+        "payment_method": "pm_1UHnloHIBYZYyePrqIw1AntP",
+        "payment_method_configuration_details": null,
+        "payment_method_options": {
+          "card": {
+            "mandate_options": null,
+            "network": null,
+            "request_three_d_secure": "automatic"
+          }
+        },
+        "payment_method_types": [
+          "card"
+        ],
+        "single_use_mandate": null,
+        "status": "requires_confirmation",
+        "usage": "off_session"
+      }
+    },
+    {
+      "seq": 27,
+      "method": "POST",
+      "path": "/v1/setup_intents/{intent}/confirm",
+      "path_refs": {
+        "intent": {
+          "step": "expired",
+          "field": "id"
+        }
+      },
+      "params": {},
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 402,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "error": {
+          "advice_code": "confirm_card_data",
+          "code": "expired_card",
+          "decline_code": "expired_card",
+          "doc_url": "https://stripe.com/docs/error-codes/expired-card",
+          "message": "Your card has expired.",
+          "network_advice_code": "03",
+          "network_decline_code": "54",
+          "param": "exp_month",
+          "payment_method": {
+            "id": "pm_1UHnloHIBYZYyePrqIw1AntP",
+            "object": "payment_method",
+            "allow_redisplay": "unspecified",
+            "billing_details": {
+              "address": {
+                "city": null,
+                "country": null,
+                "line1": null,
+                "line2": null,
+                "postal_code": null,
+                "state": null
+              },
+              "email": null,
+              "name": null,
+              "phone": null,
+              "tax_id": null
+            },
+            "card": {
+              "brand": "visa",
+              "checks": {
+                "address_line1_check": null,
+                "address_postal_code_check": null,
+                "cvc_check": "pass"
+              },
+              "country": "US",
+              "display_brand": "visa",
+              "exp_month": 9,
+              "exp_year": 2027,
+              "fingerprint": "62Zdz8grSoAhaoNn",
+              "funding": "credit",
+              "generated_from": null,
+              "last4": "0069",
+              "networks": {
+                "available": [
+                  "visa"
+                ],
+                "preferred": null
+              },
+              "regulated_status": "unregulated",
+              "three_d_secure_usage": {
+                "supported": true
+              },
+              "wallet": null
+            },
+            "created": 1789922356,
+            "customer": null,
+            "customer_account": null,
+            "livemode": false,
+            "metadata": {},
+            "shared_payment_granted_token": null,
+            "type": "card"
+          },
+          "request_log_url": "<redacted:request_log_url>",
+          "setup_intent": {
+            "id": "seti_1UHnloHIBYZYyePr9etincj8",
+            "object": "setup_intent",
+            "allowed_payment_method_types": null,
+            "application": null,
+            "automatic_payment_methods": null,
+            "cancellation_reason": null,
+            "client_secret": "seti_1UHnloHIBYZYyePr9etincj8_secret_VIOYNcd9RfVL2Z5o5yXwxLrgR2Bbooq",
+            "created": 1789922356,
+            "customer": null,
+            "customer_account": null,
+            "description": null,
+            "excluded_payment_method_types": null,
+            "flow_directions": null,
+            "last_setup_error": {
+              "advice_code": "confirm_card_data",
+              "code": "expired_card",
+              "decline_code": "expired_card",
+              "doc_url": "https://stripe.com/docs/error-codes/expired-card",
+              "message": "Your card has expired.",
+              "network_advice_code": "03",
+              "network_decline_code": "54",
+              "param": "exp_month",
+              "payment_method": {
+                "id": "pm_1UHnloHIBYZYyePrqIw1AntP",
+                "object": "payment_method",
+                "allow_redisplay": "unspecified",
+                "billing_details": {
+                  "address": {
+                    "city": null,
+                    "country": null,
+                    "line1": null,
+                    "line2": null,
+                    "postal_code": null,
+                    "state": null
+                  },
+                  "email": null,
+                  "name": null,
+                  "phone": null,
+                  "tax_id": null
+                },
+                "card": {
+                  "brand": "visa",
+                  "checks": {
+                    "address_line1_check": null,
+                    "address_postal_code_check": null,
+                    "cvc_check": "pass"
+                  },
+                  "country": "US",
+                  "display_brand": "visa",
+                  "exp_month": 9,
+                  "exp_year": 2027,
+                  "fingerprint": "62Zdz8grSoAhaoNn",
+                  "funding": "credit",
+                  "generated_from": null,
+                  "last4": "0069",
+                  "networks": {
+                    "available": [
+                      "visa"
+                    ],
+                    "preferred": null
+                  },
+                  "regulated_status": "unregulated",
+                  "three_d_secure_usage": {
+                    "supported": true
+                  },
+                  "wallet": null
+                },
+                "created": 1789922356,
+                "customer": null,
+                "customer_account": null,
+                "livemode": false,
+                "metadata": {},
+                "shared_payment_granted_token": null,
+                "type": "card"
+              },
+              "type": "card_error"
+            },
+            "latest_attempt": "setatt_1UHnlpHIBYZYyePrYhRF3v8k",
+            "livemode": false,
+            "managed_payments": {
+              "enabled": false
+            },
+            "mandate": null,
+            "metadata": {},
+            "next_action": null,
+            "on_behalf_of": null,
+            "payment_method": null,
+            "payment_method_configuration_details": null,
+            "payment_method_options": {
+              "card": {
+                "mandate_options": null,
+                "network": null,
+                "request_three_d_secure": "automatic"
+              }
+            },
+            "payment_method_types": [
+              "card"
+            ],
+            "single_use_mandate": null,
+            "status": "requires_payment_method",
+            "usage": "off_session"
+          },
+          "type": "card_error"
+        }
+      }
+    },
+    {
+      "seq": 28,
+      "method": "GET",
+      "path": "/v1/setup_intents/{intent}",
+      "path_refs": {
+        "intent": {
+          "step": "expired",
+          "field": "id"
+        }
+      },
+      "params": {},
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "seti_1UHnloHIBYZYyePr9etincj8",
+        "object": "setup_intent",
+        "allowed_payment_method_types": null,
+        "application": null,
+        "automatic_payment_methods": null,
+        "cancellation_reason": null,
+        "client_secret": "seti_1UHnloHIBYZYyePr9etincj8_secret_VIOYNcd9RfVL2Z5o5yXwxLrgR2Bbooq",
+        "created": 1789922356,
+        "customer": null,
+        "customer_account": null,
+        "description": null,
+        "excluded_payment_method_types": null,
+        "flow_directions": null,
+        "last_setup_error": {
+          "advice_code": "confirm_card_data",
+          "code": "expired_card",
+          "decline_code": "expired_card",
+          "doc_url": "https://stripe.com/docs/error-codes/expired-card",
+          "message": "Your card has expired.",
+          "network_advice_code": "03",
+          "network_decline_code": "54",
+          "param": "exp_month",
+          "payment_method": {
+            "id": "pm_1UHnloHIBYZYyePrqIw1AntP",
+            "object": "payment_method",
+            "allow_redisplay": "unspecified",
+            "billing_details": {
+              "address": {
+                "city": null,
+                "country": null,
+                "line1": null,
+                "line2": null,
+                "postal_code": null,
+                "state": null
+              },
+              "email": null,
+              "name": null,
+              "phone": null,
+              "tax_id": null
+            },
+            "card": {
+              "brand": "visa",
+              "checks": {
+                "address_line1_check": null,
+                "address_postal_code_check": null,
+                "cvc_check": "pass"
+              },
+              "country": "US",
+              "display_brand": "visa",
+              "exp_month": 9,
+              "exp_year": 2027,
+              "fingerprint": "62Zdz8grSoAhaoNn",
+              "funding": "credit",
+              "generated_from": null,
+              "last4": "0069",
+              "networks": {
+                "available": [
+                  "visa"
+                ],
+                "preferred": null
+              },
+              "regulated_status": "unregulated",
+              "three_d_secure_usage": {
+                "supported": true
+              },
+              "wallet": null
+            },
+            "created": 1789922356,
+            "customer": null,
+            "customer_account": null,
+            "livemode": false,
+            "metadata": {},
+            "shared_payment_granted_token": null,
+            "type": "card"
+          },
+          "type": "card_error"
+        },
+        "latest_attempt": "setatt_1UHnlpHIBYZYyePrYhRF3v8k",
+        "livemode": false,
+        "managed_payments": {
+          "enabled": false
+        },
+        "mandate": null,
+        "metadata": {},
+        "next_action": null,
+        "on_behalf_of": null,
+        "payment_method": null,
+        "payment_method_configuration_details": null,
+        "payment_method_options": {
+          "card": {
+            "mandate_options": null,
+            "network": null,
+            "request_three_d_secure": "automatic"
+          }
+        },
+        "payment_method_types": [
+          "card"
+        ],
+        "single_use_mandate": null,
+        "status": "requires_payment_method",
+        "usage": "off_session"
+      }
+    },
+    {
+      "seq": 29,
+      "method": "POST",
+      "path": "/v1/setup_intents",
+      "path_refs": {},
+      "params": {
+        "description": "before",
+        "metadata": {
+          "a": "1"
+        },
+        "payment_method_types": [
+          "card"
+        ]
+      },
+      "idempotency_key": null,
+      "binds_as": "updatable",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "seti_1UHnlpHIBYZYyePrt7RjvpcX",
+        "object": "setup_intent",
+        "allowed_payment_method_types": null,
+        "application": null,
+        "automatic_payment_methods": null,
+        "cancellation_reason": null,
+        "client_secret": "seti_1UHnlpHIBYZYyePrt7RjvpcX_secret_VIOYXzi6pdI7lNmB59oJAoiYcAKyz45",
+        "created": 1789922357,
+        "customer": null,
+        "customer_account": null,
+        "description": "before",
+        "excluded_payment_method_types": null,
+        "flow_directions": null,
+        "last_setup_error": null,
+        "latest_attempt": null,
+        "livemode": false,
+        "managed_payments": {
+          "enabled": false
+        },
+        "mandate": null,
+        "metadata": {
+          "a": "1"
+        },
+        "next_action": null,
+        "on_behalf_of": null,
+        "payment_method": null,
+        "payment_method_configuration_details": null,
+        "payment_method_options": {
+          "card": {
+            "mandate_options": null,
+            "network": null,
+            "request_three_d_secure": "automatic"
+          }
+        },
+        "payment_method_types": [
+          "card"
+        ],
+        "single_use_mandate": null,
+        "status": "requires_payment_method",
+        "usage": "off_session"
+      }
+    },
+    {
+      "seq": 30,
+      "method": "POST",
+      "path": "/v1/setup_intents/{intent}",
+      "path_refs": {
+        "intent": {
+          "step": "updatable",
+          "field": "id"
+        }
+      },
+      "params": {
+        "description": "after",
+        "metadata": {
+          "b": "2"
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "seti_1UHnlpHIBYZYyePrt7RjvpcX",
+        "object": "setup_intent",
+        "allowed_payment_method_types": null,
+        "application": null,
+        "automatic_payment_methods": null,
+        "cancellation_reason": null,
+        "client_secret": "seti_1UHnlpHIBYZYyePrt7RjvpcX_secret_VIOYXzi6pdI7lNmB59oJAoiYcAKyz45",
+        "created": 1789922357,
+        "customer": null,
+        "customer_account": null,
+        "description": "after",
+        "excluded_payment_method_types": null,
+        "flow_directions": null,
+        "last_setup_error": null,
+        "latest_attempt": null,
+        "livemode": false,
+        "managed_payments": {
+          "enabled": false
+        },
+        "mandate": null,
+        "metadata": {
+          "a": "1",
+          "b": "2"
+        },
+        "next_action": null,
+        "on_behalf_of": null,
+        "payment_method": null,
+        "payment_method_configuration_details": null,
+        "payment_method_options": {
+          "card": {
+            "mandate_options": null,
+            "network": null,
+            "request_three_d_secure": "automatic"
+          }
+        },
+        "payment_method_types": [
+          "card"
+        ],
+        "single_use_mandate": null,
+        "status": "requires_payment_method",
+        "usage": "off_session"
+      }
+    },
+    {
+      "seq": 31,
+      "method": "POST",
+      "path": "/v1/setup_intents/{intent}",
+      "path_refs": {
+        "intent": {
+          "step": "updatable",
+          "field": "id"
+        }
+      },
+      "params": {
+        "payment_method": {
+          "$ref": {
+            "step": "visa",
+            "field": "id"
+          }
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 400,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "error": {
+          "message": "The payment method supplied (pm_1UHnljHIBYZYyePrVRAUWQVl) belongs to the Customer cus_VIOY4LwwrstX3k. Please include the Customer in the `customer` parameter on the SetupIntent.",
+          "param": "payment_method",
+          "request_log_url": "<redacted:request_log_url>",
+          "setup_intent": {
+            "id": "seti_1UHnlpHIBYZYyePrt7RjvpcX",
+            "object": "setup_intent",
+            "allowed_payment_method_types": null,
+            "application": null,
+            "automatic_payment_methods": null,
+            "cancellation_reason": null,
+            "client_secret": "seti_1UHnlpHIBYZYyePrt7RjvpcX_secret_VIOYXzi6pdI7lNmB59oJAoiYcAKyz45",
+            "created": 1789922357,
+            "customer": null,
+            "customer_account": null,
+            "description": "after",
+            "excluded_payment_method_types": null,
+            "flow_directions": null,
+            "last_setup_error": null,
+            "latest_attempt": null,
+            "livemode": false,
+            "managed_payments": {
+              "enabled": false
+            },
+            "mandate": null,
+            "metadata": {
+              "a": "1",
+              "b": "2"
+            },
+            "next_action": null,
+            "on_behalf_of": null,
+            "payment_method": null,
+            "payment_method_configuration_details": null,
+            "payment_method_options": {
+              "card": {
+                "mandate_options": null,
+                "network": null,
+                "request_three_d_secure": "automatic"
+              }
+            },
+            "payment_method_types": [
+              "card"
+            ],
+            "single_use_mandate": null,
+            "status": "requires_payment_method",
+            "usage": "off_session"
+          },
+          "type": "invalid_request_error"
+        }
+      }
+    },
+    {
+      "seq": 32,
+      "method": "POST",
+      "path": "/v1/setup_intents/{intent}",
+      "path_refs": {
+        "intent": {
+          "step": "updatable",
+          "field": "id"
+        }
+      },
+      "params": {
+        "customer": {
+          "$ref": {
+            "step": "other",
+            "field": "id"
+          }
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "seti_1UHnlpHIBYZYyePrt7RjvpcX",
+        "object": "setup_intent",
+        "allowed_payment_method_types": null,
+        "application": null,
+        "automatic_payment_methods": null,
+        "cancellation_reason": null,
+        "client_secret": "seti_1UHnlpHIBYZYyePrt7RjvpcX_secret_VIOYXzi6pdI7lNmB59oJAoiYcAKyz45",
+        "created": 1789922357,
+        "customer": "cus_VIOYHEDSFMFUW5",
+        "customer_account": null,
+        "description": "after",
+        "excluded_payment_method_types": null,
+        "flow_directions": null,
+        "last_setup_error": null,
+        "latest_attempt": null,
+        "livemode": false,
+        "managed_payments": {
+          "enabled": false
+        },
+        "mandate": null,
+        "metadata": {
+          "a": "1",
+          "b": "2"
+        },
+        "next_action": null,
+        "on_behalf_of": null,
+        "payment_method": null,
+        "payment_method_configuration_details": null,
+        "payment_method_options": {
+          "card": {
+            "mandate_options": null,
+            "network": null,
+            "request_three_d_secure": "automatic"
+          }
+        },
+        "payment_method_types": [
+          "card"
+        ],
+        "single_use_mandate": null,
+        "status": "requires_payment_method",
+        "usage": "off_session"
+      }
+    },
+    {
+      "seq": 33,
+      "method": "POST",
+      "path": "/v1/setup_intents/{intent}",
+      "path_refs": {
+        "intent": {
+          "step": "updatable",
+          "field": "id"
+        }
+      },
+      "params": {
+        "payment_method": {
+          "$ref": {
+            "step": "visa",
+            "field": "id"
+          }
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 400,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "error": {
+          "message": "The PaymentMethod pm_1UHnljHIBYZYyePrVRAUWQVl does not belong to the Customer you supplied cus_VIOYHEDSFMFUW5. Please use this PaymentMethod with the Customer that it belongs to instead.",
+          "param": "payment_method",
+          "request_log_url": "<redacted:request_log_url>",
+          "setup_intent": {
+            "id": "seti_1UHnlpHIBYZYyePrt7RjvpcX",
+            "object": "setup_intent",
+            "allowed_payment_method_types": null,
+            "application": null,
+            "automatic_payment_methods": null,
+            "cancellation_reason": null,
+            "client_secret": "seti_1UHnlpHIBYZYyePrt7RjvpcX_secret_VIOYXzi6pdI7lNmB59oJAoiYcAKyz45",
+            "created": 1789922357,
+            "customer": "cus_VIOYHEDSFMFUW5",
+            "customer_account": null,
+            "description": "after",
+            "excluded_payment_method_types": null,
+            "flow_directions": null,
+            "last_setup_error": null,
+            "latest_attempt": null,
+            "livemode": false,
+            "managed_payments": {
+              "enabled": false
+            },
+            "mandate": null,
+            "metadata": {
+              "a": "1",
+              "b": "2"
+            },
+            "next_action": null,
+            "on_behalf_of": null,
+            "payment_method": null,
+            "payment_method_configuration_details": null,
+            "payment_method_options": {
+              "card": {
+                "mandate_options": null,
+                "network": null,
+                "request_three_d_secure": "automatic"
+              }
+            },
+            "payment_method_types": [
+              "card"
+            ],
+            "single_use_mandate": null,
+            "status": "requires_payment_method",
+            "usage": "off_session"
+          },
+          "type": "invalid_request_error"
+        }
+      }
+    },
+    {
+      "seq": 34,
+      "method": "POST",
+      "path": "/v1/setup_intents",
+      "path_refs": {},
+      "params": {
+        "customer": {
+          "$ref": {
+            "step": "other",
+            "field": "id"
+          }
+        },
+        "payment_method_types": [
+          "card"
+        ]
+      },
+      "idempotency_key": null,
+      "binds_as": "wrong_customer",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "seti_1UHnlqHIBYZYyePrGhxzQhP3",
+        "object": "setup_intent",
+        "allowed_payment_method_types": null,
+        "application": null,
+        "automatic_payment_methods": null,
+        "cancellation_reason": null,
+        "client_secret": "seti_1UHnlqHIBYZYyePrGhxzQhP3_secret_VIOYBgamlAGHUlpKeHIFNV4oboFNWKR",
+        "created": 1789922358,
+        "customer": "cus_VIOYHEDSFMFUW5",
+        "customer_account": null,
+        "description": null,
+        "excluded_payment_method_types": null,
+        "flow_directions": null,
+        "last_setup_error": null,
+        "latest_attempt": null,
+        "livemode": false,
+        "managed_payments": {
+          "enabled": false
+        },
+        "mandate": null,
+        "metadata": {},
+        "next_action": null,
+        "on_behalf_of": null,
+        "payment_method": null,
+        "payment_method_configuration_details": null,
+        "payment_method_options": {
+          "card": {
+            "mandate_options": null,
+            "network": null,
+            "request_three_d_secure": "automatic"
+          }
+        },
+        "payment_method_types": [
+          "card"
+        ],
+        "single_use_mandate": null,
+        "status": "requires_payment_method",
+        "usage": "off_session"
+      }
+    },
+    {
+      "seq": 35,
+      "method": "POST",
+      "path": "/v1/setup_intents/{intent}/confirm",
+      "path_refs": {
+        "intent": {
+          "step": "wrong_customer",
+          "field": "id"
+        }
+      },
+      "params": {
+        "payment_method": {
+          "$ref": {
+            "step": "visa",
+            "field": "id"
+          }
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 400,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "error": {
+          "message": "The PaymentMethod pm_1UHnljHIBYZYyePrVRAUWQVl does not belong to the Customer you supplied cus_VIOYHEDSFMFUW5. Please use this PaymentMethod with the Customer that it belongs to instead.",
+          "param": "payment_method",
+          "request_log_url": "<redacted:request_log_url>",
+          "setup_intent": {
+            "id": "seti_1UHnlqHIBYZYyePrGhxzQhP3",
+            "object": "setup_intent",
+            "allowed_payment_method_types": null,
+            "application": null,
+            "automatic_payment_methods": null,
+            "cancellation_reason": null,
+            "client_secret": "seti_1UHnlqHIBYZYyePrGhxzQhP3_secret_VIOYBgamlAGHUlpKeHIFNV4oboFNWKR",
+            "created": 1789922358,
+            "customer": "cus_VIOYHEDSFMFUW5",
+            "customer_account": null,
+            "description": null,
+            "excluded_payment_method_types": null,
+            "flow_directions": null,
+            "last_setup_error": null,
+            "latest_attempt": null,
+            "livemode": false,
+            "managed_payments": {
+              "enabled": false
+            },
+            "mandate": null,
+            "metadata": {},
+            "next_action": null,
+            "on_behalf_of": null,
+            "payment_method": null,
+            "payment_method_configuration_details": null,
+            "payment_method_options": {
+              "card": {
+                "mandate_options": null,
+                "network": null,
+                "request_three_d_secure": "automatic"
+              }
+            },
+            "payment_method_types": [
+              "card"
+            ],
+            "single_use_mandate": null,
+            "status": "requires_payment_method",
+            "usage": "off_session"
+          },
+          "type": "invalid_request_error"
+        }
+      }
+    },
+    {
+      "seq": 36,
+      "method": "POST",
+      "path": "/v1/setup_intents",
+      "path_refs": {},
+      "params": {
+        "payment_method_types": [
+          "card"
+        ]
+      },
+      "idempotency_key": null,
+      "binds_as": "no_customer",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "seti_1UHnlqHIBYZYyePrWyBIcIqO",
+        "object": "setup_intent",
+        "allowed_payment_method_types": null,
+        "application": null,
+        "automatic_payment_methods": null,
+        "cancellation_reason": null,
+        "client_secret": "seti_1UHnlqHIBYZYyePrWyBIcIqO_secret_VIOYqoJQaFinjhZV4p7En9rUHKvWBIr",
+        "created": 1789922358,
+        "customer": null,
+        "customer_account": null,
+        "description": null,
+        "excluded_payment_method_types": null,
+        "flow_directions": null,
+        "last_setup_error": null,
+        "latest_attempt": null,
+        "livemode": false,
+        "managed_payments": {
+          "enabled": false
+        },
+        "mandate": null,
+        "metadata": {},
+        "next_action": null,
+        "on_behalf_of": null,
+        "payment_method": null,
+        "payment_method_configuration_details": null,
+        "payment_method_options": {
+          "card": {
+            "mandate_options": null,
+            "network": null,
+            "request_three_d_secure": "automatic"
+          }
+        },
+        "payment_method_types": [
+          "card"
+        ],
+        "single_use_mandate": null,
+        "status": "requires_payment_method",
+        "usage": "off_session"
+      }
+    },
+    {
+      "seq": 37,
+      "method": "POST",
+      "path": "/v1/setup_intents/{intent}/confirm",
+      "path_refs": {
+        "intent": {
+          "step": "no_customer",
+          "field": "id"
+        }
+      },
+      "params": {
+        "payment_method": {
+          "$ref": {
+            "step": "visa",
+            "field": "id"
+          }
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 400,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "error": {
+          "message": "The payment method supplied (pm_1UHnljHIBYZYyePrVRAUWQVl) belongs to the Customer cus_VIOY4LwwrstX3k. Please include the Customer in the `customer` parameter on the SetupIntent.",
+          "param": "payment_method",
+          "request_log_url": "<redacted:request_log_url>",
+          "setup_intent": {
+            "id": "seti_1UHnlqHIBYZYyePrWyBIcIqO",
+            "object": "setup_intent",
+            "allowed_payment_method_types": null,
+            "application": null,
+            "automatic_payment_methods": null,
+            "cancellation_reason": null,
+            "client_secret": "seti_1UHnlqHIBYZYyePrWyBIcIqO_secret_VIOYqoJQaFinjhZV4p7En9rUHKvWBIr",
+            "created": 1789922358,
+            "customer": null,
+            "customer_account": null,
+            "description": null,
+            "excluded_payment_method_types": null,
+            "flow_directions": null,
+            "last_setup_error": null,
+            "latest_attempt": null,
+            "livemode": false,
+            "managed_payments": {
+              "enabled": false
+            },
+            "mandate": null,
+            "metadata": {},
+            "next_action": null,
+            "on_behalf_of": null,
+            "payment_method": null,
+            "payment_method_configuration_details": null,
+            "payment_method_options": {
+              "card": {
+                "mandate_options": null,
+                "network": null,
+                "request_three_d_secure": "automatic"
+              }
+            },
+            "payment_method_types": [
+              "card"
+            ],
+            "single_use_mandate": null,
+            "status": "requires_payment_method",
+            "usage": "off_session"
+          },
+          "type": "invalid_request_error"
+        }
+      }
+    },
+    {
+      "seq": 38,
+      "method": "POST",
+      "path": "/v1/setup_intents",
+      "path_refs": {},
+      "params": {
+        "customer": {
+          "$ref": {
+            "step": "customer",
+            "field": "id"
+          }
+        },
+        "payment_method": {
+          "$ref": {
+            "step": "visa",
+            "field": "id"
+          }
+        },
+        "payment_method_types": [
+          "card"
+        ]
+      },
+      "idempotency_key": null,
+      "binds_as": "to_cancel",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "seti_1UHnlrHIBYZYyePrHtrWPMru",
+        "object": "setup_intent",
+        "allowed_payment_method_types": null,
+        "application": null,
+        "automatic_payment_methods": null,
+        "cancellation_reason": null,
+        "client_secret": "seti_1UHnlrHIBYZYyePrHtrWPMru_secret_VIOYtcAVWMOM03tAjnvqHoriO8aOWnU",
+        "created": 1789922359,
+        "customer": "cus_VIOY4LwwrstX3k",
+        "customer_account": null,
+        "description": null,
+        "excluded_payment_method_types": null,
+        "flow_directions": null,
+        "last_setup_error": null,
+        "latest_attempt": null,
+        "livemode": false,
+        "managed_payments": {
+          "enabled": false
+        },
+        "mandate": null,
+        "metadata": {},
+        "next_action": null,
+        "on_behalf_of": null,
+        "payment_method": "pm_1UHnljHIBYZYyePrVRAUWQVl",
+        "payment_method_configuration_details": null,
+        "payment_method_options": {
+          "card": {
+            "mandate_options": null,
+            "network": null,
+            "request_three_d_secure": "automatic"
+          }
+        },
+        "payment_method_types": [
+          "card"
+        ],
+        "single_use_mandate": null,
+        "status": "requires_confirmation",
+        "usage": "off_session"
+      }
+    },
+    {
+      "seq": 39,
+      "method": "POST",
+      "path": "/v1/setup_intents/{intent}/cancel",
+      "path_refs": {
+        "intent": {
+          "step": "to_cancel",
+          "field": "id"
+        }
+      },
+      "params": {
+        "cancellation_reason": "duplicate"
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "seti_1UHnlrHIBYZYyePrHtrWPMru",
+        "object": "setup_intent",
+        "allowed_payment_method_types": null,
+        "application": null,
+        "automatic_payment_methods": null,
+        "cancellation_reason": "duplicate",
+        "client_secret": "seti_1UHnlrHIBYZYyePrHtrWPMru_secret_VIOYtcAVWMOM03tAjnvqHoriO8aOWnU",
+        "created": 1789922359,
+        "customer": "cus_VIOY4LwwrstX3k",
+        "customer_account": null,
+        "description": null,
+        "excluded_payment_method_types": null,
+        "flow_directions": null,
+        "last_setup_error": null,
+        "latest_attempt": null,
+        "livemode": false,
+        "managed_payments": {
+          "enabled": false
+        },
+        "mandate": null,
+        "metadata": {},
+        "next_action": null,
+        "on_behalf_of": null,
+        "payment_method": "pm_1UHnljHIBYZYyePrVRAUWQVl",
+        "payment_method_configuration_details": null,
+        "payment_method_options": {
+          "card": {
+            "mandate_options": null,
+            "network": null,
+            "request_three_d_secure": "automatic"
+          }
+        },
+        "payment_method_types": [
+          "card"
+        ],
+        "single_use_mandate": null,
+        "status": "canceled",
+        "usage": "off_session"
+      }
+    },
+    {
+      "seq": 40,
+      "method": "POST",
+      "path": "/v1/setup_intents/{intent}/confirm",
+      "path_refs": {
+        "intent": {
+          "step": "to_cancel",
+          "field": "id"
+        }
+      },
+      "params": {},
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 400,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "error": {
+          "code": "setup_intent_unexpected_state",
+          "doc_url": "https://stripe.com/docs/error-codes/setup-intent-unexpected-state",
+          "message": "You cannot confirm this SetupIntent because it has been canceled.",
+          "request_log_url": "<redacted:request_log_url>",
+          "setup_intent": {
+            "id": "seti_1UHnlrHIBYZYyePrHtrWPMru",
+            "object": "setup_intent",
+            "allowed_payment_method_types": null,
+            "application": null,
+            "automatic_payment_methods": null,
+            "cancellation_reason": "duplicate",
+            "client_secret": "seti_1UHnlrHIBYZYyePrHtrWPMru_secret_VIOYtcAVWMOM03tAjnvqHoriO8aOWnU",
+            "created": 1789922359,
+            "customer": "cus_VIOY4LwwrstX3k",
+            "customer_account": null,
+            "description": null,
+            "excluded_payment_method_types": null,
+            "flow_directions": null,
+            "last_setup_error": null,
+            "latest_attempt": null,
+            "livemode": false,
+            "managed_payments": {
+              "enabled": false
+            },
+            "mandate": null,
+            "metadata": {},
+            "next_action": null,
+            "on_behalf_of": null,
+            "payment_method": "pm_1UHnljHIBYZYyePrVRAUWQVl",
+            "payment_method_configuration_details": null,
+            "payment_method_options": {
+              "card": {
+                "mandate_options": null,
+                "network": null,
+                "request_three_d_secure": "automatic"
+              }
+            },
+            "payment_method_types": [
+              "card"
+            ],
+            "single_use_mandate": null,
+            "status": "canceled",
+            "usage": "off_session"
+          },
+          "type": "invalid_request_error"
+        }
+      }
+    },
+    {
+      "seq": 41,
+      "method": "POST",
+      "path": "/v1/setup_intents/{intent}/cancel",
+      "path_refs": {
+        "intent": {
+          "step": "to_cancel",
+          "field": "id"
+        }
+      },
+      "params": {},
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 400,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "error": {
+          "code": "setup_intent_unexpected_state",
+          "doc_url": "https://stripe.com/docs/error-codes/setup-intent-unexpected-state",
+          "message": "You cannot cancel this SetupIntent because it is already canceled.",
+          "request_log_url": "<redacted:request_log_url>",
+          "setup_intent": {
+            "id": "seti_1UHnlrHIBYZYyePrHtrWPMru",
+            "object": "setup_intent",
+            "allowed_payment_method_types": null,
+            "application": null,
+            "automatic_payment_methods": null,
+            "cancellation_reason": "duplicate",
+            "client_secret": "seti_1UHnlrHIBYZYyePrHtrWPMru_secret_VIOYtcAVWMOM03tAjnvqHoriO8aOWnU",
+            "created": 1789922359,
+            "customer": "cus_VIOY4LwwrstX3k",
+            "customer_account": null,
+            "description": null,
+            "excluded_payment_method_types": null,
+            "flow_directions": null,
+            "last_setup_error": null,
+            "latest_attempt": null,
+            "livemode": false,
+            "managed_payments": {
+              "enabled": false
+            },
+            "mandate": null,
+            "metadata": {},
+            "next_action": null,
+            "on_behalf_of": null,
+            "payment_method": "pm_1UHnljHIBYZYyePrVRAUWQVl",
+            "payment_method_configuration_details": null,
+            "payment_method_options": {
+              "card": {
+                "mandate_options": null,
+                "network": null,
+                "request_three_d_secure": "automatic"
+              }
+            },
+            "payment_method_types": [
+              "card"
+            ],
+            "single_use_mandate": null,
+            "status": "canceled",
+            "usage": "off_session"
+          },
+          "type": "invalid_request_error"
+        }
+      }
+    },
+    {
+      "seq": 42,
+      "method": "POST",
+      "path": "/v1/setup_intents/{intent}/verify_microdeposits",
+      "path_refs": {
+        "intent": {
+          "step": "updatable",
+          "field": "id"
+        }
+      },
+      "params": {
+        "amounts": [
+          32,
+          45
+        ]
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 400,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "error": {
+          "code": "intent_invalid_state",
+          "doc_url": "https://stripe.com/docs/error-codes/intent-invalid-state",
+          "message": "This SetupIntent cannot be actioned on because it has a status of requires_payment_method. Only a SetupIntent with one of the following statuses may be actioned on: [\"requires_action\"].",
+          "request_log_url": "<redacted:request_log_url>",
+          "setup_intent": {
+            "application": null,
+            "last_setup_error": null,
+            "latest_attempt": null,
+            "payment_method": null,
+            "customer_account": null,
+            "payment_method_configuration_details": null,
+            "client_secret": "seti_1UHnlpHIBYZYyePrt7RjvpcX_secret_VIOYXzi6pdI7lNmB59oJAoiYcAKyz45",
+            "livemode": false,
+            "payment_method_types": [
+              "card"
+            ],
+            "id": "seti_1UHnlpHIBYZYyePrt7RjvpcX",
+            "automatic_payment_methods": null,
+            "excluded_payment_method_types": null,
+            "allowed_payment_method_types": null,
+            "description": "after",
+            "mandate": null,
+            "created": 1789922357,
+            "on_behalf_of": null,
+            "flow_directions": null,
+            "customer": "cus_VIOYHEDSFMFUW5",
+            "cancellation_reason": null,
+            "next_action": null,
+            "status": "requires_payment_method",
+            "managed_payments": {
+              "enabled": false
+            },
+            "usage": "off_session",
+            "metadata": {
+              "b": "2",
+              "a": "1"
+            },
+            "object": "setup_intent",
+            "single_use_mandate": null,
+            "payment_method_options": {
+              "card": {
+                "network": null,
+                "request_three_d_secure": "automatic",
+                "mandate_options": null
+              }
+            }
+          },
+          "type": "invalid_request_error"
+        }
+      }
+    },
+    {
+      "seq": 43,
+      "method": "GET",
+      "path": "/v1/setup_intents",
+      "path_refs": {},
+      "params": {
+        "customer": {
+          "$ref": {
+            "step": "customer",
+            "field": "id"
+          }
+        },
+        "limit": 100
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "object": "list",
+        "data": [
+          {
+            "id": "seti_1UHnlrHIBYZYyePrHtrWPMru",
+            "object": "setup_intent",
+            "allowed_payment_method_types": null,
+            "application": null,
+            "automatic_payment_methods": null,
+            "cancellation_reason": "duplicate",
+            "client_secret": "seti_1UHnlrHIBYZYyePrHtrWPMru_secret_VIOYtcAVWMOM03tAjnvqHoriO8aOWnU",
+            "created": 1789922359,
+            "customer": "cus_VIOY4LwwrstX3k",
+            "customer_account": null,
+            "description": null,
+            "excluded_payment_method_types": null,
+            "flow_directions": null,
+            "last_setup_error": null,
+            "latest_attempt": null,
+            "livemode": false,
+            "managed_payments": {
+              "enabled": false
+            },
+            "mandate": null,
+            "metadata": {},
+            "next_action": null,
+            "on_behalf_of": null,
+            "payment_method": "pm_1UHnljHIBYZYyePrVRAUWQVl",
+            "payment_method_configuration_details": null,
+            "payment_method_options": {
+              "card": {
+                "mandate_options": null,
+                "network": null,
+                "request_three_d_secure": "automatic"
+              }
+            },
+            "payment_method_types": [
+              "card"
+            ],
+            "single_use_mandate": null,
+            "status": "canceled",
+            "usage": "off_session"
+          },
+          {
+            "id": "seti_1UHnlmHIBYZYyePr9BC1sPVE",
+            "object": "setup_intent",
+            "allowed_payment_method_types": null,
+            "application": null,
+            "automatic_payment_methods": null,
+            "cancellation_reason": null,
+            "client_secret": "seti_1UHnlmHIBYZYyePr9BC1sPVE_secret_VIOYqQxOZJ1syszU18KzfRZUE5YO2Ct",
+            "created": 1789922354,
+            "customer": "cus_VIOY4LwwrstX3k",
+            "customer_account": null,
+            "description": null,
+            "excluded_payment_method_types": null,
+            "flow_directions": null,
+            "last_setup_error": null,
+            "latest_attempt": "setatt_1UHnlmHIBYZYyeProQfPbFjO",
+            "livemode": false,
+            "managed_payments": {
+              "enabled": false
+            },
+            "mandate": null,
+            "metadata": {},
+            "next_action": null,
+            "on_behalf_of": null,
+            "payment_method": "pm_1UHnlmHIBYZYyePrCaBsSsUl",
+            "payment_method_configuration_details": null,
+            "payment_method_options": {
+              "card": {
+                "mandate_options": null,
+                "network": null,
+                "request_three_d_secure": "automatic"
+              }
+            },
+            "payment_method_types": [
+              "card"
+            ],
+            "single_use_mandate": null,
+            "status": "succeeded",
+            "usage": "off_session"
+          },
+          {
+            "id": "seti_1UHnlmHIBYZYyePrHrm0iNDm",
+            "object": "setup_intent",
+            "allowed_payment_method_types": null,
+            "application": null,
+            "automatic_payment_methods": null,
+            "cancellation_reason": null,
+            "client_secret": "seti_1UHnlmHIBYZYyePrHrm0iNDm_secret_VIOYn3Xpjg7U971jGxxAjcOzvo8F60H",
+            "created": 1789922354,
+            "customer": "cus_VIOY4LwwrstX3k",
+            "customer_account": null,
+            "description": null,
+            "excluded_payment_method_types": null,
+            "flow_directions": null,
+            "last_setup_error": null,
+            "latest_attempt": null,
+            "livemode": false,
+            "managed_payments": {
+              "enabled": false
+            },
+            "mandate": null,
+            "metadata": {},
+            "next_action": null,
+            "on_behalf_of": null,
+            "payment_method": null,
+            "payment_method_configuration_details": null,
+            "payment_method_options": {
+              "card": {
+                "mandate_options": null,
+                "network": null,
+                "request_three_d_secure": "automatic"
+              }
+            },
+            "payment_method_types": [
+              "card"
+            ],
+            "single_use_mandate": null,
+            "status": "requires_payment_method",
+            "usage": "off_session"
+          },
+          {
+            "id": "seti_1UHnlkHIBYZYyePrkKlKDei4",
+            "object": "setup_intent",
+            "allowed_payment_method_types": null,
+            "application": null,
+            "automatic_payment_methods": null,
+            "cancellation_reason": null,
+            "client_secret": "seti_1UHnlkHIBYZYyePrkKlKDei4_secret_VIOYbEtu4aJOFLyJ7Pxi6CbeqFBCEpz",
+            "created": 1789922352,
+            "customer": "cus_VIOY4LwwrstX3k",
+            "customer_account": null,
+            "description": "after the fact",
+            "excluded_payment_method_types": null,
+            "flow_directions": null,
+            "last_setup_error": null,
+            "latest_attempt": "setatt_1UHnlkHIBYZYyePrisdDPinv",
+            "livemode": false,
+            "managed_payments": {
+              "enabled": false
+            },
+            "mandate": null,
+            "metadata": {
+              "k": "v"
+            },
+            "next_action": null,
+            "on_behalf_of": null,
+            "payment_method": "pm_1UHnljHIBYZYyePrVRAUWQVl",
+            "payment_method_configuration_details": null,
+            "payment_method_options": {
+              "card": {
+                "mandate_options": null,
+                "network": null,
+                "request_three_d_secure": "automatic"
+              }
+            },
+            "payment_method_types": [
+              "card"
+            ],
+            "single_use_mandate": null,
+            "status": "succeeded",
+            "usage": "off_session"
+          }
+        ],
+        "has_more": false,
+        "url": "/v1/setup_intents"
+      }
+    },
+    {
+      "seq": 44,
+      "method": "GET",
+      "path": "/v1/setup_intents",
+      "path_refs": {},
+      "params": {
+        "payment_method": {
+          "$ref": {
+            "step": "visa",
+            "field": "id"
+          }
+        },
+        "limit": 100
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "object": "list",
+        "data": [
+          {
+            "id": "seti_1UHnlrHIBYZYyePrHtrWPMru",
+            "object": "setup_intent",
+            "allowed_payment_method_types": null,
+            "application": null,
+            "automatic_payment_methods": null,
+            "cancellation_reason": "duplicate",
+            "client_secret": "seti_1UHnlrHIBYZYyePrHtrWPMru_secret_VIOYtcAVWMOM03tAjnvqHoriO8aOWnU",
+            "created": 1789922359,
+            "customer": "cus_VIOY4LwwrstX3k",
+            "customer_account": null,
+            "description": null,
+            "excluded_payment_method_types": null,
+            "flow_directions": null,
+            "last_setup_error": null,
+            "latest_attempt": null,
+            "livemode": false,
+            "managed_payments": {
+              "enabled": false
+            },
+            "mandate": null,
+            "metadata": {},
+            "next_action": null,
+            "on_behalf_of": null,
+            "payment_method": "pm_1UHnljHIBYZYyePrVRAUWQVl",
+            "payment_method_configuration_details": null,
+            "payment_method_options": {
+              "card": {
+                "mandate_options": null,
+                "network": null,
+                "request_three_d_secure": "automatic"
+              }
+            },
+            "payment_method_types": [
+              "card"
+            ],
+            "single_use_mandate": null,
+            "status": "canceled",
+            "usage": "off_session"
+          },
+          {
+            "id": "seti_1UHnlkHIBYZYyePrkKlKDei4",
+            "object": "setup_intent",
+            "allowed_payment_method_types": null,
+            "application": null,
+            "automatic_payment_methods": null,
+            "cancellation_reason": null,
+            "client_secret": "seti_1UHnlkHIBYZYyePrkKlKDei4_secret_VIOYbEtu4aJOFLyJ7Pxi6CbeqFBCEpz",
+            "created": 1789922352,
+            "customer": "cus_VIOY4LwwrstX3k",
+            "customer_account": null,
+            "description": "after the fact",
+            "excluded_payment_method_types": null,
+            "flow_directions": null,
+            "last_setup_error": null,
+            "latest_attempt": "setatt_1UHnlkHIBYZYyePrisdDPinv",
+            "livemode": false,
+            "managed_payments": {
+              "enabled": false
+            },
+            "mandate": null,
+            "metadata": {
+              "k": "v"
+            },
+            "next_action": null,
+            "on_behalf_of": null,
+            "payment_method": "pm_1UHnljHIBYZYyePrVRAUWQVl",
+            "payment_method_configuration_details": null,
+            "payment_method_options": {
+              "card": {
+                "mandate_options": null,
+                "network": null,
+                "request_three_d_secure": "automatic"
+              }
+            },
+            "payment_method_types": [
+              "card"
+            ],
+            "single_use_mandate": null,
+            "status": "succeeded",
+            "usage": "off_session"
+          }
+        ],
+        "has_more": false,
+        "url": "/v1/setup_intents"
+      }
+    },
+    {
+      "seq": 45,
+      "method": "GET",
+      "path": "/v1/setup_intents/seti_nope000000000000000000",
+      "path_refs": {},
+      "params": {},
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 404,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "error": {
+          "code": "resource_missing",
+          "doc_url": "https://stripe.com/docs/error-codes/resource-missing",
+          "message": "No such setupintent: 'seti_nope000000000000000000'",
+          "param": "intent",
+          "request_log_url": "<redacted:request_log_url>",
+          "type": "invalid_request_error"
+        }
+      }
+    }
+  ]
+}

@@ -42,6 +42,7 @@ def test_an_instance_of_empty_has_the_schema_and_no_rows(instance: seahaven.Inst
         "products",
         "promotion_codes",
         "refunds",
+        "setup_intents",
         "tax_rates",
     ]
     # No tracked table carries a row: no customer, no event, no payment
@@ -57,6 +58,7 @@ def test_an_instance_of_empty_has_the_schema_and_no_rows(instance: seahaven.Inst
         "tax_rates",
         "payment_intents",
         "charges",
+        "setup_intents",
     ):
         assert instance.inspect().one(f"SELECT count(*) AS n FROM {table}") == {"n": 0}
 
