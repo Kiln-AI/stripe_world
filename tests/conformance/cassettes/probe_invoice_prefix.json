@@ -1,0 +1,275 @@
+{
+  "scenario": "probe_invoice_prefix",
+  "description": "The customers invoice_prefix contract: format refusal, a 10-character date-derived holder prefix, and the uniqueness refusal on create and update.",
+  "recorded_at": "2026-09-20T02:33:32+00:00",
+  "stripe_version_pin": "2026-08-26.dahlia",
+  "steps": [
+    {
+      "seq": 0,
+      "method": "POST",
+      "path": "/v1/customers",
+      "path_refs": {},
+      "params": {
+        "email": "probe-prefix@conformance.stripeapi.invalid",
+        "invoice_prefix": "a"
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 400,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "error": {
+          "message": "Invoice number prefix must be 1–12 uppercase letters or numbers.",
+          "request_log_url": "<redacted:request_log_url>",
+          "type": "invalid_request_error"
+        }
+      }
+    },
+    {
+      "seq": 1,
+      "method": "POST",
+      "path": "/v1/customers",
+      "path_refs": {},
+      "params": {
+        "email": "probe-prefix@conformance.stripeapi.invalid",
+        "invoice_prefix": "abc"
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 400,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "error": {
+          "message": "Invoice number prefix must be 1–12 uppercase letters or numbers.",
+          "request_log_url": "<redacted:request_log_url>",
+          "type": "invalid_request_error"
+        }
+      }
+    },
+    {
+      "seq": 2,
+      "method": "POST",
+      "path": "/v1/customers",
+      "path_refs": {},
+      "params": {
+        "email": "probe-prefix@conformance.stripeapi.invalid",
+        "invoice_prefix": "AB_1"
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 400,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "error": {
+          "message": "Invoice number prefix must be 1–12 uppercase letters or numbers.",
+          "request_log_url": "<redacted:request_log_url>",
+          "type": "invalid_request_error"
+        }
+      }
+    },
+    {
+      "seq": 3,
+      "method": "POST",
+      "path": "/v1/customers",
+      "path_refs": {},
+      "params": {
+        "email": "probe-prefix@conformance.stripeapi.invalid",
+        "invoice_prefix": "ABCDEFGHIJKLM"
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 400,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "error": {
+          "message": "Invoice number prefix must be 1–12 uppercase letters or numbers.",
+          "request_log_url": "<redacted:request_log_url>",
+          "type": "invalid_request_error"
+        }
+      }
+    },
+    {
+      "seq": 4,
+      "method": "POST",
+      "path": "/v1/customers",
+      "path_refs": {},
+      "params": {
+        "email": "probe-prefix@conformance.stripeapi.invalid",
+        "invoice_prefix": "P626092001"
+      },
+      "idempotency_key": null,
+      "binds_as": "holder",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "cus_VIAvpQ7xuwdScV",
+        "object": "customer",
+        "address": null,
+        "balance": 0,
+        "created": 1789871611,
+        "currency": null,
+        "customer_account": null,
+        "default_source": null,
+        "delinquent": false,
+        "description": null,
+        "discount": null,
+        "email": "probe-prefix@conformance.stripeapi.invalid",
+        "invoice_prefix": "P626092001",
+        "invoice_settings": {
+          "custom_fields": null,
+          "default_payment_method": null,
+          "footer": null,
+          "rendering_options": null
+        },
+        "livemode": false,
+        "metadata": {},
+        "name": null,
+        "next_invoice_sequence": 1,
+        "phone": null,
+        "preferred_locales": [],
+        "shipping": null,
+        "tax_exempt": "none",
+        "test_clock": null
+      }
+    },
+    {
+      "seq": 5,
+      "method": "POST",
+      "path": "/v1/customers",
+      "path_refs": {},
+      "params": {
+        "email": "probe-prefix@conformance.stripeapi.invalid"
+      },
+      "idempotency_key": null,
+      "binds_as": "other",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "cus_VIAv06oKtu0MlA",
+        "object": "customer",
+        "address": null,
+        "balance": 0,
+        "created": 1789871611,
+        "currency": null,
+        "customer_account": null,
+        "default_source": null,
+        "delinquent": false,
+        "description": null,
+        "discount": null,
+        "email": "probe-prefix@conformance.stripeapi.invalid",
+        "invoice_prefix": "9UAOJLEO",
+        "invoice_settings": {
+          "custom_fields": null,
+          "default_payment_method": null,
+          "footer": null,
+          "rendering_options": null
+        },
+        "livemode": false,
+        "metadata": {},
+        "name": null,
+        "next_invoice_sequence": 1,
+        "phone": null,
+        "preferred_locales": [],
+        "shipping": null,
+        "tax_exempt": "none",
+        "test_clock": null
+      }
+    },
+    {
+      "seq": 6,
+      "method": "POST",
+      "path": "/v1/customers",
+      "path_refs": {},
+      "params": {
+        "email": "probe-prefix@conformance.stripeapi.invalid",
+        "invoice_prefix": "P626092001"
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 400,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "error": {
+          "message": "This invoice number prefix is taken by customer: cus_VIAvpQ7xuwdScV. Please enter a different prefix.",
+          "param": "invoice_prefix",
+          "request_log_url": "<redacted:request_log_url>",
+          "type": "invalid_request_error"
+        }
+      }
+    },
+    {
+      "seq": 7,
+      "method": "POST",
+      "path": "/v1/customers/{customer}",
+      "path_refs": {
+        "customer": {
+          "step": "other",
+          "field": "id"
+        }
+      },
+      "params": {
+        "invoice_prefix": "P626092001"
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 400,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "error": {
+          "message": "This invoice number prefix is taken by customer: cus_VIAvpQ7xuwdScV. Please enter a different prefix.",
+          "param": "invoice_prefix",
+          "request_log_url": "<redacted:request_log_url>",
+          "type": "invalid_request_error"
+        }
+      }
+    },
+    {
+      "seq": 8,
+      "method": "POST",
+      "path": "/v1/customers/{customer}",
+      "path_refs": {
+        "customer": {
+          "step": "holder",
+          "field": "id"
+        }
+      },
+      "params": {
+        "invoice_prefix": "P626092001"
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "cus_VIAvpQ7xuwdScV",
+        "object": "customer",
+        "address": null,
+        "balance": 0,
+        "created": 1789871611,
+        "currency": null,
+        "customer_account": null,
+        "default_source": null,
+        "delinquent": false,
+        "description": null,
+        "discount": null,
+        "email": "probe-prefix@conformance.stripeapi.invalid",
+        "invoice_prefix": "P626092001",
+        "invoice_settings": {
+          "custom_fields": null,
+          "default_payment_method": null,
+          "footer": null,
+          "rendering_options": null
+        },
+        "livemode": false,
+        "metadata": {},
+        "name": null,
+        "next_invoice_sequence": 1,
+        "phone": null,
+        "preferred_locales": [],
+        "shipping": null,
+        "tax_exempt": "none",
+        "test_clock": null
+      }
+    }
+  ]
+}

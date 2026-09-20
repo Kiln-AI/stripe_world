@@ -1,0 +1,1321 @@
+{
+  "scenario": "06_customers_payment_methods",
+  "description": "The customers + payment_methods slice: full customer cycle, token card creation, attach/detach with their recorded errors, scoped and filtered lists.",
+  "recorded_at": "2026-09-20T02:51:22+00:00",
+  "stripe_version_pin": "2026-08-26.dahlia",
+  "steps": [
+    {
+      "seq": 0,
+      "method": "POST",
+      "path": "/v1/customers",
+      "path_refs": {},
+      "params": {
+        "email": "s06@conformance.stripeapi.invalid",
+        "description": "scenario 06",
+        "name": "Six",
+        "metadata": {
+          "probe": "s06"
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": "customer",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "cus_VIBCazb89Rgtff",
+        "object": "customer",
+        "address": null,
+        "balance": 0,
+        "created": 1789872678,
+        "currency": null,
+        "customer_account": null,
+        "default_source": null,
+        "delinquent": false,
+        "description": "scenario 06",
+        "discount": null,
+        "email": "s06@conformance.stripeapi.invalid",
+        "invoice_prefix": "IZLOKWS5",
+        "invoice_settings": {
+          "custom_fields": null,
+          "default_payment_method": null,
+          "footer": null,
+          "rendering_options": null
+        },
+        "livemode": false,
+        "metadata": {
+          "probe": "s06"
+        },
+        "name": "Six",
+        "next_invoice_sequence": 1,
+        "phone": null,
+        "preferred_locales": [],
+        "shipping": null,
+        "tax_exempt": "none",
+        "test_clock": null
+      }
+    },
+    {
+      "seq": 1,
+      "method": "GET",
+      "path": "/v1/customers/{customer}",
+      "path_refs": {
+        "customer": {
+          "step": "customer",
+          "field": "id"
+        }
+      },
+      "params": {},
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "cus_VIBCazb89Rgtff",
+        "object": "customer",
+        "address": null,
+        "balance": 0,
+        "created": 1789872678,
+        "currency": null,
+        "customer_account": null,
+        "default_source": null,
+        "delinquent": false,
+        "description": "scenario 06",
+        "discount": null,
+        "email": "s06@conformance.stripeapi.invalid",
+        "invoice_prefix": "IZLOKWS5",
+        "invoice_settings": {
+          "custom_fields": null,
+          "default_payment_method": null,
+          "footer": null,
+          "rendering_options": null
+        },
+        "livemode": false,
+        "metadata": {
+          "probe": "s06"
+        },
+        "name": "Six",
+        "next_invoice_sequence": 1,
+        "phone": null,
+        "preferred_locales": [],
+        "shipping": null,
+        "tax_exempt": "none",
+        "test_clock": null
+      }
+    },
+    {
+      "seq": 2,
+      "method": "POST",
+      "path": "/v1/customers/{customer}",
+      "path_refs": {
+        "customer": {
+          "step": "customer",
+          "field": "id"
+        }
+      },
+      "params": {
+        "name": "Six II",
+        "email": "s06-2@conformance.stripeapi.invalid"
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "cus_VIBCazb89Rgtff",
+        "object": "customer",
+        "address": null,
+        "balance": 0,
+        "created": 1789872678,
+        "currency": null,
+        "customer_account": null,
+        "default_source": null,
+        "delinquent": false,
+        "description": "scenario 06",
+        "discount": null,
+        "email": "s06-2@conformance.stripeapi.invalid",
+        "invoice_prefix": "IZLOKWS5",
+        "invoice_settings": {
+          "custom_fields": null,
+          "default_payment_method": null,
+          "footer": null,
+          "rendering_options": null
+        },
+        "livemode": false,
+        "metadata": {
+          "probe": "s06"
+        },
+        "name": "Six II",
+        "next_invoice_sequence": 1,
+        "phone": null,
+        "preferred_locales": [],
+        "shipping": null,
+        "tax_exempt": "none",
+        "test_clock": null
+      }
+    },
+    {
+      "seq": 3,
+      "method": "POST",
+      "path": "/v1/payment_methods",
+      "path_refs": {},
+      "params": {
+        "type": "card",
+        "card": {
+          "token": "tok_visa"
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": "visa",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "pm_1UHaqZHIBYZYyePrUVQSubct",
+        "object": "payment_method",
+        "allow_redisplay": "unspecified",
+        "billing_details": {
+          "address": {
+            "city": null,
+            "country": null,
+            "line1": null,
+            "line2": null,
+            "postal_code": null,
+            "state": null
+          },
+          "email": null,
+          "name": null,
+          "phone": null,
+          "tax_id": null
+        },
+        "card": {
+          "brand": "visa",
+          "checks": {
+            "address_line1_check": null,
+            "address_postal_code_check": null,
+            "cvc_check": "unchecked"
+          },
+          "country": "US",
+          "display_brand": "visa",
+          "exp_month": 9,
+          "exp_year": 2027,
+          "fingerprint": "OiMHMa3aYsyDbc1P",
+          "funding": "credit",
+          "generated_from": null,
+          "last4": "4242",
+          "networks": {
+            "available": [
+              "visa"
+            ],
+            "preferred": null
+          },
+          "regulated_status": "unregulated",
+          "three_d_secure_usage": {
+            "supported": true
+          },
+          "wallet": null
+        },
+        "created": 1789872679,
+        "customer": null,
+        "customer_account": null,
+        "livemode": false,
+        "metadata": {},
+        "shared_payment_granted_token": null,
+        "type": "card"
+      }
+    },
+    {
+      "seq": 4,
+      "method": "POST",
+      "path": "/v1/payment_methods",
+      "path_refs": {},
+      "params": {
+        "type": "card",
+        "card": {
+          "token": "tok_visa_chargeDeclined"
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": "declined",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "pm_1UHaqZHIBYZYyePrfMGw5neQ",
+        "object": "payment_method",
+        "allow_redisplay": "unspecified",
+        "billing_details": {
+          "address": {
+            "city": null,
+            "country": null,
+            "line1": null,
+            "line2": null,
+            "postal_code": null,
+            "state": null
+          },
+          "email": null,
+          "name": null,
+          "phone": null,
+          "tax_id": null
+        },
+        "card": {
+          "brand": "visa",
+          "checks": {
+            "address_line1_check": null,
+            "address_postal_code_check": null,
+            "cvc_check": "unchecked"
+          },
+          "country": "US",
+          "display_brand": "visa",
+          "exp_month": 9,
+          "exp_year": 2027,
+          "fingerprint": "xslyWSy1gFnl8a4Y",
+          "funding": "credit",
+          "generated_from": null,
+          "last4": "0002",
+          "networks": {
+            "available": [
+              "visa"
+            ],
+            "preferred": null
+          },
+          "regulated_status": "unregulated",
+          "three_d_secure_usage": {
+            "supported": true
+          },
+          "wallet": null
+        },
+        "created": 1789872679,
+        "customer": null,
+        "customer_account": null,
+        "livemode": false,
+        "metadata": {},
+        "shared_payment_granted_token": null,
+        "type": "card"
+      }
+    },
+    {
+      "seq": 5,
+      "method": "POST",
+      "path": "/v1/payment_methods",
+      "path_refs": {},
+      "params": {
+        "type": "klarna"
+      },
+      "idempotency_key": null,
+      "binds_as": "klarna",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "pm_1UHaqZHIBYZYyePrst2UNblc",
+        "object": "payment_method",
+        "allow_redisplay": "unspecified",
+        "billing_details": {
+          "address": {
+            "city": null,
+            "country": null,
+            "line1": null,
+            "line2": null,
+            "postal_code": null,
+            "state": null
+          },
+          "email": null,
+          "name": null,
+          "phone": null,
+          "tax_id": null
+        },
+        "created": 1789872679,
+        "customer": null,
+        "customer_account": null,
+        "klarna": {},
+        "livemode": false,
+        "metadata": {},
+        "shared_payment_granted_token": null,
+        "type": "klarna"
+      }
+    },
+    {
+      "seq": 6,
+      "method": "GET",
+      "path": "/v1/payment_methods/{payment_method}",
+      "path_refs": {
+        "payment_method": {
+          "step": "klarna",
+          "field": "id"
+        }
+      },
+      "params": {},
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "pm_1UHaqZHIBYZYyePrst2UNblc",
+        "object": "payment_method",
+        "allow_redisplay": "unspecified",
+        "billing_details": {
+          "address": {
+            "city": null,
+            "country": null,
+            "line1": null,
+            "line2": null,
+            "postal_code": null,
+            "state": null
+          },
+          "email": null,
+          "name": null,
+          "phone": null,
+          "tax_id": null
+        },
+        "created": 1789872679,
+        "customer": null,
+        "customer_account": null,
+        "klarna": {},
+        "livemode": false,
+        "metadata": {},
+        "shared_payment_granted_token": null,
+        "type": "klarna"
+      }
+    },
+    {
+      "seq": 7,
+      "method": "POST",
+      "path": "/v1/payment_methods/{payment_method}/attach",
+      "path_refs": {
+        "payment_method": {
+          "step": "visa",
+          "field": "id"
+        }
+      },
+      "params": {
+        "customer": {
+          "$ref": {
+            "step": "customer",
+            "field": "id"
+          }
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "pm_1UHaqZHIBYZYyePrUVQSubct",
+        "object": "payment_method",
+        "allow_redisplay": "unspecified",
+        "billing_details": {
+          "address": {
+            "city": null,
+            "country": null,
+            "line1": null,
+            "line2": null,
+            "postal_code": null,
+            "state": null
+          },
+          "email": null,
+          "name": null,
+          "phone": null,
+          "tax_id": null
+        },
+        "card": {
+          "brand": "visa",
+          "checks": {
+            "address_line1_check": null,
+            "address_postal_code_check": null,
+            "cvc_check": "pass"
+          },
+          "country": "US",
+          "display_brand": "visa",
+          "exp_month": 9,
+          "exp_year": 2027,
+          "fingerprint": "OiMHMa3aYsyDbc1P",
+          "funding": "credit",
+          "generated_from": null,
+          "last4": "4242",
+          "networks": {
+            "available": [
+              "visa"
+            ],
+            "preferred": null
+          },
+          "regulated_status": "unregulated",
+          "three_d_secure_usage": {
+            "supported": true
+          },
+          "wallet": null
+        },
+        "created": 1789872679,
+        "customer": "cus_VIBCazb89Rgtff",
+        "customer_account": null,
+        "livemode": false,
+        "metadata": {},
+        "shared_payment_granted_token": null,
+        "type": "card"
+      }
+    },
+    {
+      "seq": 8,
+      "method": "POST",
+      "path": "/v1/payment_methods/{payment_method}/attach",
+      "path_refs": {
+        "payment_method": {
+          "step": "visa",
+          "field": "id"
+        }
+      },
+      "params": {
+        "customer": {
+          "$ref": {
+            "step": "customer",
+            "field": "id"
+          }
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "pm_1UHaqZHIBYZYyePrUVQSubct",
+        "object": "payment_method",
+        "allow_redisplay": "unspecified",
+        "billing_details": {
+          "address": {
+            "city": null,
+            "country": null,
+            "line1": null,
+            "line2": null,
+            "postal_code": null,
+            "state": null
+          },
+          "email": null,
+          "name": null,
+          "phone": null,
+          "tax_id": null
+        },
+        "card": {
+          "brand": "visa",
+          "checks": {
+            "address_line1_check": null,
+            "address_postal_code_check": null,
+            "cvc_check": "pass"
+          },
+          "country": "US",
+          "display_brand": "visa",
+          "exp_month": 9,
+          "exp_year": 2027,
+          "fingerprint": "OiMHMa3aYsyDbc1P",
+          "funding": "credit",
+          "generated_from": null,
+          "last4": "4242",
+          "networks": {
+            "available": [
+              "visa"
+            ],
+            "preferred": null
+          },
+          "regulated_status": "unregulated",
+          "three_d_secure_usage": {
+            "supported": true
+          },
+          "wallet": null
+        },
+        "created": 1789872679,
+        "customer": "cus_VIBCazb89Rgtff",
+        "customer_account": null,
+        "livemode": false,
+        "metadata": {},
+        "shared_payment_granted_token": null,
+        "type": "card"
+      }
+    },
+    {
+      "seq": 9,
+      "method": "POST",
+      "path": "/v1/payment_methods/{payment_method}/attach",
+      "path_refs": {
+        "payment_method": {
+          "step": "declined",
+          "field": "id"
+        }
+      },
+      "params": {
+        "customer": {
+          "$ref": {
+            "step": "customer",
+            "field": "id"
+          }
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 402,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "error": {
+          "advice_code": "try_again_later",
+          "code": "card_declined",
+          "decline_code": "generic_decline",
+          "doc_url": "https://stripe.com/docs/error-codes/card-declined",
+          "message": "Your card was declined.",
+          "network_decline_code": "01",
+          "param": "",
+          "request_log_url": "<redacted:request_log_url>",
+          "type": "card_error"
+        }
+      }
+    },
+    {
+      "seq": 10,
+      "method": "GET",
+      "path": "/v1/customers/{customer}/payment_methods/{payment_method}",
+      "path_refs": {
+        "customer": {
+          "step": "customer",
+          "field": "id"
+        },
+        "payment_method": {
+          "step": "declined",
+          "field": "id"
+        }
+      },
+      "params": {},
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 404,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "error": {
+          "message": "Invalid request",
+          "param": "customer",
+          "request_log_url": "<redacted:request_log_url>",
+          "type": "invalid_request_error"
+        }
+      }
+    },
+    {
+      "seq": 11,
+      "method": "GET",
+      "path": "/v1/payment_methods",
+      "path_refs": {},
+      "params": {
+        "customer": "cus_nope"
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 400,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "error": {
+          "code": "resource_missing",
+          "doc_url": "https://stripe.com/docs/error-codes/resource-missing",
+          "message": "No such customer: 'cus_nope'",
+          "param": "customer",
+          "request_log_url": "<redacted:request_log_url>",
+          "type": "invalid_request_error"
+        }
+      }
+    },
+    {
+      "seq": 12,
+      "method": "GET",
+      "path": "/v1/customers/cus_nope/payment_methods",
+      "path_refs": {},
+      "params": {
+        "type": "card"
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 404,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "error": {
+          "code": "resource_missing",
+          "doc_url": "https://stripe.com/docs/error-codes/resource-missing",
+          "message": "No such customer: 'cus_nope'",
+          "param": "id",
+          "request_log_url": "<redacted:request_log_url>",
+          "type": "invalid_request_error"
+        }
+      }
+    },
+    {
+      "seq": 13,
+      "method": "GET",
+      "path": "/v1/payment_methods",
+      "path_refs": {},
+      "params": {
+        "customer": {
+          "$ref": {
+            "step": "customer",
+            "field": "id"
+          }
+        },
+        "type": "card",
+        "limit": 5
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "object": "list",
+        "data": [
+          {
+            "id": "pm_1UHaqZHIBYZYyePrUVQSubct",
+            "object": "payment_method",
+            "allow_redisplay": "unspecified",
+            "billing_details": {
+              "address": {
+                "city": null,
+                "country": null,
+                "line1": null,
+                "line2": null,
+                "postal_code": null,
+                "state": null
+              },
+              "email": null,
+              "name": null,
+              "phone": null,
+              "tax_id": null
+            },
+            "card": {
+              "brand": "visa",
+              "checks": {
+                "address_line1_check": null,
+                "address_postal_code_check": null,
+                "cvc_check": "pass"
+              },
+              "country": "US",
+              "display_brand": "visa",
+              "exp_month": 9,
+              "exp_year": 2027,
+              "fingerprint": "OiMHMa3aYsyDbc1P",
+              "funding": "credit",
+              "generated_from": null,
+              "last4": "4242",
+              "networks": {
+                "available": [
+                  "visa"
+                ],
+                "preferred": null
+              },
+              "regulated_status": "unregulated",
+              "three_d_secure_usage": {
+                "supported": true
+              },
+              "wallet": null
+            },
+            "created": 1789872679,
+            "customer": "cus_VIBCazb89Rgtff",
+            "customer_account": null,
+            "livemode": false,
+            "metadata": {},
+            "shared_payment_granted_token": null,
+            "type": "card"
+          }
+        ],
+        "has_more": false,
+        "url": "/v1/payment_methods"
+      }
+    },
+    {
+      "seq": 14,
+      "method": "GET",
+      "path": "/v1/payment_methods",
+      "path_refs": {},
+      "params": {
+        "limit": 3
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "object": "list",
+        "data": [],
+        "has_more": false,
+        "url": "/v1/payment_methods"
+      }
+    },
+    {
+      "seq": 15,
+      "method": "GET",
+      "path": "/v1/customers/{customer}/payment_methods",
+      "path_refs": {
+        "customer": {
+          "step": "customer",
+          "field": "id"
+        }
+      },
+      "params": {
+        "type": "card"
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "object": "list",
+        "data": [
+          {
+            "id": "pm_1UHaqZHIBYZYyePrUVQSubct",
+            "object": "payment_method",
+            "allow_redisplay": "unspecified",
+            "billing_details": {
+              "address": {
+                "city": null,
+                "country": null,
+                "line1": null,
+                "line2": null,
+                "postal_code": null,
+                "state": null
+              },
+              "email": null,
+              "name": null,
+              "phone": null,
+              "tax_id": null
+            },
+            "card": {
+              "brand": "visa",
+              "checks": {
+                "address_line1_check": null,
+                "address_postal_code_check": null,
+                "cvc_check": "pass"
+              },
+              "country": "US",
+              "display_brand": "visa",
+              "exp_month": 9,
+              "exp_year": 2027,
+              "fingerprint": "OiMHMa3aYsyDbc1P",
+              "funding": "credit",
+              "generated_from": null,
+              "last4": "4242",
+              "networks": {
+                "available": [
+                  "visa"
+                ],
+                "preferred": null
+              },
+              "regulated_status": "unregulated",
+              "three_d_secure_usage": {
+                "supported": true
+              },
+              "wallet": null
+            },
+            "created": 1789872679,
+            "customer": "cus_VIBCazb89Rgtff",
+            "customer_account": null,
+            "livemode": false,
+            "metadata": {},
+            "shared_payment_granted_token": null,
+            "type": "card"
+          }
+        ],
+        "has_more": false,
+        "url": "/v1/customers/cus_VIBCazb89Rgtff/payment_methods"
+      }
+    },
+    {
+      "seq": 16,
+      "method": "GET",
+      "path": "/v1/customers/{customer}/payment_methods/{payment_method}",
+      "path_refs": {
+        "customer": {
+          "step": "customer",
+          "field": "id"
+        },
+        "payment_method": {
+          "step": "visa",
+          "field": "id"
+        }
+      },
+      "params": {},
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "pm_1UHaqZHIBYZYyePrUVQSubct",
+        "object": "payment_method",
+        "allow_redisplay": "unspecified",
+        "billing_details": {
+          "address": {
+            "city": null,
+            "country": null,
+            "line1": null,
+            "line2": null,
+            "postal_code": null,
+            "state": null
+          },
+          "email": null,
+          "name": null,
+          "phone": null,
+          "tax_id": null
+        },
+        "card": {
+          "brand": "visa",
+          "checks": {
+            "address_line1_check": null,
+            "address_postal_code_check": null,
+            "cvc_check": "pass"
+          },
+          "country": "US",
+          "display_brand": "visa",
+          "exp_month": 9,
+          "exp_year": 2027,
+          "fingerprint": "OiMHMa3aYsyDbc1P",
+          "funding": "credit",
+          "generated_from": null,
+          "last4": "4242",
+          "networks": {
+            "available": [
+              "visa"
+            ],
+            "preferred": null
+          },
+          "regulated_status": "unregulated",
+          "three_d_secure_usage": {
+            "supported": true
+          },
+          "wallet": null
+        },
+        "created": 1789872679,
+        "customer": "cus_VIBCazb89Rgtff",
+        "customer_account": null,
+        "livemode": false,
+        "metadata": {},
+        "shared_payment_granted_token": null,
+        "type": "card"
+      }
+    },
+    {
+      "seq": 17,
+      "method": "GET",
+      "path": "/v1/payment_methods/{payment_method}",
+      "path_refs": {
+        "payment_method": {
+          "step": "visa",
+          "field": "id"
+        }
+      },
+      "params": {
+        "expand": [
+          "customer"
+        ]
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "pm_1UHaqZHIBYZYyePrUVQSubct",
+        "object": "payment_method",
+        "allow_redisplay": "unspecified",
+        "billing_details": {
+          "address": {
+            "city": null,
+            "country": null,
+            "line1": null,
+            "line2": null,
+            "postal_code": null,
+            "state": null
+          },
+          "email": null,
+          "name": null,
+          "phone": null,
+          "tax_id": null
+        },
+        "card": {
+          "brand": "visa",
+          "checks": {
+            "address_line1_check": null,
+            "address_postal_code_check": null,
+            "cvc_check": "pass"
+          },
+          "country": "US",
+          "display_brand": "visa",
+          "exp_month": 9,
+          "exp_year": 2027,
+          "fingerprint": "OiMHMa3aYsyDbc1P",
+          "funding": "credit",
+          "generated_from": null,
+          "last4": "4242",
+          "networks": {
+            "available": [
+              "visa"
+            ],
+            "preferred": null
+          },
+          "regulated_status": "unregulated",
+          "three_d_secure_usage": {
+            "supported": true
+          },
+          "wallet": null
+        },
+        "created": 1789872679,
+        "customer": {
+          "id": "cus_VIBCazb89Rgtff",
+          "object": "customer",
+          "address": null,
+          "balance": 0,
+          "created": 1789872678,
+          "currency": null,
+          "customer_account": null,
+          "default_source": null,
+          "delinquent": false,
+          "description": "scenario 06",
+          "discount": null,
+          "email": "s06-2@conformance.stripeapi.invalid",
+          "invoice_prefix": "IZLOKWS5",
+          "invoice_settings": {
+            "custom_fields": null,
+            "default_payment_method": null,
+            "footer": null,
+            "rendering_options": null
+          },
+          "livemode": false,
+          "metadata": {
+            "probe": "s06"
+          },
+          "name": "Six II",
+          "next_invoice_sequence": 1,
+          "phone": null,
+          "preferred_locales": [],
+          "shipping": null,
+          "tax_exempt": "none",
+          "test_clock": null
+        },
+        "customer_account": null,
+        "livemode": false,
+        "metadata": {},
+        "shared_payment_granted_token": null,
+        "type": "card"
+      }
+    },
+    {
+      "seq": 18,
+      "method": "POST",
+      "path": "/v1/payment_methods/{payment_method}",
+      "path_refs": {
+        "payment_method": {
+          "step": "visa",
+          "field": "id"
+        }
+      },
+      "params": {
+        "allow_redisplay": "limited",
+        "billing_details": {
+          "name": "Six II"
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "pm_1UHaqZHIBYZYyePrUVQSubct",
+        "object": "payment_method",
+        "allow_redisplay": "limited",
+        "billing_details": {
+          "address": {
+            "city": null,
+            "country": null,
+            "line1": null,
+            "line2": null,
+            "postal_code": null,
+            "state": null
+          },
+          "email": null,
+          "name": "Six II",
+          "phone": null,
+          "tax_id": null
+        },
+        "card": {
+          "brand": "visa",
+          "checks": {
+            "address_line1_check": null,
+            "address_postal_code_check": null,
+            "cvc_check": "pass"
+          },
+          "country": "US",
+          "display_brand": "visa",
+          "exp_month": 9,
+          "exp_year": 2027,
+          "fingerprint": "OiMHMa3aYsyDbc1P",
+          "funding": "credit",
+          "generated_from": null,
+          "last4": "4242",
+          "networks": {
+            "available": [
+              "visa"
+            ],
+            "preferred": null
+          },
+          "regulated_status": "unregulated",
+          "three_d_secure_usage": {
+            "supported": true
+          },
+          "wallet": null
+        },
+        "created": 1789872679,
+        "customer": "cus_VIBCazb89Rgtff",
+        "customer_account": null,
+        "livemode": false,
+        "metadata": {},
+        "shared_payment_granted_token": null,
+        "type": "card"
+      }
+    },
+    {
+      "seq": 19,
+      "method": "GET",
+      "path": "/v1/payment_methods",
+      "path_refs": {},
+      "params": {
+        "customer": {
+          "$ref": {
+            "step": "customer",
+            "field": "id"
+          }
+        },
+        "allow_redisplay": "limited"
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "object": "list",
+        "data": [
+          {
+            "id": "pm_1UHaqZHIBYZYyePrUVQSubct",
+            "object": "payment_method",
+            "allow_redisplay": "limited",
+            "billing_details": {
+              "address": {
+                "city": null,
+                "country": null,
+                "line1": null,
+                "line2": null,
+                "postal_code": null,
+                "state": null
+              },
+              "email": null,
+              "name": "Six II",
+              "phone": null,
+              "tax_id": null
+            },
+            "card": {
+              "brand": "visa",
+              "checks": {
+                "address_line1_check": null,
+                "address_postal_code_check": null,
+                "cvc_check": "pass"
+              },
+              "country": "US",
+              "display_brand": "visa",
+              "exp_month": 9,
+              "exp_year": 2027,
+              "fingerprint": "OiMHMa3aYsyDbc1P",
+              "funding": "credit",
+              "generated_from": null,
+              "last4": "4242",
+              "networks": {
+                "available": [
+                  "visa"
+                ],
+                "preferred": null
+              },
+              "regulated_status": "unregulated",
+              "three_d_secure_usage": {
+                "supported": true
+              },
+              "wallet": null
+            },
+            "created": 1789872679,
+            "customer": "cus_VIBCazb89Rgtff",
+            "customer_account": null,
+            "livemode": false,
+            "metadata": {},
+            "shared_payment_granted_token": null,
+            "type": "card"
+          }
+        ],
+        "has_more": false,
+        "url": "/v1/payment_methods"
+      }
+    },
+    {
+      "seq": 20,
+      "method": "POST",
+      "path": "/v1/payment_methods/{payment_method}/detach",
+      "path_refs": {
+        "payment_method": {
+          "step": "visa",
+          "field": "id"
+        }
+      },
+      "params": {},
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "pm_1UHaqZHIBYZYyePrUVQSubct",
+        "object": "payment_method",
+        "allow_redisplay": "limited",
+        "billing_details": {
+          "address": {
+            "city": null,
+            "country": null,
+            "line1": null,
+            "line2": null,
+            "postal_code": null,
+            "state": null
+          },
+          "email": null,
+          "name": "Six II",
+          "phone": null,
+          "tax_id": null
+        },
+        "card": {
+          "brand": "visa",
+          "checks": {
+            "address_line1_check": null,
+            "address_postal_code_check": null,
+            "cvc_check": "pass"
+          },
+          "country": "US",
+          "display_brand": "visa",
+          "exp_month": 9,
+          "exp_year": 2027,
+          "fingerprint": "OiMHMa3aYsyDbc1P",
+          "funding": "credit",
+          "generated_from": null,
+          "last4": "4242",
+          "networks": {
+            "available": [
+              "visa"
+            ],
+            "preferred": null
+          },
+          "regulated_status": "unregulated",
+          "three_d_secure_usage": {
+            "supported": true
+          },
+          "wallet": null
+        },
+        "created": 1789872679,
+        "customer": null,
+        "customer_account": null,
+        "livemode": false,
+        "metadata": {},
+        "shared_payment_granted_token": null,
+        "type": "card"
+      }
+    },
+    {
+      "seq": 21,
+      "method": "POST",
+      "path": "/v1/payment_methods/{payment_method}/detach",
+      "path_refs": {
+        "payment_method": {
+          "step": "visa",
+          "field": "id"
+        }
+      },
+      "params": {},
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 400,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "error": {
+          "message": "The payment method you provided is not attached to a customer so detachment is impossible.",
+          "request_log_url": "<redacted:request_log_url>",
+          "type": "invalid_request_error"
+        }
+      }
+    },
+    {
+      "seq": 22,
+      "method": "DELETE",
+      "path": "/v1/customers/{customer}",
+      "path_refs": {
+        "customer": {
+          "step": "customer",
+          "field": "id"
+        }
+      },
+      "params": {},
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "cus_VIBCazb89Rgtff",
+        "object": "customer",
+        "deleted": true
+      }
+    },
+    {
+      "seq": 23,
+      "method": "GET",
+      "path": "/v1/payment_methods",
+      "path_refs": {},
+      "params": {
+        "customer": {
+          "$ref": {
+            "step": "customer",
+            "field": "id"
+          }
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 400,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "error": {
+          "code": "resource_missing",
+          "doc_url": "https://stripe.com/docs/error-codes/resource-missing",
+          "message": "No such customer: 'cus_VIBCazb89Rgtff'",
+          "param": "customer",
+          "request_log_url": "<redacted:request_log_url>",
+          "type": "invalid_request_error"
+        }
+      }
+    },
+    {
+      "seq": 24,
+      "method": "POST",
+      "path": "/v1/payment_methods/{payment_method}/attach",
+      "path_refs": {
+        "payment_method": {
+          "step": "visa",
+          "field": "id"
+        }
+      },
+      "params": {
+        "customer": {
+          "$ref": {
+            "step": "customer",
+            "field": "id"
+          }
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 400,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "error": {
+          "code": "resource_missing",
+          "doc_url": "https://stripe.com/docs/error-codes/resource-missing",
+          "message": "No such customer: 'cus_VIBCazb89Rgtff'",
+          "param": "customer",
+          "request_log_url": "<redacted:request_log_url>",
+          "type": "invalid_request_error"
+        }
+      }
+    }
+  ]
+}

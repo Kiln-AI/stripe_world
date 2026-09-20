@@ -386,6 +386,27 @@ def test_every_deleted_stub_has_rules() -> None:
         assert schema_name in RULES
 
 
+def test_a_stubbed_payment_rail_passes_and_a_richer_stray_key_still_fails() -> None:
+    """The one declared stub exception (Phase 6): a `payment_method` may
+    carry `{}` under an unmodeled rail's own type name — recorded on
+    `klarna` — while the same shape on another object, or anything richer
+    than `{}` on the rail, is still an undeclared field."""
+    klarna = minimal_object("payment_method", type="klarna", klarna={})
+    assert violations_in_body(klarna, source="probe") == []
+
+    richer = minimal_object("payment_method", type="klarna", klarna={"last4": "4242"})
+    assert any(
+        "undeclared field" in violation.problem
+        for violation in violations_in_body(richer, source="probe")
+    )
+
+    on_a_customer = minimal_object("customer", klarna={})
+    assert any(
+        "undeclared field" in violation.problem
+        for violation in violations_in_body(on_a_customer, source="probe")
+    )
+
+
 # --- the hook ----------------------------------------------------------------------
 
 

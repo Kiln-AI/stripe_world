@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from stripeapi.dispatch.resource import ResourceSpec, Scope
     from stripeapi.dispatch.response import Handler
 
-from stripeapi.resources import customers
+from stripeapi.resources import customers, payment_methods
 
 __all__ = ["ALL", "Route"]
 
@@ -202,11 +202,23 @@ ALL: Final[tuple[Route, ...]] = (
         method="GET",
         pattern="/v1/customers/{customer}/payment_methods",
         op_id="GetCustomersCustomerPaymentMethods",
+        response_object="payment_method",
+        envelope="list",
+        params=payment_methods.CUSTOMER_PAYMENT_METHODS,
+        resource=payment_methods.SPEC,
+        action="list",
+        scope=payment_methods.CUSTOMER_SCOPE,
     ),
     Route(
         method="GET",
         pattern="/v1/customers/{customer}/payment_methods/{payment_method}",
         op_id="GetCustomersCustomerPaymentMethodsPaymentMethod",
+        response_object="payment_method",
+        envelope="object",
+        params=payment_methods.CUSTOMER_PAYMENT_METHOD,
+        resource=payment_methods.SPEC,
+        action="retrieve",
+        scope=payment_methods.CUSTOMER_SCOPE,
     ),
     Route(
         method="GET",
@@ -356,27 +368,63 @@ ALL: Final[tuple[Route, ...]] = (
         op_id="PostPaymentIntentsIntentVerifyMicrodeposits",
     ),
     # payment_methods
-    Route(method="GET", pattern="/v1/payment_methods", op_id="GetPaymentMethods"),
-    Route(method="POST", pattern="/v1/payment_methods", op_id="PostPaymentMethods"),
+    Route(
+        method="GET",
+        pattern="/v1/payment_methods",
+        op_id="GetPaymentMethods",
+        response_object="payment_method",
+        envelope="list",
+        params=payment_methods.PM_LIST,
+        resource=payment_methods.SPEC,
+        action="list",
+    ),
+    Route(
+        method="POST",
+        pattern="/v1/payment_methods",
+        op_id="PostPaymentMethods",
+        response_object="payment_method",
+        envelope="object",
+        params=payment_methods.PM_CREATE,
+        resource=payment_methods.SPEC,
+        action="create",
+    ),
     Route(
         method="GET",
         pattern="/v1/payment_methods/{payment_method}",
         op_id="GetPaymentMethodsPaymentMethod",
+        response_object="payment_method",
+        envelope="object",
+        params=payment_methods.PM_RETRIEVE,
+        resource=payment_methods.SPEC,
+        action="retrieve",
     ),
     Route(
         method="POST",
         pattern="/v1/payment_methods/{payment_method}",
         op_id="PostPaymentMethodsPaymentMethod",
+        response_object="payment_method",
+        envelope="object",
+        params=payment_methods.PM_UPDATE,
+        resource=payment_methods.SPEC,
+        action="update",
     ),
     Route(
         method="POST",
         pattern="/v1/payment_methods/{payment_method}/attach",
         op_id="PostPaymentMethodsPaymentMethodAttach",
+        response_object="payment_method",
+        envelope="object",
+        params=payment_methods.PM_ATTACH,
+        handler=payment_methods.attach,
     ),
     Route(
         method="POST",
         pattern="/v1/payment_methods/{payment_method}/detach",
         op_id="PostPaymentMethodsPaymentMethodDetach",
+        response_object="payment_method",
+        envelope="object",
+        params=payment_methods.PM_DETACH,
+        handler=payment_methods.detach,
     ),
     # payouts
     Route(method="GET", pattern="/v1/payouts", op_id="GetPayouts"),

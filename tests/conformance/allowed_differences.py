@@ -69,6 +69,45 @@ def _both_false(recorded: Any, replayed: Any) -> bool:
     return recorded is False and replayed is False
 
 
+def _both_cus_ids(recorded: Any, replayed: Any) -> bool:
+    """A `customer`-shaped reference field: both sides are freshly minted ids
+    of the same shape, never equal — the `**.id` rule on the field it lands
+    on."""
+    return (
+        isinstance(recorded, str)
+        and isinstance(replayed, str)
+        and recorded.startswith("cus_")
+        and replayed.startswith("cus_")
+    )
+
+
+_ID_IN_URL = re.compile(
+    r"\b(?:cus|pm|ch|pi|in|sub|si|ii|cn|re|dp|seti|txn|po|cbtxn|evt|price|prod|promo|txr|sub_sched)_[A-Za-z0-9]+\b"
+)
+
+
+def _same_url_modulo_ids(recorded: Any, replayed: Any) -> bool:
+    """A list envelope's `url` embeds the caller's path ids; strip every
+    id-shaped token and what remains must be identical."""
+    if not isinstance(recorded, str) or not isinstance(replayed, str):
+        return False
+    return _ID_IN_URL.sub("<id>", recorded) == _ID_IN_URL.sub("<id>", replayed)
+
+
+#: The one message form whose entire variable content is the id it names.
+#: Predicate-narrowed so every other error message stays byte-exact: only
+#: `No such customer: '<cus_id>'` on both sides passes. Real Stripe ids vary
+#: in length (14 here against this world's minted 24), so the form — not the
+#: length — is the test.
+_NO_SUCH_CUSTOMER = re.compile(r"^No such customer: 'cus_[A-Za-z0-9]+'$")
+
+
+def _no_such_customer_modulo_id(recorded: Any, replayed: Any) -> bool:
+    if not isinstance(recorded, str) or not isinstance(replayed, str):
+        return False
+    return bool(_NO_SUCH_CUSTOMER.fullmatch(recorded) and _NO_SUCH_CUSTOMER.fullmatch(replayed))
+
+
 ALLOWED_DIFFERENCES: list[AllowedDifference] = [
     AllowedDifference(
         "**.id",
@@ -106,6 +145,65 @@ ALLOWED_DIFFERENCES: list[AllowedDifference] = [
         "does not model a dashboard. Recorded values are already normalized "
         "to a placeholder by the redaction pass, and the field is absent on "
         "this side.",
+    ),
+    AllowedDifference(
+        "**.fingerprint",
+        "Card fingerprints are derived per recording account on real Stripe "
+        "and per content digest here (billing/magic_cards.py): same number -> "
+        "same fingerprint within each world, never equal across the divide — "
+        "the id rule in miniature, with the same stability property.",
+    ),
+    AllowedDifference(
+        "**.shared_payment_granted_token",
+        "The live API at the pinned version emits fields its own spec does "
+        "not declare (recorded on payment_method, Phase 6); this world emits "
+        "the spec's property set, which is the authority for object shape.",
+    ),
+    AllowedDifference(
+        "**.customer",
+        "Reference-valued fields carry ids minted per instance "
+        "(architecture.md §4.4): the `**.id` rule on the field name a "
+        "reference lands on. Predicate mode so a non-id divergence on any "
+        "`customer` field still fails.",
+        predicate=_both_cus_ids,
+    ),
+    AllowedDifference(
+        "**.url",
+        "A list envelope's `url` echoes the caller's path, scoped paths "
+        "included, so it embeds the same freshly minted ids. Predicate mode: "
+        "with every id-shaped token masked, recorded and replayed must be "
+        "identical.",
+        predicate=_same_url_modulo_ids,
+    ),
+    AllowedDifference(
+        "**.error.message",
+        "A `resource_missing` message names the id it could not find, and "
+        "the ids differ per instance — the `**.id` rule where the id is the "
+        "message's whole variable content. Predicate mode admits exactly the "
+        "`No such customer: '<cus_id>'` form on both sides; every other "
+        "message stays byte-exact.",
+        predicate=_no_such_customer_modulo_id,
+    ),
+    # Scenario 6's attachment refusal: the recorded decline envelope carries
+    # network chatter and a form-boundary artifact this world deliberately
+    # omits. Scoped here so the entries can never mask a regression on any
+    # other decline.
+    AllowedDifference(
+        "body.error.param",
+        "The recorded envelope answers param as an empty string (a form-"
+        "encoding artifact); this world omits a param it has no value for.",
+        scenario="06_customers_payment_methods",
+    ),
+    AllowedDifference(
+        "body.error.advice_code",
+        "Real Stripe decorates the decline with advice_code try_again_later; "
+        "no advice model exists here to source one from.",
+        scenario="06_customers_payment_methods",
+    ),
+    AllowedDifference(
+        "body.error.network_decline_code",
+        "Issuer network decline codes are network state this world does not model.",
+        scenario="06_customers_payment_methods",
     ),
     # Scenario 3 exists to record what a malformed Stripe-Version answers.
     # The world deliberately serves one fixed version with no header channel
@@ -172,6 +270,25 @@ STRUCTURAL_DIFFERENCES: list[str] = [
     "'closed', which was never a real invoice.status value. The docs win "
     "(functional spec §7); observable when the invoices phase's cassettes "
     "land, declared here now.",
+    "Raw card numbers are accepted here and refused on the recording "
+    "account: newer Stripe accounts block raw PANs by default ('Sending "
+    "credit card numbers directly to the Stripe API is generally unsafe', "
+    "recorded Phase 6), while the magic-card table is this world's spec'd "
+    "failure-injection mechanism and needs the raw path. Cassettes create "
+    "cards through tok_* tokens; unit tests exercise the numbers.",
+    "The 54 payment rails the pruner drops are creatable and answered as "
+    "`{}` under their own type key (recorded on klarna), exactly as "
+    "components/data_model.md §3.9 stubs them; the pruned spec cannot "
+    "declare those properties, so the schema-conformance validator carries "
+    "the one declared stub exception (tests/schema_conformance/validate.py).",
+    "A customer created or updated with a nonzero balance is stamped with "
+    "the account default currency — the recording account's is 'cad', this "
+    "world's single static account defaults to 'usd' until an account "
+    "object exists (Phase 21). Probed both ways: balance=0 leaves currency "
+    "null, and `currency` is not itself a settable parameter.",
+    "Token card expiries are frozen at the recorded (9, 2027): real Stripe "
+    "rolls a token's default expiry forward with wall time, and a frozen "
+    "clock cannot follow (billing/magic_cards.py::TOKEN_EXPIRY).",
 ]
 
 # --- Matching --------------------------------------------------------------------

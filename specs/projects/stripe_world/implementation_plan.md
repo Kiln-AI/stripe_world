@@ -56,7 +56,7 @@ Grouped rather than strictly per-table: a charge with no payment intent, or an i
 invoice, cannot be exercised end to end, and a phase that ships untestable code defeats the recipe.
 Each still touches only its own tables.
 
-- [ ] **Phase 6: Customers and payment methods.** `customers`, `payment_methods`. The first real
+- [x] **Phase 6: Customers and payment methods.** `customers`, `payment_methods`. The first real
       slice; establishes the pattern every later one copies. Includes magic-card behavior on
       payment-method creation.
 - [ ] **Phase 7: Catalog.** `products`, `prices`, `coupons`, `promotion_codes`, `tax_rates`. Mostly

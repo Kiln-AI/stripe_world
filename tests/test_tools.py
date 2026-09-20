@@ -76,9 +76,10 @@ def seahaven_world_tool_description(name: str) -> str:
 
 
 def test_the_wired_surface_is_small_and_named() -> None:
-    """What Phase 3 serves end to end: the five core customers routes. The
-    other 143 are routed data awaiting their resource phases, and calling one
-    is an honest `INTERNAL` naming the op (see `test_dispatch.py`)."""
+    """What is served end to end: the customers phase's thirteen routes (five
+    core customers, six payment_methods, two customer-scoped payment-method
+    reads). The rest are routed data awaiting their resource phases, and
+    calling one is an honest `INTERNAL` naming the op (see `test_dispatch.py`)."""
     wired = [route.op_id for route in _all_routes() if route.params is not None]
     assert wired == [
         "GetCustomers",
@@ -86,6 +87,14 @@ def test_the_wired_surface_is_small_and_named() -> None:
         "GetCustomersCustomer",
         "PostCustomersCustomer",
         "DeleteCustomersCustomer",
+        "GetCustomersCustomerPaymentMethods",
+        "GetCustomersCustomerPaymentMethodsPaymentMethod",
+        "GetPaymentMethods",
+        "PostPaymentMethods",
+        "GetPaymentMethodsPaymentMethod",
+        "PostPaymentMethodsPaymentMethod",
+        "PostPaymentMethodsPaymentMethodAttach",
+        "PostPaymentMethodsPaymentMethodDetach",
     ]
 
 

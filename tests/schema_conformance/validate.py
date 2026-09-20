@@ -64,6 +64,24 @@ NULLABLE_DESPITE_SPEC: frozenset[tuple[str, str]] = frozenset(
 )
 
 
+def _rail_stub_ok(owner: str | None, key: str, value: Any) -> bool:
+    """A stubbed payment rail, emitted as `{}` under its own type name.
+
+    The pruner drops the 54 rail properties `KEEP_RAILS` does not name, by
+    design (components/data_model.md §3.9); the live API still creates and
+    returns those rails, recorded this phase on `type=klarna`
+    (`"klarna": {}`, cassette 06 steps 5 and 6: create and retrieve). The
+    exception is exactly that shape — a
+    `payment_method` key that is a member of the `type` enum and equals `{}`
+    — so anything richer on an unmodeled rail still fails, and a stray key on
+    any other object still fails.
+    """
+    if owner != "payment_method":
+        return False
+    enum = RULES["payment_method"]["props"]["type"]["enum"]
+    return key in enum and value == {}
+
+
 @dataclass(frozen=True)
 class SchemaViolation:
     """One way an object failed its schema, at a path from the body root.
@@ -262,7 +280,7 @@ def _check_fields(
         elif open_map:
             if rule["map"] is not None:
                 _check(value, rule["map"], where, owner, out)
-        else:
+        elif not _rail_stub_ok(owner, key, value):
             out.append(
                 SchemaViolation(
                     "", where, f"undeclared field {key!r}: the spec's property set is closed"

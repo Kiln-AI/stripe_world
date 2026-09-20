@@ -224,13 +224,23 @@ def _check_string(param: Param, value: object, path: str) -> str | None:
     return value
 
 
-def _check(param: Param, value: object, path: str) -> Any:
+def _check(
+    param: Param,
+    value: object,
+    path: str,
+    id_status: int = 400,
+) -> Any:
     """Validate one value depth-first; returns the coerced, engine-ready value.
 
     Coerced shapes: booleans stay `bool` (the engine stores 0/1), objects and
     arrays stay `dict`/`list` (the engine dumps them), timestamps and range
     bounds become canonical ISO text — the conversion is on the parameter, so
     the SQL stays a text comparison (`components/dispatcher.md` §3.5.1).
+
+    `id_status` is the status an unresolvable id refuses at: **400 for a
+    request parameter** and 404 for a path one, both probed at the pinned
+    version (`POST …/attach {customer: "cus_nope"}` answers 400
+    `resource_missing`; `GET /v1/payment_methods/pm_nope` answers 404).
     """
     kind = param.kind
     if kind == "string":
@@ -266,7 +276,7 @@ def _check(param: Param, value: object, path: str) -> Any:
             raise seahaven.WorldBug(f"id parameter {path!r} cannot be cleared with an empty string")
         if param.id_prefixes and not text.startswith(param.id_prefixes):
             raise resource_missing(
-                _object_name_for(param.id_prefixes, param.name), text, param=path
+                _object_name_for(param.id_prefixes, param.name), text, param=path, status=id_status
             )
         return text
     if kind == "timestamp":
@@ -282,7 +292,10 @@ def _check(param: Param, value: object, path: str) -> Any:
             raise _invalid("array", path, f"Invalid array: {value!r}")
         if param.item is None:
             raise seahaven.WorldBug(f"array parameter {path!r} declares no item param")
-        return [_check(param.item, item, f"{path}[{index}]") for index, item in enumerate(value)]
+        return [
+            _check(param.item, item, f"{path}[{index}]", id_status)
+            for index, item in enumerate(value)
+        ]
     raise seahaven.WorldBug(f"unknown parameter kind {kind!r} on {path!r}")
 
 
@@ -311,7 +324,7 @@ def _check_range(param: Param, value: object, path: str) -> dict[str, str]:
     return bounds
 
 
-def _check_object(param: Param, value: object, path: str) -> dict[str, Any]:
+def _check_object(param: Param, value: object, path: str, id_status: int = 400) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise _invalid("string", path, f"Invalid {param.name}: must be an object")
     by_name = {shape.name: shape for shape in param.shape}
@@ -323,7 +336,9 @@ def _check_object(param: Param, value: object, path: str) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for shape in param.shape:
         if shape.name in value:
-            out[shape.name] = _check(shape, value[shape.name], _bracket(path, shape.name))
+            out[shape.name] = _check(
+                shape, value[shape.name], _bracket(path, shape.name), id_status
+            )
         elif shape.required:
             raise missing_parameter(_bracket(path, shape.name))
     return out
@@ -376,16 +391,24 @@ _list_filter_cache: dict[str, tuple[Param, ...]] = {}
 def _list_filter_params(resource: ResourceSpec) -> tuple[Param, ...]:
     cached = _list_filter_cache.get(resource.object)
     if cached is None:
-        cached = tuple(
-            Param(
-                name=flt.name,
-                kind=_LIST_FILTER_KIND[flt.kind],
-                choices=flt.choices,
-                id_prefixes=flt.id_prefixes,
-                required=flt.required,
+        params = []
+        for flt in resource.list_filters:
+            # An exact filter with id prefixes is an id parameter: the prefix
+            # is checked here (at 400 — query side), while *existence* is the
+            # engine's `references` lookup, which bind never does.
+            kind = _LIST_FILTER_KIND[flt.kind]
+            if kind == "string" and flt.id_prefixes:
+                kind = "id"
+            params.append(
+                Param(
+                    name=flt.name,
+                    kind=kind,
+                    choices=flt.choices,
+                    id_prefixes=flt.id_prefixes,
+                    required=flt.required,
+                )
             )
-            for flt in resource.list_filters
-        )
+        cached = tuple(params)
         _list_filter_cache[resource.object] = cached
     return cached
 
@@ -463,7 +486,9 @@ def bind(
             and route.resource.missing_path_param is not None
         ):
             error_name = route.resource.missing_path_param
-        path_params[name] = _check(param, value, error_name)
+        # A path id refuses at 404; a request-parameter one at 400 (probed
+        # both ways — see `_check`).
+        path_params[name] = _check(param, value, error_name, id_status=404)
 
     # 2. Lift the five. A lifted parameter the operation does not accept is
     #    `parameter_unknown`, the same as any other.

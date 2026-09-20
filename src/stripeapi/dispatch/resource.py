@@ -68,6 +68,17 @@ class ListFilter:
     choices: tuple[str, ...] = ()
     id_prefixes: tuple[str, ...] = ()
     required: bool = False  # `subscription` on GET /v1/subscription_items
+    # True when the live API answers an empty page rather than an error when
+    # this filter is absent — the parameter is de facto required but not de
+    # jure (probed at the pinned version: `GET /v1/payment_methods` without
+    # `customer` returns nothing, with it the customer's attached methods).
+    empty_without: bool = False
+    # The object name this filter's value must name. When set, the engine
+    # looks the row up before querying and refuses at 400 `resource_missing`
+    # — probed: `GET /v1/payment_methods?customer=<unknown-or-deleted>`
+    # answers "No such customer", query-side, unlike a path id's 404. Bind
+    # checks only the prefix; existence is a table read, and bind reads none.
+    references: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,12 +96,17 @@ class Scope:
 
     The parent is looked up first, so a bad `{charge}` is Stripe's
     `resource_missing` rather than an empty page or a `DbError` from a foreign
-    key (`architecture.md` §7).
+    key (`architecture.md` §7). `missing_param` overrides the `param` that
+    lookup names — live Stripe is per-resource inconsistent here too (probed
+    at the pinned version: `/v1/customers/{customer}/balance_transactions`
+    with a bad customer names `customer`, while
+    `/v1/customers/{customer}/payment_methods` names `id`).
     """
 
     path_param: str  # "charge"
     column: str  # "charge_id" on the child table
     parent: ResourceSpec  # looked up before the child query runs
+    missing_param: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,6 +125,11 @@ class ResourceSpec:
     # nested sub-resource paths always keep it), so each slice pins its own
     # spelling from its recordings. None means the placeholder.
     missing_path_param: str | None = None
+    # The name Stripe's own error messages call this resource — its spelling
+    # is not the discriminator's (probed: `No such PaymentMethod: 'pm_…'`
+    # against `object: "payment_method"`; customers are merely lucky that
+    # "customer" is both). None means the discriminator.
+    error_name: str | None = None
     list_filters: tuple[ListFilter, ...] = ()
     creatable: ParamSpec | None = None
     updatable: ParamSpec | None = None
@@ -331,6 +352,11 @@ def _missing_param(spec: ResourceSpec, path_param: str) -> str:
     return spec.missing_path_param if spec.missing_path_param is not None else path_param
 
 
+def _display_name(spec: ResourceSpec) -> str:
+    """The resource's name in Stripe's own messages (`error_name`)."""
+    return spec.error_name if spec.error_name is not None else spec.object
+
+
 def _scope_clause(ctx: seahaven.Ctx, req: Request) -> tuple[str, Any] | None:
     """The parent of a scoped route, looked up before any child query runs."""
     scope = req.route.scope
@@ -338,9 +364,34 @@ def _scope_clause(ctx: seahaven.Ctx, req: Request) -> tuple[str, Any] | None:
         return None
     parent_id = req.path_params[scope.path_param]
     _lookup.require_row(
-        ctx, scope.parent.table, scope.parent.object, parent_id, param=scope.path_param
+        ctx,
+        scope.parent.table,
+        scope.parent.object,
+        parent_id,
+        param=scope.missing_param if scope.missing_param is not None else scope.path_param,
     )
     return scope.column, parent_id
+
+
+def _require_filter_reference(ctx: seahaven.Ctx, flt: ListFilter, value: str) -> None:
+    """A filter value that names another resource must name a live one.
+
+    The 400 and the soft-delete refusal are both probed at the pinned version
+    on the payment-methods customer filter; a tombstoned customer is as
+    missing as an absent one, unlike a path id where the deleted row still
+    resolves (probed, cassette 06 step 23 — and step 24 for the same rule on
+    attach's customer parameter; the path-id contrast is
+    `components/cross_cutting.md` §3.2.4).
+    """
+    parent = BY_OBJECT.get(flt.references)
+    if parent is None:
+        raise seahaven.WorldBug(
+            f"list filter {flt.name!r} references unknown object {flt.references!r}"
+        )
+    row = ctx.db.one(f"SELECT * FROM {parent.table} WHERE id = ?", value)
+    soft = parent.delete is not None and parent.delete.mode == "soft"
+    if row is None or (soft and row["deleted"] == 1):
+        raise resource_missing(_display_name(parent), value, param=flt.name, status=400)
 
 
 def list_(ctx: seahaven.Ctx, req: Request) -> dict[str, Any]:
@@ -360,8 +411,17 @@ def list_(ctx: seahaven.Ctx, req: Request) -> dict[str, Any]:
                 # `body_of`, so the unreachable fallback at least carries the
                 # same code and message.
                 raise missing_parameter(flt.name)
+            if flt.empty_without and req.route.scope is None:
+                # Not an error: the de facto required filter is simply absent,
+                # and the live API answers an empty page (see ListFilter). A
+                # scoped route never lands here — its parent pins the column.
+                # A cursor still resolves first — `page()` reads the table
+                # before these clauses ever run.
+                where.append("1 = 0")
             continue
         value = req.params[flt.name]
+        if flt.references is not None:
+            _require_filter_reference(ctx, flt, value)
         if flt.kind == "range":
             for op, bound in value.items():
                 where.append(f"{flt.column} {_RANGE_SQL[op]} ?")
@@ -376,7 +436,7 @@ def list_(ctx: seahaven.Ctx, req: Request) -> dict[str, Any]:
     one_page = page(
         ctx,
         table=spec.table,
-        object_name=spec.object,
+        object_name=_display_name(spec),
         where=where,
         params=binds,
         limit=req.page.limit,
@@ -398,9 +458,20 @@ def retrieve(ctx: seahaven.Ctx, req: Request) -> dict[str, Any]:
             f"SELECT * FROM {spec.table} WHERE id = ? AND {column} = ?", id_, parent_id
         )
         if row is None:
-            raise resource_missing(spec.object, id_, param=error_param)
+            if ctx.db.one(f"SELECT id FROM {spec.table} WHERE id = ?", id_) is None:
+                raise resource_missing(_display_name(spec), id_, param=error_param)
+            # The row exists but is not this parent's: probed at the pinned
+            # version (GET /v1/customers/{c}/payment_methods/{pm} of another
+            # customer's pm, attached or not) — a 404 carrying type, message
+            # and `param: <scope placeholder>` only, no `code`. Note the
+            # spelling split within one path: the *missing parent* names
+            # `Scope.missing_param` ("id" here), the mismatch names the
+            # placeholder itself ("customer") — both probed.
+            scope = req.route.scope
+            assert scope is not None  # only a scoped retrieve reaches here
+            raise invalid_request("Invalid request", param=scope.path_param, status=404)
     else:
-        row = _lookup.require_row(ctx, spec.table, spec.object, id_, param=error_param)
+        row = _lookup.require_row(ctx, spec.table, _display_name(spec), id_, param=error_param)
     if spec.delete is not None and spec.delete.mode == "soft" and row.get("deleted") == 1:
         return fields.deleted_stub(spec.object, id_)
     return spec.serializer(ctx, row)
@@ -436,7 +507,7 @@ def create(ctx: seahaven.Ctx, req: Request) -> dict[str, Any]:
     columns = ", ".join(cols)
     placeholders = ", ".join("?" for _ in cols)
     ctx.db.execute(f"INSERT INTO {spec.table} ({columns}) VALUES ({placeholders})", *cols.values())
-    row = _lookup.require_row(ctx, spec.table, spec.object, cols["id"], param="id")
+    row = _lookup.require_row(ctx, spec.table, _display_name(spec), cols["id"], param="id")
     body = spec.serializer(ctx, row)
     if spec.created_event is not None:
         events.emit_event(ctx, type=spec.created_event, obj=body)
@@ -448,7 +519,7 @@ def update(ctx: seahaven.Ctx, req: Request) -> dict[str, Any]:
     spec = _spec_of(req)
     path_param, id_ = _path_id(req)
     error_param = _missing_param(spec, path_param)
-    row = _lookup.require_row(ctx, spec.table, spec.object, id_, param=error_param)
+    row = _lookup.require_row(ctx, spec.table, _display_name(spec), id_, param=error_param)
     old = spec.serializer(ctx, row)
     sets: dict[str, Any] = {column: _store(value) for column, value in req.params.items()}
     if req.metadata is not None:
@@ -459,7 +530,7 @@ def update(ctx: seahaven.Ctx, req: Request) -> dict[str, Any]:
     if sets:
         assignments = ", ".join(f"{column} = ?" for column in sets)
         ctx.db.execute(f"UPDATE {spec.table} SET {assignments} WHERE id = ?", *sets.values(), id_)
-    fresh = _lookup.require_row(ctx, spec.table, spec.object, id_, param=error_param)
+    fresh = _lookup.require_row(ctx, spec.table, _display_name(spec), id_, param=error_param)
     new = spec.serializer(ctx, fresh)
     if spec.updated_event is not None:
         previous = {key: value for key, value in old.items() if new.get(key) != value}
@@ -479,7 +550,7 @@ def delete(ctx: seahaven.Ctx, req: Request) -> dict[str, Any]:
         raise seahaven.WorldBug(f"route {req.route.op_id} is generated-delete with no DeleteSpec")
     path_param, id_ = _path_id(req)
     error_param = _missing_param(spec, path_param)
-    row = _lookup.require_row(ctx, spec.table, spec.object, id_, param=error_param)
+    row = _lookup.require_row(ctx, spec.table, _display_name(spec), id_, param=error_param)
     if (
         delete_spec.requires_status
         and row.get(delete_spec.status_column) not in delete_spec.requires_status
@@ -490,12 +561,23 @@ def delete(ctx: seahaven.Ctx, req: Request) -> dict[str, Any]:
         raise invalid_request(
             f"This {spec.object} cannot be deleted in its current state.", param=path_param
         )
-    if spec.deleted_event is not None:
-        events.emit_event(ctx, type=spec.deleted_event, obj=spec.serializer(ctx, row))
+    # The event is emitted AFTER the write, like create and update, per the
+    # cross-cutting rule "after every row for that change is written"
+    # (`components/cross_cutting.md` §3.4.2). This is the deliberately settled
+    # Phase 3 carry-over: the snapshot is the serializer's view of the row, and
+    # for a soft delete that view is identical before and after the tombstone
+    # because `deleted` is not a serialized field — recorded against real test
+    # mode at the pinned version, `customer.deleted`'s `data.object` is the
+    # FULL pre-delete object with NO `deleted` key, never the three-key stub
+    # and never `deleted: true` (cassette `probe_customer_payment_method_
+    # events`, step for `type=customer.deleted`). Emission order is therefore
+    # unobservable through the snapshot and is fixed by the rule instead.
     if delete_spec.mode == "soft":
         ctx.db.execute(f"UPDATE {spec.table} SET deleted = 1 WHERE id = ?", id_)
     else:
         ctx.db.execute(f"DELETE FROM {spec.table} WHERE id = ?", id_)
+    if spec.deleted_event is not None:
+        events.emit_event(ctx, type=spec.deleted_event, obj=spec.serializer(ctx, row))
     return fields.deleted_stub(spec.object, id_)
 
 

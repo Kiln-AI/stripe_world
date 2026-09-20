@@ -10,6 +10,28 @@ from stripeapi.dispatch.response import ApiResponse
 pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
 
 
+@pytest.fixture(autouse=True, scope="module")
+def _clean_by_object():
+    """Undo this module's probe-resource registrations.
+
+    `_probe_routes()` / `_note_spec()` register into the module-global
+    `BY_OBJECT` with no teardown, and a leaked `note` changes another suite's
+    verdict: the schema-conformance walker treats a registered-but-unspecced
+    discriminator as scaffolding to skip, so its "an unregistered type is
+    flagged" assertion fails once this module has run first. Module scope,
+    deliberately: a per-test teardown would run before the schema-conformance
+    hook's teardown validation and un-register `note` under it mid-check.
+    Every test here (re-)registers what it needs, so holding the snapshot
+    across the module is safe.
+    """
+    from stripeapi.dispatch import resource
+
+    before = set(resource.BY_OBJECT)
+    yield
+    for added in set(resource.BY_OBJECT) - before:
+        resource.BY_OBJECT.pop(added)
+
+
 def create(instance: seahaven.Instance, **params: object) -> dict:
     result = instance.call("stripe_api_write", method="POST", path="/v1/customers", params=params)
     assert result["status"] == 200, result
@@ -181,6 +203,93 @@ def test_event_request_id_is_minted_per_call(instance: seahaven.Instance) -> Non
     assert rows[0]["request_id"] != rows[1]["request_id"]
 
 
+def test_delete_emits_after_the_write_and_the_snapshot_has_no_deleted_key(
+    instance: seahaven.Instance,
+) -> None:
+    """The Phase 3 carry-over, settled by recording (cassette
+    `probe_customer_payment_method_events`): `customer.deleted`'s
+    `data.object` is the full pre-delete object with no `deleted` key, and
+    emission follows the write like every other action — observable here as
+    the event ordering within the call: a delete that followed a create and
+    an update lists third, after both."""
+    import json
+
+    created = create(instance, name="gone soon")
+    cus = created["id"]
+    instance.call(
+        "stripe_api_write", method="POST", path=f"/v1/customers/{cus}", params={"name": "gone"}
+    )
+    instance.call("stripe_api_write", method="DELETE", path=f"/v1/customers/{cus}")
+
+    rows = instance.inspect().rows("SELECT type, data FROM events ORDER BY x_seq")
+    assert [row["type"] for row in rows] == [
+        "customer.created",
+        "customer.updated",
+        "customer.deleted",
+    ]
+    obj = json.loads(rows[2]["data"])["object"]
+    assert "deleted" not in obj
+    assert obj["name"] == "gone"
+
+
+def test_an_empty_without_filter_yields_an_empty_page_not_an_error(probe, monkeypatch) -> None:
+    """`ListFilter.empty_without` (this phase's one list-semantics knob):
+    without the filter the page is empty — probed on
+    `GET /v1/payment_methods` — while cursors still resolve and a scoped
+    route never sees the clause."""
+    from conftest import BLANK_NOW as NOW
+    from stripeapi.dispatch import routes as routes_module
+    from stripeapi.dispatch.params import ParamSpec
+    from stripeapi.dispatch.router import Router
+    from stripeapi.dispatch.routes import Route
+
+    routes = (
+        Route(
+            method="GET",
+            pattern="/v1/probe_notes",
+            op_id="GetProbeNotes",
+            params=ParamSpec(op_id="GetProbeNotes", paginated=True),
+            resource=_note_spec(),
+            action="list",
+            response_object="note",
+            envelope="list",
+        ),
+        *_probe_routes(),
+    )
+    monkeypatch.setattr("stripeapi.dispatch.router.ROUTER", Router((*routes_module.ALL, *routes)))
+    world = probe(dispatch_tool(), schema=SCOPED_SCHEMA)
+    with world.instance(None, now=NOW) as instance:
+        cus = instance.call("call_stripe", method="POST", path="/v1/customers")["body"]["id"]
+        with instance.bulk() as ctx:
+            ctx.db.execute(
+                "INSERT INTO probe_notes (id, x_seq, created, body, customer)"
+                " VALUES ('note_a', 1, ?, 'a', ?)",
+                NOW,
+                cus,
+            )
+
+        empty = instance.call("call_stripe", method="GET", path="/v1/probe_notes")
+        assert empty["status"] == 200
+        assert empty["body"]["data"] == []
+
+        # A bogus cursor still 400s on the empty page: resolution precedes
+        # the clauses, exactly as on a populated one.
+        bogus = instance.call(
+            "call_stripe", method="GET", path="/v1/probe_notes", params={"starting_after": "note_z"}
+        )
+        assert bogus["status"] == 400
+
+        filtered = instance.call(
+            "call_stripe", method="GET", path="/v1/probe_notes", params={"customer": cus}
+        )
+        assert [item["id"] for item in filtered["body"]["data"]] == ["note_a"]
+
+        # A scoped route carrying the same filter serves its parent's rows:
+        # the scope pins the column, so `empty_without` must not fire.
+        scoped = instance.call("call_stripe", method="GET", path=f"/v1/customers/{cus}/probe_notes")
+        assert [item["id"] for item in scoped["body"]["data"]] == ["note_a"]
+
+
 # --- A scoped child list and hand-written handler semantics, on a probe world ---
 
 
@@ -225,7 +334,7 @@ _NOTE_SPEC = {}
 
 
 def _note_spec():
-    from stripeapi.dispatch.resource import ResourceSpec, register
+    from stripeapi.dispatch.resource import ListFilter, ResourceSpec, register
     from stripeapi.serialize.fields import FieldMap, serializer_for
 
     if not _NOTE_SPEC:
@@ -244,6 +353,13 @@ def _note_spec():
                     )
                 ),
                 columns=("id", "created", "body", "customer"),
+                list_filters=(
+                    # `empty_without` is what the new test exercises; the
+                    # scoped test above must keep working despite it.
+                    ListFilter(
+                        name="customer", column="customer", kind="exact", empty_without=True
+                    ),
+                ),
                 creatable=None,
                 updatable=None,
                 delete=None,
