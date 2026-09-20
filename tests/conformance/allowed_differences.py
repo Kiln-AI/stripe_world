@@ -198,6 +198,163 @@ def _both_minted_coupon_ids(recorded: Any, replayed: Any) -> bool:
     )
 
 
+#: The decline envelope's message-with-key: the idempotency-mismatch text
+#: names the caller's key, which differs per recording run by design (see
+#: s04's module docstring). Form-only comparison on both sides.
+_IDEMPOTENCY_MISMATCH = re.compile(
+    r"^Keys for idempotent requests can only be used with the same parameters "
+    r"they were first used with\. Try using a key other than 's04-idem-[0-9a-f]+' "
+    r"if you meant to execute a different request\.$"
+)
+
+
+def _idempotency_mismatch_modulo_key(recorded: Any, replayed: Any) -> bool:
+    if not isinstance(recorded, str) or not isinstance(replayed, str):
+        return False
+    return bool(
+        _IDEMPOTENCY_MISMATCH.fullmatch(recorded) and _IDEMPOTENCY_MISMATCH.fullmatch(replayed)
+    )
+
+
+#: A client secret embeds its intent's minted id plus a random suffix.
+_CLIENT_SECRET = re.compile(r"^pi_[A-Za-z0-9]+_secret_[A-Za-z0-9]+$")
+
+
+def _both_client_secrets(recorded: Any, replayed: Any) -> bool:
+    return (
+        isinstance(recorded, str)
+        and isinstance(replayed, str)
+        and bool(_CLIENT_SECRET.fullmatch(recorded) and _CLIENT_SECRET.fullmatch(replayed))
+    )
+
+
+def _recorded_placeholder_or_same(recorded: Any, replayed: Any) -> bool:
+    """The recorded value was normalized to a redaction placeholder (or the
+    two sides agree); the replayed value is this world's own derivation."""
+    return recorded in ("<redacted:receipt_url>", replayed)
+
+
+#: The confirm-missing-method message names the customer id — the same
+#: id-only rule (probed Phase 8).
+_CONFIRM_MISSING = re.compile(
+    r"^You cannot confirm this PaymentIntent because it's missing a payment method\. "
+    r"To confirm the PaymentIntent with cus_[A-Za-z0-9]+, specify a payment method "
+    r"attached to this customer along with the customer ID\.$"
+)
+
+
+def _confirm_missing_modulo_customer(recorded: Any, replayed: Any) -> bool:
+    if not isinstance(recorded, str) or not isinstance(replayed, str):
+        return False
+    return bool(_CONFIRM_MISSING.fullmatch(recorded) and _CONFIRM_MISSING.fullmatch(replayed))
+
+
+#: The two charge-capture refusal messages name the object id — the id rule
+#: where the id is the message's whole variable content (both probed, Phase 8).
+_CHARGE_CAPTURE_REFUSED = re.compile(
+    r"^(?:Charge ch_[A-Za-z0-9]+ has already been captured\."
+    r"|This uncaptured Charge was created by a PaymentIntent \(pi_[A-Za-z0-9]+\)\. "
+    r"You must capture the PaymentIntent instead\. For more information, see "
+    r"https://stripe\.com/docs/payments/place-a-hold-on-a-payment-method)$"
+)
+
+
+def _charge_capture_message_modulo_id(recorded: Any, replayed: Any) -> bool:
+    if not isinstance(recorded, str) or not isinstance(replayed, str):
+        return False
+    return bool(
+        _CHARGE_CAPTURE_REFUSED.fullmatch(recorded) and _CHARGE_CAPTURE_REFUSED.fullmatch(replayed)
+    )
+
+
+#: The ownership refusal a customerless intent's confirm with a customer's
+#: method answers (probed CR round 1): both ids are per-run mints.
+_PM_BELONGS_TO = re.compile(
+    r"^The `payment_method` parameter supplied pm_[A-Za-z0-9]+ belongs to the "
+    r"Customer cus_[A-Za-z0-9]+\. Please include the Customer in the `customer` "
+    r"parameter on the PaymentIntent\.$"
+)
+
+
+def _pm_belongs_to_modulo_ids(recorded: Any, replayed: Any) -> bool:
+    if not isinstance(recorded, str) or not isinstance(replayed, str):
+        return False
+    return bool(_PM_BELONGS_TO.fullmatch(recorded) and _PM_BELONGS_TO.fullmatch(replayed))
+
+
+#: The wrong-customer confirm refusal (recorded, cassette 04, CR round 2):
+#: same id-only rule, its sibling spelling.
+_PM_NOT_BELONG = re.compile(
+    r"^The PaymentMethod pm_[A-Za-z0-9]+ does not belong to the Customer you "
+    r"supplied cus_[A-Za-z0-9]+\. Please use this PaymentMethod with the "
+    r"Customer that it belongs to instead\.$"
+)
+
+
+def _pm_not_belong_modulo_ids(recorded: Any, replayed: Any) -> bool:
+    if not isinstance(recorded, str) or not isinstance(replayed, str):
+        return False
+    return bool(_PM_NOT_BELONG.fullmatch(recorded) and _PM_NOT_BELONG.fullmatch(replayed))
+
+
+#: The recorded transfer_group refusal on a PI-created charge (cassette 04,
+#: CR round 2) versus this world's scope-cut answer — real Stripe names the
+#: PaymentIntent and directs the update there; this world has cut the
+#: parameter (data_model §7's constant-null ruling) and answers
+#: `parameter_unknown`. Four entries, one per envelope field that differs.
+_TRANSFER_GROUP_RECORDED = re.compile(
+    r"^This Charge was created by a PaymentIntent \(pi_[A-Za-z0-9]+\)\. You must "
+    r"update the `transfer_group` on the PaymentIntent instead of updating the "
+    r"Charge directly\. See https://stripe\.com/docs/api#update_payment_intent$"
+)
+
+
+def _transfer_group_message(recorded: Any, replayed: Any) -> bool:
+    return (
+        isinstance(recorded, str)
+        and isinstance(replayed, str)
+        and (
+            bool(_TRANSFER_GROUP_RECORDED.fullmatch(recorded))
+            and replayed == "Received unknown parameter: transfer_group"
+        )
+    )
+
+
+def _transfer_group_code(recorded: Any, replayed: Any) -> bool:
+    return recorded is None and replayed == "parameter_unknown"
+
+
+def _transfer_group_param(recorded: Any, replayed: Any) -> bool:
+    return recorded is None and replayed == "transfer_group"
+
+
+def _transfer_group_doc_url(recorded: Any, replayed: Any) -> bool:
+    return recorded is None and isinstance(replayed, str)
+
+
+#: Card-issuer geography of the test cards varies by recording account region
+#: (probed Phase 8: the decline and 3DS tokens answered `IE` where the table's
+#: US issuers answered `US`); a two-letter country either way is the form.
+_COUNTRY = re.compile(r"^[A-Z]{2}$")
+
+
+def _both_country_codes(recorded: Any, replayed: Any) -> bool:
+    return (
+        isinstance(recorded, str)
+        and isinstance(replayed, str)
+        and bool(_COUNTRY.fullmatch(recorded) and _COUNTRY.fullmatch(replayed))
+    )
+
+
+def _both_pm_ids(recorded: Any, replayed: Any) -> bool:
+    return (
+        isinstance(recorded, str)
+        and isinstance(replayed, str)
+        and recorded.startswith("pm_")
+        and replayed.startswith("pm_")
+    )
+
+
 ALLOWED_DIFFERENCES: list[AllowedDifference] = [
     AllowedDifference(
         "**.id",
@@ -394,6 +551,298 @@ ALLOWED_DIFFERENCES: list[AllowedDifference] = [
         "body.error.network_decline_code",
         "Issuer network decline codes are network state this world does not model.",
         scenario="06_customers_payment_methods",
+    ),
+    # --- the money path's reference-valued fields and secrets (Phase 8) ---
+    AllowedDifference(
+        "**.client_secret",
+        "A client secret embeds its intent's minted id and a per-creation "
+        "random suffix — the id rule twice over. Predicate mode admits only "
+        "the `{pi}_secret_{…}` shape on both sides.",
+        predicate=_both_client_secrets,
+    ),
+    AllowedDifference(
+        "**.payment_method",
+        "Reference-valued fields carry ids minted per instance: the `**.id` "
+        "rule on the field a payment-method reference lands on, predicated "
+        "to `pm_`-shaped string pairs (the full-object shapes under "
+        "`last_payment_error.payment_method` compare field-by-field).",
+        predicate=_both_pm_ids,
+    ),
+    AllowedDifference(
+        "**.latest_charge",
+        "The id rule on the charge reference a PaymentIntent carries.",
+        predicate=_both_prefixed_ids("ch_"),
+    ),
+    AllowedDifference(
+        "**.payment_intent",
+        "The id rule on the intent reference a charge carries, predicated to "
+        "`pi_`-shaped string pairs.",
+        predicate=_both_prefixed_ids("pi_"),
+    ),
+    AllowedDifference(
+        "**.error.charge",
+        "The decline envelope's `charge` names the freshly minted failed "
+        "charge — the id rule in its message-shaped position.",
+        predicate=_both_prefixed_ids("ch_"),
+    ),
+    AllowedDifference(
+        "**.last_payment_error.charge",
+        "The same rule one level in, on the recorded shape of `last_payment_error`.",
+        predicate=_both_prefixed_ids("ch_"),
+    ),
+    AllowedDifference(
+        "**.invoice_settings.default_payment_method",
+        "The customer's default payment method carries a minted id — the id "
+        "rule, predicated to `pm_`-shaped pairs.",
+        predicate=_both_pm_ids,
+    ),
+    # --- the money path's account-config artifacts (Phase 8) ---
+    # The recording account drives payment-method availability from its
+    # Dashboard configuration; this world has no dashboard. These entries
+    # carry the artifacts that config puts on every recorded body.
+    AllowedDifference(
+        "**.automatic_payment_methods",
+        "The recording account's Dashboard configuration fills this on every "
+        "intent a caller did not set it on; this world has no dashboard to "
+        "source one from and emits the parameter's own value or null.",
+        predicate=lambda recorded, replayed: replayed is None or recorded == replayed,
+    ),
+    AllowedDifference(
+        "**.payment_method_configuration_details",
+        "The recording account's payment-method configuration echoes its "
+        "`pmc_…` id on unconfigured intents; no configuration object exists "
+        "in this world (scope boundary).",
+        predicate=lambda recorded, replayed: replayed is None,
+    ),
+    AllowedDifference(
+        "**.payment_method_types",
+        "The Dashboard configuration adds `link` beside `card` wherever the "
+        "caller pinned no types; this world's unpinned default is "
+        "payment_methods' own `['card']`. Predicate mode admits exactly the "
+        "one-extra-rail shape, so a pinned list still compares byte-exact.",
+        predicate=lambda recorded, replayed: (
+            isinstance(recorded, list)
+            and isinstance(replayed, list)
+            and recorded == [*replayed, "link"]
+        ),
+    ),
+    AllowedDifference(
+        "**.payment_method_options.link",
+        "The Dashboard configuration adds a `link` block beside `card`; no "
+        "Link rail is modeled here.",
+        predicate=lambda recorded, replayed: replayed is None,
+    ),
+    AllowedDifference(
+        "**.managed_payments",
+        'The live body carries `{"enabled": false}` where the pinned spec '
+        "types the field `string` — this world emits the spec-legal null "
+        "rather than failing schema conformance (functional spec §4: the "
+        "spec is the authority for shape).",
+        predicate=lambda recorded, replayed: recorded == {"enabled": False} and replayed is None,
+    ),
+    # --- live-only fields the pinned spec does not declare (Phase 8) ---
+    AllowedDifference(
+        "**.payment_record",
+        "Undeclared in the pinned spec, emitted null by the live API "
+        "(recorded, Phase 8); omitted here like every other undeclared live "
+        "field.",
+        predicate=lambda recorded, replayed: recorded is None and replayed is None,
+    ),
+    AllowedDifference(
+        "**.source",
+        "Undeclared on payment_intent and charge at the pinned version, "
+        "emitted null live; omitted here.",
+        predicate=lambda recorded, replayed: recorded is None and replayed is None,
+    ),
+    AllowedDifference(
+        "**.destination",
+        "Connect-shaped and undeclared on charge at the pinned version; "
+        "nulled on the wire, omitted here.",
+        predicate=lambda recorded, replayed: recorded is None and replayed is None,
+    ),
+    AllowedDifference(
+        "**.dispute",
+        "Undeclared on charge at the pinned version (disputes are Phase 9); "
+        "nulled on the wire, omitted here.",
+        predicate=lambda recorded, replayed: recorded is None and replayed is None,
+    ),
+    AllowedDifference(
+        "**.order",
+        "Undeclared on charge at the pinned version; nulled on the wire, omitted here.",
+        predicate=lambda recorded, replayed: recorded is None and replayed is None,
+    ),
+    AllowedDifference(
+        "**.radar_options",
+        "Typed literally `null` by the pinned spec but emitted `{}` live; "
+        "omitted here, where the spec-legal value would be null and null is "
+        "indistinguishable from absent for an empty object.",
+        predicate=lambda recorded, replayed: recorded == {} and replayed is None,
+    ),
+    # --- network and Radar state this world does not model (Phase 8) ---
+    AllowedDifference(
+        "**.outcome.risk_score",
+        "Radar's risk score is ML state this world does not model; recorded "
+        "integers vary per charge (17, 6, 56…), replayed omits the field.",
+    ),
+    AllowedDifference(
+        "**.outcome.advice_code",
+        "Network advice codes are issuer chatter this world does not model; "
+        "recorded `try_again_later` on declines, replayed null.",
+        predicate=lambda recorded, replayed: replayed is None,
+    ),
+    AllowedDifference(
+        "**.outcome.network_decline_code",
+        "Issuer network decline codes are network state this world does not "
+        "model; recorded `01` on declines, replayed null.",
+        predicate=lambda recorded, replayed: replayed is None,
+    ),
+    AllowedDifference(
+        "**.error.advice_code",
+        "The decline envelope's network chatter, omitted here — the same "
+        "ruling as scenario 06's attachment refusal, now met on the money "
+        "path.",
+        predicate=lambda recorded, replayed: replayed is None,
+    ),
+    AllowedDifference(
+        "**.error.network_decline_code",
+        "The decline envelope's network chatter, omitted here.",
+        predicate=lambda recorded, replayed: replayed is None,
+    ),
+    AllowedDifference(
+        "**.last_payment_error.advice_code",
+        "`last_payment_error`'s network chatter, omitted here.",
+        predicate=lambda recorded, replayed: replayed is None,
+    ),
+    AllowedDifference(
+        "**.last_payment_error.network_decline_code",
+        "`last_payment_error`'s network chatter, omitted here.",
+        predicate=lambda recorded, replayed: replayed is None,
+    ),
+    AllowedDifference(
+        "**.payment_method_details.card.authorization_code",
+        "The issuer's six-digit authorization code is network randomness; "
+        "the field is spec-nullable and null here.",
+        predicate=lambda recorded, replayed: replayed is None,
+    ),
+    AllowedDifference(
+        "**.payment_method_details.card.network_transaction_id",
+        "The card network's transaction id is network randomness; spec-nullable and null here.",
+        predicate=lambda recorded, replayed: replayed is None,
+    ),
+    AllowedDifference(
+        "**.payment_method_details.card.electronic_commerce_indicator",
+        "Undeclared in the pinned spec, emitted `07` live; omitted here.",
+        predicate=lambda recorded, replayed: replayed is None,
+    ),
+    AllowedDifference(
+        "**.capture_before",
+        "The authorization-expiry instant is network-set (recorded values "
+        "jitter around created+7d) and embeds the clock difference besides — "
+        "the `**.created` reasoning in miniature.",
+        predicate=lambda recorded, replayed: (
+            isinstance(recorded, int) and isinstance(replayed, int)
+        ),
+    ),
+    AllowedDifference(
+        "**.card.country",
+        "The test cards' issuer geography varies by recording account region "
+        "(probed Phase 8: the decline and 3DS tokens answered `IE` where the "
+        "success tokens answered `US`); a two-letter code either way is the "
+        "form.",
+        predicate=_both_country_codes,
+    ),
+    AllowedDifference(
+        "**.payment_method.card.checks.cvc_check",
+        "The payment-method snapshot a decline embeds in "
+        "`last_payment_error` / `error.payment_method` reports the CVC check "
+        "inconsistently across recordings (probed both `pass` and "
+        "`unchecked` for the same unattached card, Phase 8); either member "
+        "of the pair is the form.",
+        predicate=lambda recorded, replayed: (
+            recorded in ("pass", "unchecked") and replayed in ("pass", "unchecked")
+        ),
+    ),
+    AllowedDifference(
+        "**.balance_transaction",
+        "The balance ledger lands in Phase 11; until then this world's "
+        "charges carry no ledger reference where the live API mints one at "
+        "capture (recorded: null until capture even live, under the "
+        "default `automatic_async` settlement).",
+        predicate=lambda recorded, replayed: (
+            replayed is None
+            and (recorded is None or (isinstance(recorded, str) and recorded.startswith("txn_")))
+        ),
+    ),
+    AllowedDifference(
+        "**.receipt_url",
+        "A dashboard URL whose signature base64-embeds the recording account "
+        "id (redacted to a placeholder at record time); this world derives a "
+        "deterministic id-shaped URL the way credit_note.pdf does.",
+        predicate=_recorded_placeholder_or_same,
+    ),
+    AllowedDifference(
+        "**.error.message",
+        "The idempotency-mismatch message names the caller's key, which "
+        "differs per recording run by design (the keyed steps embed "
+        "run-specific ids, so every run draws a fresh key) — form-only "
+        "comparison, the id rule where the key is the message's whole "
+        "variable content.",
+        predicate=_idempotency_mismatch_modulo_key,
+    ),
+    AllowedDifference(
+        "**.error.message",
+        "The two charge-capture refusals name the object id they refuse — "
+        "the id-only rule again (both probed verbatim, Phase 8).",
+        predicate=_charge_capture_message_modulo_id,
+    ),
+    AllowedDifference(
+        "**.error.message",
+        "The confirm-missing-method refusal names the customer id — the "
+        "id-only rule (probed verbatim, Phase 8).",
+        predicate=_confirm_missing_modulo_customer,
+    ),
+    AllowedDifference(
+        "**.error.message",
+        "The ownership refusal a customerless intent's confirm with a "
+        "customer's method answers names both ids — the id-only rule "
+        "(probed verbatim, CR round 1).",
+        predicate=_pm_belongs_to_modulo_ids,
+    ),
+    AllowedDifference(
+        "**.error.message",
+        "The wrong-customer confirm refusal names both ids — the id-only "
+        "rule, its sibling spelling (recorded verbatim, cassette 04).",
+        predicate=_pm_not_belong_modulo_ids,
+    ),
+    # The transfer_group scope cut (cassette 04, CR round 2): real Stripe
+    # refuses the update on a PI-created charge; this world has cut the
+    # parameter, so the whole refusal envelope differs shape by shape —
+    # four entries rather than one message rule, because the recorded
+    # envelope carries no code/param/doc_url where the replayed one does.
+    AllowedDifference(
+        "**.error.message",
+        "Real Stripe's PI-naming transfer_group refusal versus this world's "
+        "`Received unknown parameter` — the parameter is cut (data_model §7), "
+        "declared here rather than silently diverging.",
+        predicate=_transfer_group_message,
+    ),
+    AllowedDifference(
+        "**.error.code",
+        "The recorded transfer_group refusal carries no code; the scope cut's "
+        "`parameter_unknown` does.",
+        predicate=_transfer_group_code,
+    ),
+    AllowedDifference(
+        "**.error.param",
+        "The recorded transfer_group refusal carries no param; the scope cut's "
+        "refusal names the parameter.",
+        predicate=_transfer_group_param,
+    ),
+    AllowedDifference(
+        "**.error.doc_url",
+        "The recorded transfer_group refusal carries no doc_url; the scope "
+        "cut's derived one is present.",
+        predicate=_transfer_group_doc_url,
     ),
     # Scenario 3 exists to record what a malformed Stripe-Version answers.
     # The world deliberately serves one fixed version with no header channel

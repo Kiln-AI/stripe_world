@@ -22,6 +22,14 @@ candidates and their reasons are recorded in phase_plans/phase_4.md.
 Every value token is asserted at generation time to still appear in
 the live description of its field, so a Stripe wording change fails
 regeneration rather than silently dropping a value.
+
+DECLINE_CODES: the card decline_code enumeration, 50 values,
+hand-transcribed from docs.stripe.com/declines/codes
+(gap-closure-2026-09-18.md item 7). No spec description exists to
+assert against — decline_code lives only on the wire and in the docs —
+so the committed count is the drift guard instead.
+`stripe_errors.declined` validates every emitted decline_code against
+this set; an unlisted code is a WorldBug for the §3.4.4 reason.
 """
 
 DOC_ONLY_ENUMS: dict[str, dict[str, tuple[str, ...]]] = {
@@ -238,6 +246,61 @@ ENUM_OVERRIDES: dict[str, dict[str, tuple[str, ...]]] = {
         "usage": ("on_session", "off_session"),
     },
 }
+
+DECLINE_CODES: frozenset[str] = frozenset(
+    {
+        "authentication_not_handled",
+        "authentication_required",
+        "approve_with_id",
+        "call_issuer",
+        "card_not_supported",
+        "card_velocity_exceeded",
+        "currency_not_supported",
+        "do_not_honor",
+        "do_not_try_again",
+        "duplicate_transaction",
+        "expired_card",
+        "fraudulent",
+        "generic_decline",
+        "incorrect_address",
+        "incorrect_cvc",
+        "incorrect_number",
+        "incorrect_pin",
+        "incorrect_zip",
+        "insufficient_funds",
+        "invalid_account",
+        "invalid_amount",
+        "invalid_cvc",
+        "invalid_expiry_month",
+        "invalid_expiry_year",
+        "invalid_number",
+        "invalid_pin",
+        "issuer_not_available",
+        "lost_card",
+        "merchant_blacklist",
+        "mobile_device_authentication_required",
+        "new_account_information_available",
+        "no_action_taken",
+        "not_permitted",
+        "offline_pin_required",
+        "online_or_offline_pin_required",
+        "pickup_card",
+        "pin_try_exceeded",
+        "processing_error",
+        "reenter_transaction",
+        "restricted_card",
+        "revocation_of_all_authorizations",
+        "revocation_of_authorization",
+        "security_violation",
+        "service_not_allowed",
+        "stolen_card",
+        "stop_payment_order",
+        "testmode_decline",
+        "transaction_not_allowed",
+        "try_again_later",
+        "withdrawal_count_limit_exceeded",
+    }
+)
 
 DECLARED_OVERRIDES: frozenset[tuple[str, str]] = frozenset(
     {

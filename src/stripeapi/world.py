@@ -7,9 +7,10 @@ everything of this world's imports `world.py`.
 `untracked_tables` names `counters` from the dispatcher phase on: every insert
 bumps a counter, so a tracked `counters` would put a bookkeeping row into the
 change log of every graded episode (`components/data_model.md` §5).
-`idempotency_keys` joins it in the idempotency phase, when the table exists —
-naming a table that does not exist yet would be a pin on a schema this world
-does not have.
+`idempotency_keys` joins it for the same reason — a middleware write must
+never appear in an episode's change log (`components/cross_cutting.md`
+§3.1.8) — and because a short-circuit's defining property is that the log
+gains zero records for it.
 """
 
 import seahaven
@@ -18,7 +19,7 @@ world = seahaven.World(
     name="stripeapi",
     version="0.1.0",
     schema=seahaven.sql_files(__package__, "schema"),
-    untracked_tables=("counters",),
+    untracked_tables=("counters", "idempotency_keys"),
     # The one line an OpenEnv hub shows beside the name. `README.md` is the
     # card's whole body, and nothing is derived from it; this sentence is kept
     # in step with the README's opening paragraph by hand.

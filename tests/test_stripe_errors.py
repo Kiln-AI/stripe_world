@@ -112,7 +112,7 @@ def test_the_three_cannot_expand_messages() -> None:
 
 
 def test_the_two_idempotency_errors() -> None:
-    mismatch = se.idempotency_mismatch()
+    mismatch = se.idempotency_mismatch("retry-4471-a")
     assert mismatch.status == 400
     assert mismatch.type == "idempotency_error"
     assert mismatch.code is None
@@ -121,7 +121,8 @@ def test_the_two_idempotency_errors() -> None:
             "type": "idempotency_error",
             "message": (
                 "Keys for idempotent requests can only be used with the same "
-                "parameters they were first used with."
+                "parameters they were first used with. Try using a key other "
+                "than 'retry-4471-a' if you meant to execute a different request."
             ),
         }
     }
@@ -148,7 +149,7 @@ def test_every_error_type_is_reachable_by_a_constructor() -> None:
     produced = {
         se.invalid_request("x").type,
         se.internal("x").type,
-        se.idempotency_mismatch().type,
+        se.idempotency_mismatch("k").type,
     }
     assert produced == {"invalid_request_error", "api_error", "idempotency_error"}
 

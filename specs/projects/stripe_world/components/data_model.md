@@ -610,7 +610,14 @@ CREATE TABLE charges (
     amount                         INTEGER NOT NULL,
     amount_captured                INTEGER NOT NULL DEFAULT 0,
     amount_refunded                INTEGER NOT NULL DEFAULT 0,
-    balance_transaction            TEXT REFERENCES balance_transactions (id),
+    -- The two ledger columns carry no REFERENCES clause until the ledger
+    -- table exists (Phase 11): SQLite refuses to prepare any INSERT into a
+    -- table whose FK parent is absent — NULL column values do not help — so
+    -- the verbatim clauses would make the whole money path unwritable until
+    -- then. The FKs join in Phase 11; until then both columns are NULL
+    -- anyway (recorded: no ledger row exists at charge time except after a
+    -- manual capture).
+    balance_transaction            TEXT,
     billing_details                TEXT NOT NULL CHECK (json_valid(billing_details) AND json_type(billing_details) = 'object'),
     calculated_statement_descriptor TEXT,
     captured                       INTEGER NOT NULL CHECK (captured IN (0, 1)),
@@ -618,7 +625,7 @@ CREATE TABLE charges (
     customer                       TEXT REFERENCES customers (id),
     description                    TEXT,
     disputed                       INTEGER NOT NULL DEFAULT 0 CHECK (disputed IN (0, 1)),
-    failure_balance_transaction    TEXT REFERENCES balance_transactions (id),
+    failure_balance_transaction    TEXT,
     failure_code                   TEXT,
     failure_message                TEXT,
     fraud_details                  TEXT CHECK (fraud_details IS NULL OR (json_valid(fraud_details) AND json_type(fraud_details) = 'object')),

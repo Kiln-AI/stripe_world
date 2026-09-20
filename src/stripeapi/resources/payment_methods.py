@@ -255,14 +255,20 @@ def _card_inputs(card: dict) -> tuple[magic_cards.CardBehavior, int, int]:
 def _x_behavior(card: magic_cards.CardBehavior, card_dict: dict) -> str | None:
     """The world-internal tag row: comma-separated tokens, never serialised.
 
-    `charge_declined=<code>` is the charge-time refusal; `attach_refused`
-    marks the decline-table cards Stripe will not attach to a customer at all
-    (probed: attaching `tok_visa_chargeDeclined` answers 402 while `…0341`
-    attaches). `preferred_network` records the caller's choice for the rail.
+    `charge_declined=<code>` is the charge-time refusal, paired with
+    `decline_code=<code>` when the table carries one — the money path needs
+    both (a 402's `code` and `decline_code` are independent facts: recorded
+    `card_declined`/`generic_decline` against `authentication_required`/
+    `authentication_required`). `attach_refused` marks the decline-table
+    cards Stripe will not attach to a customer at all (probed: attaching
+    `tok_visa_chargeDeclined` answers 402 while `…0341` attaches).
+    `preferred_network` records the caller's choice for the rail.
     """
     tokens: list[str] = []
     if card.charge_decline is not None:
         tokens.append(f"charge_declined={card.charge_decline[0]}")
+        if card.charge_decline[1] is not None:
+            tokens.append(f"decline_code={card.charge_decline[1]}")
         if card.attach_declines:
             tokens.append("attach_refused")
     if card.dispute is not None:

@@ -134,6 +134,39 @@ def test_an_unknown_token_is_refused_verbatim(instance: seahaven.Instance) -> No
     assert error["param"] == "token"
 
 
+def test_the_corrected_3ds_token_spellings_carry_the_tag(instance: seahaven.Instance) -> None:
+    """Probed 2026-09-20 at the pinned version: the real spellings are
+    `tok_threeDSecure2Required` (…3220) and `tok_threeDSecureRequired`
+    (…3063); this table's first `tok_card_threeDSecure*` transcription is not
+    a token the live API knows, so it now answers the unknown-token refusal
+    like any other miss."""
+    required = create_card(instance, token="tok_threeDSecure2Required")
+    fresh_3063 = create_card(instance, token="tok_threeDSecureRequired")
+    assert required["card"]["last4"] == "3220"
+    assert fresh_3063["card"]["last4"] == "3063"
+
+    def tag(pm_id: str) -> str | None:
+        row = instance.inspect().one(
+            "SELECT x_behavior AS b FROM payment_methods WHERE id = ?", pm_id
+        )
+        assert row is not None
+        return row["b"]
+
+    assert tag(required["id"]) == "three_d_secure=required"
+    assert tag(fresh_3063["id"]) == "three_d_secure=required"
+
+    retired = call(
+        instance,
+        "POST",
+        "/v1/payment_methods",
+        {"type": "card", "card": {"token": "tok_card_threeDSecure2Required"}},
+    )
+    assert retired["status"] == 400
+    assert retired["body"]["error"]["message"] == (
+        "Invalid token id: tok_card_threeDSecure2Required"
+    )
+
+
 def test_the_magic_tag_lands_on_the_row(instance: seahaven.Instance) -> None:
     hard = create_card(instance, token="tok_visa_chargeDeclined")
     attachable = create_card(instance, number="4000000000000341", exp_month=1, exp_year=2031)
@@ -147,8 +180,11 @@ def test_the_magic_tag_lands_on_the_row(instance: seahaven.Instance) -> None:
         assert row is not None
         return row["b"]
 
-    assert tag(hard["id"]) == "charge_declined=card_declined,attach_refused"
-    assert tag(attachable["id"]) == "charge_declined=card_declined"
+    assert (
+        tag(hard["id"])
+        == "charge_declined=card_declined,decline_code=generic_decline,attach_refused"
+    )
+    assert tag(attachable["id"]) == "charge_declined=card_declined,decline_code=generic_decline"
     assert tag(dispute["id"]) == "dispute=fraudulent"
     assert tag(plain["id"]) is None
 
@@ -384,7 +420,10 @@ def test_attaching_a_decline_card_is_a_402_that_writes_nothing(
     row = instance.inspect().one(
         "SELECT customer AS c, x_behavior AS b FROM payment_methods WHERE id = ?", hard["id"]
     )
-    assert row == {"c": None, "b": "charge_declined=card_declined,attach_refused"}
+    assert row == {
+        "c": None,
+        "b": "charge_declined=card_declined,decline_code=generic_decline,attach_refused",
+    }
     assert [row["type"] for row in instance.inspect().rows("SELECT type FROM events")] == [
         "customer.created"
     ]

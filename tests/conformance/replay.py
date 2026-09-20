@@ -265,7 +265,6 @@ def _drift(cassette: Cassette, recorder: Recorder) -> list[Violation]:
             or one.pattern != step.path
             or one.declared_params != step.params
             or one.path_refs != step.path_refs
-            or one.idempotency_key != step.idempotency_key
         ):
             problems.append(
                 f"step {step.seq}: cassette recorded {step.method} {step.path} "
@@ -284,6 +283,18 @@ def _drift(cassette: Cassette, recorder: Recorder) -> list[Violation]:
                 f"{step.recorded_stripe_version!r}, but the script would send "
                 f"{one.stripe_version!r}"
             )
+        # An idempotency key compares by shape, not literally: the money-path
+        # scenario's keyed steps embed run-specific ids in their parameters
+        # (the customer, the payment method), so every recording run must draw
+        # a fresh key — a fixed one would answer the previous run's stored
+        # `idempotency_error` instead of executing. Presence and prefix are
+        # the invariant; the suffix is per-run by design.
+        if _key_shape(one.idempotency_key) != _key_shape(step.idempotency_key):
+            problems.append(
+                f"step {step.seq}: cassette recorded idempotency key "
+                f"{_key_shape(step.idempotency_key)!r}, but the script would send "
+                f"{_key_shape(one.idempotency_key)!r}"
+            )
     if problems:
         raise ConformanceFailure(
             f"scenario '{cassette.scenario}' has drifted from its cassette — re-record it "
@@ -291,6 +302,14 @@ def _drift(cassette: Cassette, recorder: Recorder) -> list[Violation]:
             + "\n  ".join(problems)
         )
     return []
+
+
+def _key_shape(key: str | None) -> str | None:
+    """An idempotency key's per-run-invariant shape: None, or its prefix up to
+    the run suffix (see `_drift`)."""
+    if key is None:
+        return None
+    return key.rsplit("-", 1)[0]
 
 
 def _plain(value: Any) -> Any:

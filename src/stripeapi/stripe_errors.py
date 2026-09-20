@@ -1,14 +1,13 @@
 """Stripe's error envelope: the API's own refusals, as return values.
 
 A `StripeApiError` raised out of a handler propagates through `invoke`, the
-per-call transaction rolls back, and the Stripe-envelope middleware (added in a
-later phase, per `components/cross_cutting.md` §3.5.3) renders it as
-`{status, body}`. **Raise loses the writes**: a raised Stripe error is always a
-rollback, which is the right behavior for a request that should never have been
-accepted — a bad parameter, a missing resource. An error status a call
-legitimately *earned* — a `402` decline — keeps its rows, so it is returned as
-an `ApiResponse`, never raised; `declined()` (added with the billing phases,
-when `spec/enums.py` exists to validate `decline_code`) is that constructor.
+per-call transaction rolls back, and the Stripe-envelope middleware
+(`middleware/stripe_envelope.py`, per `components/cross_cutting.md` §3.5.3)
+renders it as `{status, body}`. **Raise loses the writes**: a raised Stripe
+error is always a rollback, which is the right behavior for a request that
+should never have been accepted — a bad parameter, a missing resource. An
+error status a call legitimately *earned* — a `402` decline — keeps its rows,
+so it is returned as an `ApiResponse` built around `declined()`, never raised.
 
 The wire `type` enum has exactly four values. `rate_limit_error`,
 `authentication_error` and `permission_error` are stripe-*python* conveniences
@@ -18,11 +17,17 @@ gets this wrong reliably, and the conformance tests exist to catch it.
 
 from typing import Literal
 
+import seahaven
+
+from stripeapi.spec import DECLINE_CODES
+
 __all__ = [
     "ERROR_TYPES",
     "StripeApiError",
     "StripeErrorType",
     "cannot_expand",
+    "card_error",
+    "declined",
     "idempotency_key_in_use",
     "idempotency_mismatch",
     "internal",
@@ -143,15 +148,24 @@ def invalid_request(
     code: str | None = None,
     param: str | None = None,
     status: int = 400,
+    sub_objects: dict[str, dict] | None = None,
     pre_execution: bool = False,
 ) -> StripeApiError:
-    """A 400-shaped request fault. `status` is overridable for the odd 403/405."""
+    """A 400-shaped request fault. `status` is overridable for the odd 403/405.
+
+    `sub_objects` is the money path's shape: Stripe's
+    `payment_intent_unexpected_state` refusals carry the full PaymentIntent on
+    the error object (`error.payment_intent`), which is how a client learns
+    the intent's state — probed at the pinned version on confirm, capture,
+    cancel and the amount-update guard (Phase 8, 2026-09-20).
+    """
     return StripeApiError(
         status,
         "invalid_request_error",
         message,
         code=code,
         param=param,
+        sub_objects=sub_objects,
         pre_execution=pre_execution,
     )
 
@@ -226,13 +240,84 @@ def cannot_expand(segment: str, *, exists: bool, hint: str | None = None) -> Str
     return StripeApiError(400, "invalid_request_error", message, pre_execution=True)
 
 
-def idempotency_mismatch() -> StripeApiError:
-    """400: a stored key replayed with different parameters."""
+def card_error(
+    message: str,
+    *,
+    code: str | None = None,
+    decline_code: str | None = None,
+    param: str | None = None,
+    charge: str | None = None,
+    status: int = 402,
+) -> StripeApiError:
+    """A 402-shaped card fault that *abandons* the call — raised, so its
+    (nonexistent) writes roll back. `declined()` is the keep-the-rows twin;
+    the two are distinct because Stripe itself distinguishes them: a legacy
+    charge with no card on file is a missing-parameter-shaped `card_error`
+    that created nothing, while a decline is an outcome rows were written for."""
+    return StripeApiError(
+        status,
+        "card_error",
+        message,
+        code=code,
+        decline_code=decline_code,
+        param=param,
+        charge=charge,
+    )
+
+
+def declined(
+    *,
+    code: str,
+    message: str,
+    decline_code: str | None = None,
+    charge: str | None = None,
+    sub_objects: dict[str, dict] | None = None,
+) -> dict:
+    """The body of a 402 card decline — an envelope, returned, never raised.
+
+    A decline is an outcome, not an abandonment: the handler has already
+    written the failed charge, the PaymentIntent's status change and the
+    event pair, and those rows must survive, so the handler pairs this with
+    `ApiResponse(402, declined(...))` (`components/cross_cutting.md` §3.5.4).
+    Returning a dict rather than raising an exception is what carries the
+    rule — there is no `raise` form and a lint test holds that line.
+
+    No `param`: the recorded decline envelope at the pinned version carries
+    none (Phase 8 probe), which corrects §2.1's `param: "payment_method"`
+    default — the allow-list entry that carried the default is retired with
+    it. `sub_objects` carries the full PaymentIntent under `error
+    .payment_intent` (§3.5.1), `charge` the failed charge's id.
+    """
+    if decline_code is not None and decline_code not in DECLINE_CODES:
+        # The §3.4.4 reason: an unlisted decline code is world code inventing
+        # behavior Stripe does not have, and grading an agent for it would
+        # grade our bug as theirs.
+        raise seahaven.WorldBug(f"unknown decline_code {decline_code!r}: not in spec/enums.py")
+    return StripeApiError(
+        402,
+        "card_error",
+        message,
+        code=code,
+        decline_code=decline_code,
+        charge=charge,
+        sub_objects=sub_objects,
+    ).envelope()
+
+
+def idempotency_mismatch(key: str) -> StripeApiError:
+    """400: a stored key replayed with different parameters.
+
+    The message is the wire form probed at the pinned version (Phase 8,
+    2026-09-20): the base string cross_cutting §2.1 quoted from client-library
+    issues, plus the key hint live Stripe appends — `Try using a key other
+    than '<key>' if you meant to execute a different request.`
+    """
     return StripeApiError(
         400,
         "idempotency_error",
         "Keys for idempotent requests can only be used with the same parameters "
-        "they were first used with.",
+        f"they were first used with. Try using a key other than '{key}' "
+        "if you meant to execute a different request.",
     )
 
 

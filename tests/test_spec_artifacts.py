@@ -23,7 +23,7 @@ from tools_dev.prune_spec import (
 )
 
 from stripeapi.dispatch import routes
-from stripeapi.spec.enums import DOC_ONLY_ENUMS
+from stripeapi.spec.enums import DECLINE_CODES, DOC_ONLY_ENUMS
 from stripeapi.spec.event_types import EVENT_TYPES
 from stripeapi.spec.expandable import EXPANDABLE_FIELDS
 
@@ -139,6 +139,14 @@ def test_event_types_match_the_committed_txt() -> None:
     )
     assert committed == EVENT_TYPES
     assert len(EVENT_TYPES) == 266
+
+
+def test_decline_codes_are_the_fifty_transcribed() -> None:
+    """`decline_code` has no machine-readable enum anywhere (docs table only,
+    gap-closure-2026-09-18.md item 7), so the committed count is the drift
+    guard — the promise `spec/enums.py`'s docstring makes."""
+    assert len(DECLINE_CODES) == 50
+    assert frozenset(DECLINE_CODES) == DECLINE_CODES  # no duplicates inflating it
 
 
 def test_doc_only_enums_are_exactly_the_six_pinned() -> None:

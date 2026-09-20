@@ -23,7 +23,7 @@ from stripeapi.errors import Internal, InvalidInput
 
 # A table no world here has, for the `DbError` an ordinary tool provokes by
 # writing SQL that cannot run.
-MISSING_TABLE = "charges"
+MISSING_TABLE = "refunds"
 
 type Probe = Callable[..., seahaven.World]
 

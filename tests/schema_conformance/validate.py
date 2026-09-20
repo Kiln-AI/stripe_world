@@ -64,22 +64,27 @@ NULLABLE_DESPITE_SPEC: frozenset[tuple[str, str]] = frozenset(
 )
 
 
-def _rail_stub_ok(owner: str | None, key: str, value: Any) -> bool:
+def _rail_stub_ok(owner: str | None, key: str, value: Any, obj: dict[str, Any]) -> bool:
     """A stubbed payment rail, emitted as `{}` under its own type name.
 
     The pruner drops the 54 rail properties `KEEP_RAILS` does not name, by
     design (components/data_model.md §3.9); the live API still creates and
-    returns those rails, recorded this phase on `type=klarna`
-    (`"klarna": {}`, cassette 06 steps 5 and 6: create and retrieve). The
-    exception is exactly that shape — a
-    `payment_method` key that is a member of the `type` enum and equals `{}`
-    — so anything richer on an unmodeled rail still fails, and a stray key on
-    any other object still fails.
+    returns those rails, recorded on `type=klarna`: `"klarna": {}` on the
+    payment method (cassette 06 steps 5 and 6: create and retrieve) and
+    `{"type": "klarna", "klarna": {}}` as a charge's
+    `payment_method_details` (Phase 8 — the same ruling's charge column,
+    data_model §3.9's table). The exception is exactly those two shapes: on
+    `payment_method` a key that is a member of the `type` enum holding `{}`;
+    on `payment_method_details` only the key matching the object's own
+    `type`, holding `{}` — so anything richer on an unmodeled rail still
+    fails, and a stray key on any other object still fails.
     """
-    if owner != "payment_method":
-        return False
-    enum = RULES["payment_method"]["props"]["type"]["enum"]
-    return key in enum and value == {}
+    if owner == "payment_method":
+        enum = RULES["payment_method"]["props"]["type"]["enum"]
+        return key in enum and value == {}
+    if owner == "payment_method_details":
+        return key == obj.get("type") and value == {}
+    return False
 
 
 @dataclass(frozen=True)
@@ -280,7 +285,7 @@ def _check_fields(
         elif open_map:
             if rule["map"] is not None:
                 _check(value, rule["map"], where, owner, out)
-        elif not _rail_stub_ok(owner, key, value):
+        elif not _rail_stub_ok(owner, key, value, obj):
             out.append(
                 SchemaViolation(
                     "", where, f"undeclared field {key!r}: the spec's property set is closed"

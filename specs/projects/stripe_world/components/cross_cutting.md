@@ -105,7 +105,11 @@ def missing_parameter(param: str) -> StripeApiError
     # 400, code="parameter_missing", pre_execution=True, "Missing required param: {param}."
 def cannot_expand(segment: str, *, exists: bool, hint: str | None = None) -> StripeApiError
     # 400, invalid_request_error, no code, no param, pre_execution=True — see §3.3.5
-def idempotency_mismatch() -> StripeApiError                 # 400, idempotency_error
+def idempotency_mismatch(key: str) -> StripeApiError     # 400, idempotency_error
+    # The message ends with the key hint live Stripe appends — "Try using a key
+    # other than '{key}' if you meant to execute a different request." —
+    # probed at the pinned version (Phase 8); the constructor takes the key
+    # because the hint names it.
 def idempotency_key_in_use(key: str) -> StripeApiError       # 409, idempotency_error
 def internal(message: str) -> StripeApiError                 # 500, api_error — see §3.5.5
 ```
@@ -415,16 +419,17 @@ The replay writes nothing to `idempotency_keys` either — no `last_used_at`, no
 nothing to record, and a write on the replay path would make "a replay writes nothing" a claim with
 an asterisk instead of a fact.
 
-**(c) Hit, `state = 'complete'`, hash differs.** `raise idempotency_mismatch()` —
+**(c) Hit, `state = 'complete'`, hash differs.** `raise idempotency_mismatch(key)` —
 
 ```json
 {"error": {"type": "idempotency_error",
-           "message": "Keys for idempotent requests can only be used with the same parameters they were first used with."}}
+           "message": "Keys for idempotent requests can only be used with the same parameters they were first used with. Try using a key other than '<key>' if you meant to execute a different request."}}
 ```
 
 400, no `code`, no `param`. `next_` is not called and the stored row is not touched, so this outcome
-also writes nothing. The message is the string reported verbatim across many client-library issues
-(`idempotency.md`, "Identical key + different params").
+also writes nothing. The base string is the one reported verbatim across many client-library issues
+(`idempotency.md`, "Identical key + different params"); the key-hint suffix is the wire form probed
+at the pinned version (Phase 8) — live Stripe names the caller's key, so the constructor does too.
 
 **(d) Hit, `state = 'in_flight'`.** `raise idempotency_key_in_use(key)` — 409,
 `type: "idempotency_error"`, `code: "idempotency_key_in_use"`, the message quoted in

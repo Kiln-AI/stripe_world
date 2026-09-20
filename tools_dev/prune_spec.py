@@ -410,6 +410,67 @@ ENUM_OVERRIDES: dict[str, dict[str, tuple[str, ...]]] = {
 #: documentation, so a reviewer can find every declared assumption in one place.
 DECLARED_OVERRIDES: frozenset[tuple[str, str]] = frozenset({("setup_intent", "usage")})
 
+#: The card `decline_code` enumeration, all 50 values, hand-transcribed from
+#: the authoritative `docs.stripe.com/declines/codes` table re-fetched in the
+#: 2026-09-18 gap-closure pass (item 7 of cross-cutting-semantics'
+#: `gap-closure-2026-09-18.md`, which quotes every row verbatim). Unlike every
+#: other table here there is no spec description to assert against:
+#: `decline_code` exists only on the wire and in the docs, so the committed
+#: count is the guard — a change to Stripe's table is a re-transcription, made
+#: by hand and pinned by `test_spec_artifacts.py`.
+DECLINE_CODES: tuple[str, ...] = (
+    "authentication_not_handled",
+    "authentication_required",
+    "approve_with_id",
+    "call_issuer",
+    "card_not_supported",
+    "card_velocity_exceeded",
+    "currency_not_supported",
+    "do_not_honor",
+    "do_not_try_again",
+    "duplicate_transaction",
+    "expired_card",
+    "fraudulent",
+    "generic_decline",
+    "incorrect_address",
+    "incorrect_cvc",
+    "incorrect_number",
+    "incorrect_pin",
+    "incorrect_zip",
+    "insufficient_funds",
+    "invalid_account",
+    "invalid_amount",
+    "invalid_cvc",
+    "invalid_expiry_month",
+    "invalid_expiry_year",
+    "invalid_number",
+    "invalid_pin",
+    "issuer_not_available",
+    "lost_card",
+    "merchant_blacklist",
+    "mobile_device_authentication_required",
+    "new_account_information_available",
+    "no_action_taken",
+    "not_permitted",
+    "offline_pin_required",
+    "online_or_offline_pin_required",
+    "pickup_card",
+    "pin_try_exceeded",
+    "processing_error",
+    "reenter_transaction",
+    "restricted_card",
+    "revocation_of_all_authorizations",
+    "revocation_of_authorization",
+    "security_violation",
+    "service_not_allowed",
+    "stolen_card",
+    "stop_payment_order",
+    "testmode_decline",
+    "transaction_not_allowed",
+    "try_again_later",
+    "withdrawal_count_limit_exceeded",
+)
+
 REF_PATTERN = re.compile(r"#/components/schemas/([A-Za-z0-9_.\-]+)")
 TAG_PATTERN = re.compile(r"<[^>]+>")
 # Block-level tags become a separator; the rest (code, a, em, Stripe's inline
@@ -822,6 +883,7 @@ class Artifacts(NamedTuple):
     enums: dict[str, dict[str, tuple[str, ...]]]
     enum_overrides: dict[str, dict[str, tuple[str, ...]]]
     declared_overrides: frozenset[tuple[str, str]]
+    decline_codes: tuple[str, ...]
     schema_rules: dict[str, Any]
     event_types: frozenset[str]
 
@@ -998,6 +1060,7 @@ def build_artifacts(
         enums=DOC_ONLY_ENUMS,
         enum_overrides=ENUM_OVERRIDES,
         declared_overrides=DECLARED_OVERRIDES,
+        decline_codes=DECLINE_CODES,
         schema_rules=_build_schema_rules(bodies),
         event_types=event_types,
     )
@@ -1086,12 +1149,26 @@ def _render_enums(artifacts: Artifacts) -> str:
         "\n"
         "Every value token is asserted at generation time to still appear in\n"
         "the live description of its field, so a Stripe wording change fails\n"
-        "regeneration rather than silently dropping a value."
+        "regeneration rather than silently dropping a value.\n"
+        "\n"
+        "DECLINE_CODES: the card decline_code enumeration, 50 values,\n"
+        "hand-transcribed from docs.stripe.com/declines/codes\n"
+        "(gap-closure-2026-09-18.md item 7). No spec description exists to\n"
+        "assert against — decline_code lives only on the wire and in the docs —\n"
+        "so the committed count is the drift guard instead.\n"
+        "`stripe_errors.declined` validates every emitted decline_code against\n"
+        "this set; an unlisted code is a WorldBug for the §3.4.4 reason."
     )
     lines = [docstring]
     lines += _render_enum_table("DOC_ONLY_ENUMS", artifacts.enums)
     lines.append("")
     lines += _render_enum_table("ENUM_OVERRIDES", artifacts.enum_overrides)
+    lines.append("")
+    lines.append("DECLINE_CODES: frozenset[str] = frozenset(")
+    lines.append("    {")
+    lines.extend(f'        "{name}",' for name in artifacts.decline_codes)
+    lines.append("    }")
+    lines.append(")")
     lines.append("")
     lines.append("DECLARED_OVERRIDES: frozenset[tuple[str, str]] = frozenset(")
     lines.append("    {")

@@ -4,7 +4,9 @@ starts from.
 From the dispatcher phase on, "schema only" means the tables exist and the
 tracked tables hold no rows; `counters` carries its seeded rows by design (a
 static reference seed from the schema file, `components/data_model.md` §5) and
-is untracked, so it never appears in a graded change log.
+is untracked, so it never appears in a graded change log — as is
+`idempotency_keys`, whose rows are middleware bookkeeping a graded episode
+must not see (`components/cross_cutting.md` §3.1.8).
 """
 
 import pytest
@@ -27,18 +29,21 @@ def test_the_empty_fixture_is_committed(world: seahaven.World) -> None:
 
 def test_an_instance_of_empty_has_the_schema_and_no_rows(instance: seahaven.Instance) -> None:
     assert world_tables(instance.inspect().conn) == [
+        "charges",
         "counters",
         "coupons",
         "customers",
         "events",
+        "idempotency_keys",
+        "payment_intents",
         "payment_methods",
         "prices",
         "products",
         "promotion_codes",
         "tax_rates",
     ]
-    # No tracked table carries a row: no customer, no event, no payment method,
-    # no catalog object.
+    # No tracked table carries a row: no customer, no event, no payment
+    # method, no catalog object, nothing on the money path.
     for table in (
         "customers",
         "events",
@@ -48,6 +53,8 @@ def test_an_instance_of_empty_has_the_schema_and_no_rows(instance: seahaven.Inst
         "coupons",
         "promotion_codes",
         "tax_rates",
+        "payment_intents",
+        "charges",
     ):
         assert instance.inspect().one(f"SELECT count(*) AS n FROM {table}") == {"n": 0}
 
@@ -62,3 +69,9 @@ def test_the_counters_seed_is_present_and_untracked(instance: seahaven.Instance)
     assert len(seeded) == 22
     assert {row["value"] for row in seeded} == {0}
     assert instance.change_log() == []
+
+
+def test_idempotency_keys_is_empty_and_untracked(instance: seahaven.Instance) -> None:
+    """The keyed-POST store starts empty and never reaches the change log."""
+    assert instance.inspect().one("SELECT count(*) AS n FROM idempotency_keys") == {"n": 0}
+    assert "idempotency_keys" not in {row.table for row in instance.change_log()}

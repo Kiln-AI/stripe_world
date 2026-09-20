@@ -9,18 +9,20 @@ def test_importing_the_package_builds_the_world() -> None:
     assert stripeapi.world.pinned_state_format == "seahaven.state/1"
 
 
-def test_the_chain_is_error_handler_then_stripe_envelope() -> None:
+def test_the_chain_is_error_handler_then_stripe_envelope_then_idempotency() -> None:
     """Registration order is chain order, outermost first.
 
-    The error handler wraps everything — a bug in the Stripe envelope reaches
-    the agent as this world's `INTERNAL`, never as a raw traceback. The
-    idempotency layer registers inside the envelope in a later phase
-    (`components/cross_cutting.md` §3.1.7).
+    The error handler wraps everything — a bug below it reaches the agent as
+    this world's `INTERNAL`, never as a raw traceback. The Stripe envelope
+    sits inside it, and the idempotency layer innermost — inside the envelope
+    so it sees `ApiResponse` returns and `StripeApiError` raises rather than
+    rendered bodies (`components/cross_cutting.md` §3.1.7).
     """
     from stripeapi.middleware.error_handler import error_handler
+    from stripeapi.middleware.idempotency import idempotency
     from stripeapi.middleware.stripe_envelope import stripe_envelope
 
-    assert list(stripeapi.world.middlewares) == [error_handler, stripe_envelope]
+    assert list(stripeapi.world.middlewares) == [error_handler, stripe_envelope, idempotency]
 
 
 def test_the_four_stripe_tools_are_registered() -> None:

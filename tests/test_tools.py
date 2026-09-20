@@ -79,12 +79,18 @@ def seahaven_world_tool_description(name: str) -> str:
 def test_the_wired_surface_is_small_and_named() -> None:
     """What is served end to end: the customers phase's thirteen routes (five
     core customers, six payment_methods, two customer-scoped payment-method
-    reads) plus the catalog phase's twenty-two (five products, four prices,
-    five coupons, four promotion_codes, four tax_rates). The rest are routed
-    data awaiting their resource phases, and calling one is an honest
-    `INTERNAL` naming the op (see `test_dispatch.py`)."""
+    reads), the catalog phase's twenty-two (five products, four prices, five
+    coupons, four promotion_codes, four tax_rates), and the money path's
+    twelve (seven payment_intents, five charges). The rest are routed data
+    awaiting their resource phases, and calling one is an honest `INTERNAL`
+    naming the op (see `test_dispatch.py`)."""
     wired = [route.op_id for route in _all_routes() if route.params is not None]
     assert wired == [
+        "GetCharges",
+        "PostCharges",
+        "GetChargesCharge",
+        "PostChargesCharge",
+        "PostChargesChargeCapture",
         "GetCoupons",
         "PostCoupons",
         "GetCouponsCoupon",
@@ -97,6 +103,13 @@ def test_the_wired_surface_is_small_and_named() -> None:
         "DeleteCustomersCustomer",
         "GetCustomersCustomerPaymentMethods",
         "GetCustomersCustomerPaymentMethodsPaymentMethod",
+        "GetPaymentIntents",
+        "PostPaymentIntents",
+        "GetPaymentIntentsIntent",
+        "PostPaymentIntentsIntent",
+        "PostPaymentIntentsIntentCancel",
+        "PostPaymentIntentsIntentCapture",
+        "PostPaymentIntentsIntentConfirm",
         "GetPaymentMethods",
         "PostPaymentMethods",
         "GetPaymentMethodsPaymentMethod",

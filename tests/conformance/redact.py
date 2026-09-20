@@ -41,6 +41,7 @@ _EMAIL = re.compile(r"[\w.+-]+@([A-Za-z0-9-]+\.)+[A-Za-z]{2,}")
 KEY_PLACEHOLDER = "<redacted:api_key>"
 ACCOUNT_PLACEHOLDER = "<redacted:account_id>"
 REQUEST_LOG_PLACEHOLDER = "<redacted:request_log_url>"
+RECEIPT_URL_PLACEHOLDER = "<redacted:receipt_url>"
 
 
 class RedactionError(Exception):
@@ -93,6 +94,11 @@ def _scrub_string(text: str, where: str, findings: list[str]) -> str:
         # A known, declared field (see the module docstring): normalized, not
         # a finding, so ordinary error envelopes do not abort every recording.
         return REQUEST_LOG_PLACEHOLDER
+    if where.endswith(".receipt_url"):
+        # A charge receipt URL base64-embeds the dashboard account id inside
+        # its signature segment (probed, Phase 8), which no regex in here can
+        # see through — normalized like request_log_url rather than trusted.
+        return RECEIPT_URL_PLACEHOLDER
     for pattern, placeholder, label in (
         (_API_KEY, KEY_PLACEHOLDER, "an API key"),
         (_ACCOUNT_ID, ACCOUNT_PLACEHOLDER, "an account id"),

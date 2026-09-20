@@ -123,10 +123,11 @@ _SUCCESS = {
 _3DS = {
     "4000002500003155": "authentication_required",
     "4000002760003184": "authentication_required",
-    "4000003800000446": None,  # already set up for off-session use
-    "4000008400001629": "authentication_required",  # authenticates, then declines
     "4000000000003220": "authentication_required",
+    "4000000000003063": "authentication_required",
+    "4000008400001629": "authentication_required",  # authenticates, then declines
     "4000000000003055": None,  # 3DS supported, not required
+    "4000003800000446": None,  # already set up for off-session use
 }
 
 _DISPUTES = {
@@ -167,10 +168,13 @@ _TOKENS = {
     "tok_chargeDeclinedIncorrectCvc": "4000000000000127",
     "tok_chargeDeclinedProcessingError": "4000000000000119",
     "tok_visa_chargeDeclinedVelocityLimitExceeded": "4000000000006975",
-    "tok_card_threeDSecure2Required": "4000000000003220",
-    "tok_card_threeDSecureRequiredChargeDeclined": "4000008400001629",
-    "tok_card_threeDSecureOptional": "4000000000003055",
-    "tok_card_authenticationRequired": "4000002500003155",
+    # The 3DS tokens' real spellings, probed 2026-09-20 at the pinned
+    # version: `tok_card_threeDSecure*` (this table's first transcription) is
+    # not a token the live API knows ("There is a part of the token that is
+    # not valid: 'card'."), while `tok_threeDSecure2Required` (…3220) and
+    # `tok_threeDSecureRequired` (…3063) are.
+    "tok_threeDSecure2Required": "4000000000003220",
+    "tok_threeDSecureRequired": "4000000000003063",
     "tok_card_createDispute": "4000000000000259",
     "tok_card_createDisputeProductNotReceived": "4000000000002685",
     "tok_card_createDisputeInquiry": "4000000000001976",

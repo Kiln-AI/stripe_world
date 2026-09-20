@@ -16,12 +16,18 @@ from functools import cache
 from importlib import resources
 from typing import Any
 
-from stripeapi.spec.enums import DECLARED_OVERRIDES, DOC_ONLY_ENUMS, ENUM_OVERRIDES
+from stripeapi.spec.enums import (
+    DECLARED_OVERRIDES,
+    DECLINE_CODES,
+    DOC_ONLY_ENUMS,
+    ENUM_OVERRIDES,
+)
 from stripeapi.spec.event_types import EVENT_TYPES
 from stripeapi.spec.expandable import EXPANDABLE_FIELDS
 
 __all__ = [
     "DECLARED_OVERRIDES",
+    "DECLINE_CODES",
     "DOC_ONLY_ENUMS",
     "ENUM_OVERRIDES",
     "EVENT_TYPES",

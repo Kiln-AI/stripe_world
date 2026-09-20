@@ -1,6 +1,7 @@
--- Infrastructure tables (components/data_model.md §5). `idempotency_keys` joins
--- here in the idempotency phase; `counters` and `events` are needed from the
--- dispatcher phase on — `x_seq` assignment and event emission.
+-- Infrastructure tables (components/data_model.md §5, cross_cutting.md §3.1.3).
+-- `counters` and `events` are needed from the dispatcher phase on — `x_seq`
+-- assignment and event emission; `idempotency_keys` joins in the money-path
+-- phase, when the first keyed POST exists (cross_cutting.md §3.1).
 
 CREATE TABLE events (
     id                      TEXT PRIMARY KEY,
@@ -45,3 +46,20 @@ INSERT INTO counters (name, value) VALUES
     ('subscriptions', 0), ('subscription_items', 0), ('subscription_schedules', 0),
     ('invoices', 0), ('invoiceitems', 0), ('credit_notes', 0),
     ('customer_balance_transactions', 0), ('events', 0);
+
+-- The idempotency layer's store (cross_cutting.md §3.1.3, DDL verbatim).
+-- `status` and `body` are null while in flight, non-null once complete; `body`
+-- holds the rendered response body through the one canonical dump. The table
+-- is untracked (world.py): a middleware write must never appear in a graded
+-- episode's change log, and the table has no `x_seq` because it is never
+-- listed — its only reads are by primary key.
+CREATE TABLE idempotency_keys (
+    key          TEXT    NOT NULL PRIMARY KEY,
+    method       TEXT    NOT NULL,
+    path         TEXT    NOT NULL,
+    request_hash TEXT    NOT NULL,
+    state        TEXT    NOT NULL CHECK (state IN ('in_flight', 'complete')),
+    status       INTEGER,
+    body         TEXT    CHECK (body IS NULL OR json_valid(body)),
+    created      TEXT    NOT NULL
+) STRICT;

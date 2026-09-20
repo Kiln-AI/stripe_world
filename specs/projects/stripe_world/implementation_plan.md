@@ -61,7 +61,7 @@ Each still touches only its own tables.
       payment-method creation.
 - [x] **Phase 7: Catalog.** `products`, `prices`, `coupons`, `promotion_codes`, `tax_rates`. Mostly
        generated CRUD — the slice that proves the `ResourceSpec` engine carries its weight.
-- [ ] **Phase 8: The money path.** `payment_intents`, `charges`. Confirm, capture, cancel. The
+- [x] **Phase 8: The money path.** `payment_intents`, `charges`. Confirm, capture, cancel. The
       headline idempotency eval becomes runnable here.
 - [ ] **Phase 9: Refunds and disputes.** Partial refunds, over-refund rejection, dispute lifecycle.
 - [ ] **Phase 10: Setup intents.**

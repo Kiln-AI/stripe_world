@@ -11,6 +11,7 @@ import pytest
 from tools_dev.prune_spec import (
     API_VERSION,
     DECLARED_OVERRIDES,
+    DECLINE_CODES,
     DOC_ONLY_ENUMS,
     ENUM_OVERRIDES,
     EXTRA_DOC_ONLY_ENUMS,
@@ -308,6 +309,7 @@ def test_artifacts_carry_enums_and_event_types_verbatim() -> None:
     assert artifacts.enums == DOC_ONLY_ENUMS
     assert artifacts.enum_overrides == ENUM_OVERRIDES
     assert artifacts.declared_overrides == DECLARED_OVERRIDES
+    assert artifacts.decline_codes == DECLINE_CODES  # hand-transcribed, carried verbatim
     assert artifacts.event_types == EVENTS
 
 
