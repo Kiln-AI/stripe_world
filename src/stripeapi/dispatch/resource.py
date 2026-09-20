@@ -82,6 +82,12 @@ class ListFilter:
     # A `kind="json"` filter's accepted subfields, as body-shaped `Param`s:
     # `prices?recurring[interval]=month` is one of these.
     sub_shape: tuple[Param, ...] = ()
+    # Values with one of these prefixes answer an empty page rather than a
+    # match. The one live quirk that needs it (probed, Phase 11):
+    # `GET /v1/balance_transactions?source=<dispute>` answers `[]` even
+    # though the withdrawal row's own `source` field names the dispute — the
+    # filter never matches dispute ids, whatever the field carries.
+    never_prefixes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -446,6 +452,11 @@ def list_(ctx: seahaven.Ctx, req: Request) -> dict[str, Any]:
         value = req.params[flt.name]
         if flt.references is not None:
             _require_filter_reference(ctx, flt, value)
+        if flt.never_prefixes and isinstance(value, str) and value.startswith(flt.never_prefixes):
+            # The `never_prefixes` quirk: the filter refuses to match these
+            # values at all, so the page is empty rather than filtered.
+            where.append("1 = 0")
+            continue
         if flt.kind == "range":
             for op, bound in value.items():
                 where.append(f"{flt.column} {_RANGE_SQL[op]} ?")

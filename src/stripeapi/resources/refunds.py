@@ -15,8 +15,13 @@ message naming `payment_intent or charge`, the unknown-charge 404 under
 alias — answering with the **charge**, where the plural scoped create
 answers with the refund.
 
-`balance_transaction` stays NULL until the ledger phase writes it (the
-Phase 8 precedent for charge columns whose FK parent does not exist yet).
+`balance_transaction` is the refund's ledger row, written at creation on the
+synchronous path (Phase 11): `type: refund`, negative amount, fee 0 — all
+recorded (probed; the row also resolves the research's legacy/`payment_refund`
+pair question at this version). A pending refund — only the async-success
+card writes those — reserves nothing on a frozen clock, so it carries no row
+until it settles, which it never does here (declared, Phase 9's settlement
+entry).
 """
 
 from collections.abc import Mapping
@@ -25,6 +30,7 @@ from typing import TYPE_CHECKING, Any
 import seahaven
 
 from stripeapi import _ids, _json, _seq
+from stripeapi.billing import ledger
 from stripeapi.dispatch.params import Param, ParamSpec
 from stripeapi.dispatch.resource import (
     ListFilter,
@@ -378,6 +384,25 @@ def create_refund(
             int(refunded == charge["amount_captured"]),
             charge["id"],
         )
+        # The settled refund moves money back out: its ledger row (recorded,
+        # Phase 11 — `REFUND FOR CHARGE (<charge description>)`, the parens
+        # only when the charge is described; the undescribed corner is this
+        # world's ruling, declared).
+        bt = ledger.record(
+            ctx,
+            type_="refund",
+            amount=-amount,
+            fee=0,
+            currency=charge["currency"],
+            source_id=id_,
+            description=(
+                f"REFUND FOR CHARGE ({charge['description']})"
+                if charge["description"]
+                else "REFUND FOR CHARGE"
+            ),
+            reporting_category="refund",
+        )
+        ctx.db.execute("UPDATE refunds SET balance_transaction = ? WHERE id = ?", bt["id"], id_)
     row = _lookup.require_row(ctx, "refunds", "refund", id_, param="refund")
     events.emit_event(ctx, type="refund.created", obj=serialize(ctx, row))
     if not is_async_success:

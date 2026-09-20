@@ -86,7 +86,9 @@ def test_the_refund_body(instance: seahaven.Instance) -> None:
     assert refund["customer_account"] is None
     assert refund["transfer_reversal"] is None
     assert refund["source_transfer_reversal"] is None
-    assert refund["balance_transaction"] is None  # the ledger is Phase 11's
+    # the refund's ledger row, written at creation (Phase 11, recorded)
+    assert isinstance(refund["balance_transaction"], str)
+    assert refund["balance_transaction"].startswith("txn_")
     assert refund["destination_details"] == {
         "card": {
             "reference_status": "pending",

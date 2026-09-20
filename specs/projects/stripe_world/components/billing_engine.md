@@ -329,7 +329,6 @@ class LedgerSpec:
     fees: FeeSchedule = FeeSchedule()
     settlement_business_days: int = 2       # T+2
     dispute_received_fee: Money = 1500
-    dispute_countered_fee: Money = 1500
 
 def ledger_spec(ctx) -> LedgerSpec                   # from ctx.state["account"]["ledger"]
 
@@ -338,8 +337,8 @@ def record(ctx, *, type_: str, amount: Money, fee: Money, currency: str,
            available_on_iso: str | None = None,
            fee_details: list[dict] | None = None,
            reporting_category: str | None = None) -> dict:
-    """Mint a bt_ id and write ONE balance_transactions row. `type_` is checked against
-    spec/enums.py's 51-value set; an unknown value is a WorldBug. Stores net = amount - fee
+    """Mint a `txn_` id and write ONE balance_transactions row. `type_` is checked against
+    spec/enums.py's 50-value set; an unknown value is a WorldBug. Stores net = amount - fee
     as a column so the arithmetic is auditable in SQL; a CHECK enforces the identity."""
 
 def available_on(created_iso: str, type_: str, spec: LedgerSpec) -> str        # pure
@@ -958,33 +957,47 @@ dunning" eval grades, and none of it needs a clock that moves.
 
 #### What creates a `balance_transaction`
 
-Exactly one row per money movement. `type` is checked against the 51-value enum in `spec/enums.py`,
+Exactly one row per money movement. `type` is checked against the 50-value enum in `spec/enums.py`,
 generated from `spec3.json`; an unknown value is a `WorldBug`.
 
 | Event | `type` | `amount` | `fee` | `available_on` | `source` |
 |---|---|---|---|---|---|
 | Charge captured | `charge` | `+charge.amount` | `stripe_fee(amount)` | `created + T+2` | `ch_…` |
-| Refund | `refund` | `−refund.amount` | `0` | `created` | `re_…` |
-| Refund failed, funds returned | `refund_failure` | `+refund.amount` | `0` | `created` | `re_…` |
-| **Dispute opened** | **`adjustment`** | `−disputed_amount` | `+dispute_received_fee` | `created` | `dp_…` |
-| **Dispute won** | **`adjustment`** | `+disputed_amount` | `−dispute_countered_fee` if the merchant countered, else `0` | `created` | `dp_…` |
+| Refund | `refund` | `−refund.amount` | `0` | `created + T+2` | `re_…` |
+| Refund failed, funds returned | `refund_failure` | `+refund.amount` | `0` | `created + T+2` | `re_…` |
+| **Dispute opened** | **`adjustment`** | `−disputed_amount` | `+dispute_received_fee` | `created + T+2` | `du_…` |
+| **Dispute won** | **`adjustment`** | `+disputed_amount` | `0` | `created + T+2` | `du_…` |
 | Dispute lost | *(none)* | — | — | — | — |
 | Payout created | `payout` | `−payout.amount` | `0` (standard) | `created` | `po_…` |
 | Payout failed | `payout_failure` | `+payout.amount` | `0` | `created` | `po_…` |
 | Payout canceled | `payout_cancel` | `+payout.amount` | `0` | `created` | `po_…` |
 
+(`available_on` corrected throughout against the Phase 11 cassettes' own values — read out of
+`11_ledger_payouts.json`, not reconstructed from the rule: the recorded charge and refund rows
+(both created Sun 2026-09-20 ~22:21Z) carry `status: "pending"` with `available_on` day-floored to
+midnight UTC, while the recorded dispute withdrawal answers `status: "available"` with
+`available_on == created` to the exact second — the recording account holds its withdrawn funds
+immediately available, where an earlier draft of this table settled refunds and dispute rows
+immediately and this world holds everything but the payout family pending under its own declared
+T+2. Payout rows leave the available balance the moment they are written, so theirs is `created`.
+The divergences the recording exposes — this world's shorter delay, and its pending rather than
+available dispute withdrawals — are the `**.available_on` and `_bt_settlement_status` allow-list
+entries, not silent.)
+
 Dispute withdrawal **and** reversal are both `type = adjustment`. This is confirmed verbatim, not
 inferred — `docs.stripe.com/reports/balance-transaction-types` states both halves explicitly under
 the `adjustment` type, with the `source` pointing at the dispute and the `description` carrying the
-distinction. The enum has no dispute-specific value and a mock that invents one is wrong.
+distinction (`Chargeback withdrawal for ch_…` / `Chargeback reversal for ch_…`, both recorded). The
+enum has no dispute-specific value and a mock that invents one is wrong.
 
-Dispute fees follow the documented two-fee structure: the **received** fee is charged when the
-dispute opens and is **never** returned; the **countered** fee is charged only if the merchant
-submits evidence and **is** returned on a win. So a merchant who wins a contested dispute recovers
-the disputed amount and the countered fee, but not the received fee. That is why the reversal row
-carries a *negative* `fee`: `net = amount − fee = disputed_amount + countered_fee`. A `lost` dispute
-writes no second row; the `dispute.balance_transactions` array is documented as holding "zero, one, or
-two" entries and this table is what produces each count.
+Dispute fees, **corrected by the Phase 11 recording** (cassette 05's settled-won body, re-read on
+currency-native rows in cassette 11 — an earlier draft of this section described a two-fee model
+from the docs' pricing pages): the flat **received** fee is charged with the withdrawal and **kept
+whether the merchant wins or loses**. No "countered" fee row exists anywhere in the recorded
+corpus, and the win's reversal row carries `fee: 0, fee_details: []` — the merchant recovers
+exactly the disputed amount. A `lost` dispute writes no second row; the
+`dispute.balance_transactions` array is documented as holding "zero, one, or two" entries and this
+table is what produces each count.
 
 A `prevented` dispute writes **zero** rows. The docs' language for the fully-prevented path is that
 "the dispute is never filed" with no fee, and whether the fee-bearing prevention products create a
@@ -1018,24 +1031,43 @@ net = amount − fee          # spec3.json states this identity verbatim
 Stored as a column with `CHECK (net = amount - fee)`, so an implementation bug becomes a constraint
 violation rather than a silently wrong balance.
 
-`available_on = created + 2 business days` for `charge` rows, computed by a pure
-`add_business_days(iso, n)` (Mon–Fri, no holiday calendar); `= created` for every other type, so a
-refund, dispute adjustment or payout hits the available balance immediately. Real Stripe's
-settlement delay varies by country and account and has no canonical constant; T+2 is a world
-constant, declared. Business days rather than calendar days because a fixture with `available_on`
-landing on a Sunday is visibly wrong to anyone reading it.
+`available_on` is **midnight UTC of the creation day plus `settlement_business_days` (default 2)
+calendar days** — for `charge`, `refund` and `adjustment` rows alike — and `created` itself for the
+payout family (`payout`, `payout_cancel`, `payout_failure`), whose committed funds leave the
+available balance immediately. This is `ledger.available_on`, and what the recordings ground is
+the **shape**, not the constant: cassette 11's charge and refund rows (both created Sun
+2026-09-20 ~22:21Z) settle `pending` onto a midnight-UTC instant day-floored the same way — at
+the recording account's own +7-day delay (Sun → Sun 00:00 UTC), which is account policy, not a
+universal; the dispute withdrawal is the deliberate exception and diverges here, answered below.
+T+2 itself is a declared world constant (real Stripe's delay varies by country and account and
+has no canonical value). An earlier draft of this paragraph settled refunds and dispute rows
+immediately and used a business-day walker; the day-floor and the fresh-row `pending` status are
+what the cassettes actually carry.
 
-`balance_transaction.status` is **not a column**. It is derived at serialization time:
+The dispute rows are the one place this world's ruling knowingly differs from its recording: the
+recorded withdrawals (cassette 11 steps 13/24, cassette 05 likewise) answer `status: "available"`
+with `available_on == created` to the exact second — the recording account holds withdrawn funds
+available immediately — where `ledger.available_on` holds them pending under the same T+2 as
+everything else. Both halves of that difference are declared allow-list entries (the
+`_bt_settlement_status` predicate for the status, `**.available_on` for the instant), not silent.
+
+`balance_transaction.status` **is a stored column**, written once by `ledger.record` from the pure
+comparison
 
 ```python
 def bt_status(available_on_iso, now_iso):
     return "available" if available_on_iso <= now_iso else "pending"
 ```
 
-ISO-8601 in Seahaven's canonical form sorts correctly as text, so this is a string comparison and the
-same comparison works identically in SQL. The field is typed as a bare `string` in `spec3.json` with
-its two values stated only in prose, so it is one of the six fields the conformance validator checks
-against an extracted set rather than against the schema (functional spec §4).
+Storing rather than deriving is safe precisely because the clock is frozen: within one instance a
+row's settlement instant never crosses `now`, so the written value cannot go stale — and the
+`ledger_spec` override seam (a fixture may set `settlement_business_days`) is applied at write
+time, where it belongs. (An earlier draft derived it at serialization time; `ledger.record` and
+the DDL's CHECK settle the question the other way.) ISO-8601 in Seahaven's canonical form sorts
+correctly as text, so the comparison above is a string comparison and the same comparison works
+identically in SQL. The field is typed as a bare `string` in `spec3.json` with its two values
+stated only in prose, so it is one of the six fields the conformance validator checks against an
+extracted set rather than against the schema (functional spec §4).
 
 `/v1/balance` is a computed read over the ledger — no table, no counter, so it cannot drift:
 
@@ -1048,9 +1080,14 @@ WHERE balance_type = 'payments'
 GROUP BY currency;
 ```
 
-serialized into `balance.available[]` / `balance.pending[]` with their `source_types` breakdown.
-`instant_available`, `connect_reserved`, `issuing` and `refund_and_dispute_prefunding` are returned
-as empty arrays; `balance_type` is written `payments` on every row this world creates.
+serialized into `balance.available[]` / `balance.pending[]` with their `source_types` breakdown
+(`{card: amount}` — every money path in scope arrives by card). `instant_available`,
+`connect_reserved`, `issuing` and `refund_and_dispute_prefunding` are **omitted while empty**:
+the spec requires only `available`/`livemode`/`object`/`pending`, and the recorded account's
+all-zero prefunding block (cassette 11) is carried as a scenario-scoped allow-list entry rather
+than reproduced — no prefunding ledger row exists in this world to report. `balance_type` is
+written `payments` on every row this world creates; the SQL filter above is what keeps a future
+prefunding row out of the main buckets when one appears.
 
 #### How payouts draw down
 
@@ -1064,18 +1101,31 @@ There is no separate draw-down bookkeeping, and that is the design:
    already lower by exactly that amount. `payout.balance_transaction` points at it.
 4. Status moves `pending → in_transit → paid`, or `→ failed` / `→ canceled`. A failure or
    cancellation writes a **second, reversing** row (`payout_failure` / `payout_cancel`,
-   `amount = +payout.amount`) referenced by `payout.failure_balance_transaction`. The original row is
+   `amount = +payout.amount`) referenced by `payout.failure_balance_transaction`, and clears the
+   sweep — the rows were never paid out. The original row is
    never mutated — mutating it would make the ledger unauditable and would contradict the existence
-   of the two distinct type values.
-5. `reconciliation_status = completed` once paid, at which point
-   `GET /v1/balance_transactions?payout=po_…` lists the rows swept into it.
+   of the two distinct type values. A `paid` payout is **not** failable: unwinding one is
+   `reverse_payout`'s job (the negative reversing payout with `original_payout` / `reversed_by`
+   cross-links, born paid, emitting `payout.updated` for the original then
+   `payout.created` / `payout.paid` for the reversal — the documented webhook order); `fail_payout`
+   accepts `pending` and `in_transit` only.
+5. `reconciliation_status = completed` **at creation**: the sweep that fills `x_payout` (and so
+   answers `GET /v1/balance_transactions?payout=po_…`) is synchronous here, so there is no window
+   in which `in_progress` would be honest. (An earlier draft deferred completion to `paid`; the
+   synchronous sweep ships instead — `ledger.create_payout` and `test_create_draws_down_and_sweeps`.)
 
 Payout status never advances on its own — no clock, no scheduler. `arrival_date` is populated
-honestly and never arrives; transitions happen when called, or are laid down by the fixture
-generator. Same declared difference as `automatically_finalizes_at`.
+honestly (the settlement window's day floor, a declared ruling: live arrival follows the
+destination's banking schedule, which no frozen clock and no stub destination can model) and never
+arrives; transitions happen when called (`settle_payout`, the fixture/test-only sibling of
+`advance_cycle`), or are laid down by the fixture generator. Same declared difference as
+`automatically_finalizes_at`.
 
-Instant payouts and `instant_available` are not modelled: `method = instant` is rejected with
-`invalid_request_error` / `payouts_not_allowed`, declared.
+`instant_available` is not modelled, and `method = instant` is **accepted**: it draws the ordinary
+available balance like a standard payout, declared in `allowed_differences.py`'s structural
+section — the bucket it should draw from never fills in this world, so the substitution is
+unobservable through the tools. (An earlier draft rejected it with `payouts_not_allowed`; the
+accepting ruling is what `payouts.py`'s create parameter and the structural entry ship.)
 
 ### 7. Time: what this component can and cannot do
 
@@ -1188,7 +1238,7 @@ SELECT c.id FROM customers c
 WHERE c.balance <> (SELECT COALESCE(SUM(amount), 0)
                     FROM customer_balance_transactions t WHERE t.customer_id = c.id);
 
--- I15 Every ledger type this world wrote is in the spec's 51-value enum.
+-- I15 Every ledger type this world wrote is in the spec's 50-value enum.
 SELECT DISTINCT type FROM balance_transactions
 WHERE type NOT IN ( /* generated from spec/enums.py */ );
 ```
@@ -1206,7 +1256,7 @@ balance discrepancy", "over-refunding", "a mid-cycle plan change whose proration
 | `ctx.clock` | `now()` / `iso()`. The only source of time in the component — nothing reads a wall clock |
 | `ctx.ids` via `_ids.py::stripe_id` | `in_`, `il_`, `ii_`, `sub_`, `si_`, `txn_`, `cbtxn_`, `po_`, `evt_` prefixes. **Never `ctx.ids.uuid()`** — a test greps `billing/` for it (architecture §4.4) |
 | `ctx.state["account"]` | `RetryPolicy`, `FeeSchedule`, `LedgerSpec`, settlement delay, dispute fees. Written by `startup.py` |
-| `_time.py` | ISO ↔ unix seconds, `iso_plus`, `add_business_days`. Conversion lives here and nowhere else |
+| `_time.py` | ISO ↔ unix seconds (`to_unix` / `from_unix`) and nothing else; the ledger's day-floored settlement arithmetic lives in `ledger.available_on`. Conversion lives here and nowhere else |
 | `_json.py` | The single canonical dump for `invoices.lines` and every JSON column |
 | `spec/enums.py` | The `balance_transaction.type`, `billing_reason`, status and `decline_code` closed sets |
 | `spec/event_types.py` | Validation set for `emit_event` |
@@ -1329,19 +1379,24 @@ asserts `attempt_count` is unchanged, pinning the frozen-clock statement as a te
 comment.
 `test_retry_policy_is_not_a_subscription_field` — asserts no such column and no such API parameter.
 
-### Ledger — `tests/billing/test_ledger.py`
+### Ledger — `tests/test_ledger.py` and `tests/test_payouts.py`
 
-`test_net_equals_amount_minus_fee`, `test_fee_details_sum_to_fee`,
-`test_fee_rounds_half_up`, `test_available_on_is_t_plus_two_business_days`,
-`test_available_on_skips_weekend`, `test_refund_available_immediately`,
-`test_status_derived_not_stored`, `test_balance_splits_available_and_pending`,
-`test_payout_draws_down_available_immediately`,
-`test_payout_exceeding_available_is_balance_insufficient_and_writes_nothing`,
-`test_payout_failure_writes_reversing_row_not_a_mutation`,
-`test_dispute_withdrawal_is_adjustment`, `test_dispute_reversal_is_adjustment`,
-`test_dispute_received_fee_never_returned`, `test_dispute_countered_fee_returned_on_win`,
-`test_lost_dispute_writes_one_row_only`, `test_prevented_dispute_writes_no_rows`,
-`test_unknown_balance_transaction_type_is_world_bug`.
+The shipped names, aligned to the rulings above (a stale earlier list named
+business-day/derivation tests none of which matched the shipped behavior):
+`test_net_is_amount_minus_fee_everywhere`, `test_the_default_fee_schedule_is_290_plus_30`,
+`test_the_charge_bt` (day-floored T+2 `status: pending` on a fresh row),
+`test_the_refund_bt`, `test_the_chargeback_withdrawal_and_the_win_reversal`,
+`test_the_inquiry_writes_nothing_until_escalated`, `test_a_lost_dispute_keeps_its_withdrawal_only`,
+`test_the_balance_on_an_empty_ledger` (optional buckets omitted while empty),
+`test_the_balance_split_and_the_draw_down`, `test_the_balance_equals_the_ledger_sums`,
+`test_every_captured_charge_has_exactly_one_row`, `test_every_source_resolves_in_exactly_one_table`;
+on the payout side, `test_create_draws_down_and_sweeps`,
+`test_create_refuses_beyond_the_available_balance`,
+`test_cancel_returns_the_funds_and_unsweeps`,
+`test_fail_payout_is_the_fixture_surface` (the reversal row, not a mutation, and `pending`/`
+in_transit` only), `test_settle_then_reverse` (the negative reversing payout, cross-links, and the
+documented event order), `test_the_recorded_create_refusals`, and
+`test_an_unknown_balance_transaction_type_is_a_world_bug`.
 
 ### Invariants — `tests/invariants/test_billing_invariants.py`
 

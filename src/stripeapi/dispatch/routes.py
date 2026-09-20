@@ -28,12 +28,15 @@ if TYPE_CHECKING:
     from stripeapi.dispatch.response import Handler
 
 from stripeapi.resources import (
+    balance,
+    balance_transactions,
     charges,
     coupons,
     customers,
     disputes,
     payment_intents,
     payment_methods,
+    payouts,
     prices,
     products,
     promotion_codes,
@@ -77,11 +80,39 @@ class Route:
 
 
 ALL: Final[tuple[Route, ...]] = (
-    # balance
-    Route(method="GET", pattern="/v1/balance", op_id="GetBalance"),
-    # balance_transactions
-    Route(method="GET", pattern="/v1/balance_transactions", op_id="GetBalanceTransactions"),
-    Route(method="GET", pattern="/v1/balance_transactions/{id}", op_id="GetBalanceTransactionsId"),
+    # balance — the computed read over the ledger (Phase 11); no id, no
+    # table, `billing/ledger.py::read_balance` behind the handler.
+    Route(
+        method="GET",
+        pattern="/v1/balance",
+        op_id="GetBalance",
+        response_object="balance",
+        envelope="object",
+        params=balance.BALANCE_READ,
+        handler=balance.read,
+    ),
+    # balance_transactions — append-only reads; the rows are written by the
+    # money path and the ledger, never by these routes.
+    Route(
+        method="GET",
+        pattern="/v1/balance_transactions",
+        op_id="GetBalanceTransactions",
+        response_object="balance_transaction",
+        envelope="list",
+        params=balance_transactions.BT_LIST,
+        resource=balance_transactions.SPEC,
+        action="list",
+    ),
+    Route(
+        method="GET",
+        pattern="/v1/balance_transactions/{id}",
+        op_id="GetBalanceTransactionsId",
+        response_object="balance_transaction",
+        envelope="object",
+        params=balance_transactions.BT_RETRIEVE,
+        resource=balance_transactions.SPEC,
+        action="retrieve",
+    ),
     # charges — create and capture are the legacy surface's recorded
     # refusals (the modern API will not make a card charge without a
     # PaymentIntent); list/retrieve/update are engine-served
@@ -676,13 +707,67 @@ ALL: Final[tuple[Route, ...]] = (
         params=payment_methods.PM_DETACH,
         handler=payment_methods.detach,
     ),
-    # payouts
-    Route(method="GET", pattern="/v1/payouts", op_id="GetPayouts"),
-    Route(method="POST", pattern="/v1/payouts", op_id="PostPayouts"),
-    Route(method="GET", pattern="/v1/payouts/{payout}", op_id="GetPayoutsPayout"),
-    Route(method="POST", pattern="/v1/payouts/{payout}", op_id="PostPayoutsPayout"),
-    Route(method="POST", pattern="/v1/payouts/{payout}/cancel", op_id="PostPayoutsPayoutCancel"),
-    Route(method="POST", pattern="/v1/payouts/{payout}/reverse", op_id="PostPayoutsPayoutReverse"),
+    # payouts — create/cancel/reverse are the ledger's state transitions;
+    # list/retrieve/update are engine-served. The success bodies are
+    # spec-derived (the recording account cannot mint a payout; Phase 11's
+    # structural declaration).
+    Route(
+        method="GET",
+        pattern="/v1/payouts",
+        op_id="GetPayouts",
+        response_object="payout",
+        envelope="list",
+        params=payouts.PAYOUT_LIST,
+        resource=payouts.SPEC,
+        action="list",
+    ),
+    Route(
+        method="POST",
+        pattern="/v1/payouts",
+        op_id="PostPayouts",
+        response_object="payout",
+        envelope="object",
+        params=payouts.PAYOUT_CREATE,
+        handler=payouts.create,
+    ),
+    Route(
+        method="GET",
+        pattern="/v1/payouts/{payout}",
+        op_id="GetPayoutsPayout",
+        response_object="payout",
+        envelope="object",
+        params=payouts.PAYOUT_RETRIEVE,
+        resource=payouts.SPEC,
+        action="retrieve",
+    ),
+    Route(
+        method="POST",
+        pattern="/v1/payouts/{payout}",
+        op_id="PostPayoutsPayout",
+        response_object="payout",
+        envelope="object",
+        params=payouts.PAYOUT_UPDATE,
+        resource=payouts.SPEC,
+        action="update",
+    ),
+    Route(
+        method="POST",
+        pattern="/v1/payouts/{payout}/cancel",
+        op_id="PostPayoutsPayoutCancel",
+        response_object="payout",
+        envelope="object",
+        params=payouts.PAYOUT_CANCEL,
+        handler=payouts.cancel,
+    ),
+    Route(
+        method="POST",
+        pattern="/v1/payouts/{payout}/reverse",
+        op_id="PostPayoutsPayoutReverse",
+        response_object="payout",
+        envelope="object",
+        params=payouts.PAYOUT_REVERSE,
+        handler=payouts.reverse,
+    ),
     # prices — create and update are hand-written (the `product_data` row and
     # the lookup-key transfer are second-row writes the engine contract keeps
     # out of its normalizers)

@@ -1,10 +1,10 @@
-created_at: '2026-09-20T16:35:54.479Z'
+created_at: '2026-09-20T21:58:41.359Z'
 description: Schema only. Start here to write history, or to test setup flows.
-file_sha256: 9fd592c8abb399c48f87c133039b59db68e3ab4875211e702d842cbf70efc1e7
+file_sha256: 0457a75bbf68b95792be0b4d976d4238f1eccaa0853a6e1bc9392a97deb3ccd4
 format_version: 1
 id: empty
 now: '2026-09-01T14:00:00.000Z'
 parent_id: null
-schema_hash: 309225215e4289a94e56963da2d8b4adbb44585b7a1163bf38df5d3d910c8325
+schema_hash: 0b9c1e0acf95ab78897e0da983b79c1dea4629b5d696aef31a8f9a583433473a
 world: stripeapi
 world_version: 0.1.0

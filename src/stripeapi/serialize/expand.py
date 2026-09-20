@@ -40,6 +40,7 @@ from stripeapi.stripe_errors import cannot_expand
 
 __all__ = [
     "INLINE_LISTS",
+    "POLYMORPHIC_REFS",
     "InlineList",
     "PathTrie",
     "apply",
@@ -74,6 +75,9 @@ class _Edge:
     kind: EdgeKind
     target: str  # schema name; "" for a pruned terminal
     children: dict[str, _Edge] = field(default_factory=dict)
+    # Set when the owner field is a polymorphic reference (see
+    # POLYMORPHIC_REFS): prefix -> API object name, consulted at inflation.
+    polymorphic: dict[str, str] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +103,23 @@ class InlineList:
 #: field is never emitted unexpanded and expansion is a no-op (customer's
 #: `sources`/`subscriptions`/`tax_ids` are exactly that until their phases).
 INLINE_LISTS: dict[tuple[str, str], InlineList] = {}
+
+#: `(schema, field) -> {id prefix: API object name}` for the polymorphic
+#: references whose union names several tables and the wire resolves by
+#: prefix. One exists in scope: `balance_transaction.source`, `anyOf[string |
+#: charge | dispute | payout | refund]` (probed, Phase 11: `expand[]=source`
+#: inflates the right object per row — a charge row and a dispute row in one
+#: list). Without this map the resolver would follow the union's first `$ref`
+#: alone and read every id from the charges table. Read onto the `_Edge` at
+#: construction, where the owner schema is still known.
+POLYMORPHIC_REFS: dict[tuple[str, str], dict[str, str]] = {
+    ("balance_transaction", "source"): {
+        "ch_": "charge",
+        "re_": "refund",
+        "du_": "dispute",
+        "po_": "payout",
+    },
+}
 
 
 def register_inline_list(object_name: str, field_name: str, spec: InlineList) -> None:
@@ -193,7 +214,12 @@ def _make_edge(schema_name: str, field_name: str) -> _Edge:
         kind = "inline_list"
     else:
         kind = "embedded"
-    return _Edge(kind=kind, target=_first_ref(prop) or _inline_list_item(prop) or "", children={})
+    return _Edge(
+        kind=kind,
+        target=_first_ref(prop) or _inline_list_item(prop) or "",
+        children={},
+        polymorphic=POLYMORPHIC_REFS.get((schema_name, field_name)),
+    )
 
 
 def _inline_list_item(prop: dict) -> str | None:
@@ -280,11 +306,27 @@ def _inflate_level(
     for field_name, edge in edges.items():
         values = [(obj, obj.get(field_name)) for obj in frontier]
         if edge.kind == "reference" and edge.target:
-            ids = [value for _, value in values if isinstance(value, str)]
-            cache = _fetch(ctx, BY_OBJECT, edge, ids)
-            for obj, value in values:
-                if isinstance(value, str):
-                    obj[field_name] = cache[value]
+            if edge.polymorphic is not None:
+                # The prefix names the table: one batched fetch per prefix,
+                # the same chunking as the single-target path (§3.3.4).
+                by_object: dict[str, list[str]] = {}
+                for _, value in values:
+                    if isinstance(value, str):
+                        for prefix, object_name in edge.polymorphic.items():
+                            if value.startswith(prefix):
+                                by_object.setdefault(object_name, []).append(value)
+                resolved: dict[str, dict[str, object]] = {}
+                for object_name, ids in by_object.items():
+                    resolved.update(_fetch_by_object(ctx, BY_OBJECT, object_name, ids))
+                for obj, value in values:
+                    if isinstance(value, str) and value in resolved:
+                        obj[field_name] = resolved[value]
+            else:
+                ids = [value for _, value in values if isinstance(value, str)]
+                cache = _fetch(ctx, BY_OBJECT, edge, ids)
+                for obj, value in values:
+                    if isinstance(value, str):
+                        obj[field_name] = cache[value]
         if edge.kind == "inline_list":
             # The registry key is read off each object's own discriminator:
             # one level's frontier can mix schemas (the trie merges paths
@@ -390,11 +432,24 @@ def _fetch(
     """
     if not ids:
         return {}
-    discriminator = _discriminator(edge.target)
-    spec = by_object.get(discriminator)
+    return _fetch_by_object(ctx, by_object, _discriminator(edge.target), ids)
+
+
+def _fetch_by_object(
+    ctx: seahaven.Ctx,
+    by_object: dict[str, Any],
+    object_name: str,
+    ids: Sequence[str],
+) -> dict[str, dict[str, object]]:
+    """`_fetch`'s batched read against an API object name directly — the
+    polymorphic path's spelling, where the prefix (not the schema's first
+    `$ref`) named the table."""
+    if not ids:
+        return {}
+    spec = by_object.get(object_name)
     if spec is None:
         raise seahaven.WorldBug(
-            f"cannot expand into {edge.target!r}: no resource is registered for it yet"
+            f"cannot expand into {object_name!r}: no resource is registered for it yet"
         )
     resolved: dict[str, dict[str, object]] = {}
     wanted = sorted(set(ids))
@@ -409,7 +464,7 @@ def _fetch(
         # The engine emitted this id from a row it just read; a missing target
         # row is a schema or write bug, not something an agent did
         # (`components/cross_cutting.md` §3.3.4).
-        raise seahaven.WorldBug(f"dangling reference into {edge.target!r}: {missing}")
+        raise seahaven.WorldBug(f"dangling reference into {object_name!r}: {missing}")
     return resolved
 
 

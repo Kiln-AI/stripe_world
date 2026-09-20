@@ -73,7 +73,15 @@ def test_the_chargeback_card_creates_the_dispute_inside_the_charge(
     assert dp["livemode"] is False
     assert dp["metadata"] == {}
     assert dp["enhanced_eligibility_types"] == []
-    assert dp["balance_transactions"] == []  # the ledger is Phase 11's
+    # the chargeback's ledger withdrawal, derived from the ledger (Phase 11)
+    [withdrawal] = dp["balance_transactions"]
+    assert withdrawal["object"] == "balance_transaction"
+    assert withdrawal["type"] == "adjustment"
+    assert withdrawal["reporting_category"] == "dispute"
+    assert withdrawal["amount"] == -dp["amount"]
+    assert withdrawal["fee"] == 1500
+    assert withdrawal["net"] == -(dp["amount"] + 1500)
+    assert withdrawal["source"] == dp["id"]
     assert "customer" not in dp  # undeclared on dispute at this version
     assert dp["payment_method_details"] == {
         "card": {

@@ -29,6 +29,7 @@ def test_the_empty_fixture_is_committed(world: seahaven.World) -> None:
 
 def test_an_instance_of_empty_has_the_schema_and_no_rows(instance: seahaven.Instance) -> None:
     assert world_tables(instance.inspect().conn) == [
+        "balance_transactions",
         "charges",
         "counters",
         "coupons",
@@ -38,6 +39,7 @@ def test_an_instance_of_empty_has_the_schema_and_no_rows(instance: seahaven.Inst
         "idempotency_keys",
         "payment_intents",
         "payment_methods",
+        "payouts",
         "prices",
         "products",
         "promotion_codes",
@@ -59,6 +61,8 @@ def test_an_instance_of_empty_has_the_schema_and_no_rows(instance: seahaven.Inst
         "payment_intents",
         "charges",
         "setup_intents",
+        "balance_transactions",
+        "payouts",
     ):
         assert instance.inspect().one(f"SELECT count(*) AS n FROM {table}") == {"n": 0}
 

@@ -170,6 +170,36 @@ def _both_prefixed_ids(*prefixes: str) -> Callable[[Any, Any], bool]:
     return check
 
 
+def _ledger_reference(recorded: Any, replayed: Any) -> bool:
+    """A ledger-reference field (`balance_transaction`, the bt a charge,
+    refund or payout carries). Three shapes pass, in this order of intent:
+
+    1. Both sides freshly minted `txn_` ids — the ordinary id rule.
+    2. Recorded null, replayed id — the async settlement window: live Stripe
+       mints the charge's ledger row moments after the capture (recorded:
+       null on the confirm-time body, populated seconds later, cassette 04
+       steps 10 vs 49); this world's ledger is synchronous, so the row
+       exists inside the call that earned it.
+    3. Recorded id-or-null, replayed **absent** — the dispute's singular
+       `balance_transaction`, which the pinned spec does not declare on
+       `dispute` at all, so this world omits the key (the spec-is-authority
+       ruling every other live-only field follows). The diff walker hands
+       key-absence to the predicate as a `None` replayed value, which is
+       indistinguishable here from a recorded null.
+
+    Arm 3's `None` overlap means the predicate cannot by itself tell a
+    deliberately omitted field from a charge whose ledger write regressed to
+    a null; that regression risk is pinned by the unit suites
+    (`test_the_charge_bt`, `test_the_refund_bt`) and the ledger invariants
+    instead — the compensation is stated here because this file is reviewed
+    as a design document."""
+    if isinstance(recorded, str) and isinstance(replayed, str):
+        return recorded.startswith("txn_") and replayed.startswith("txn_")
+    if replayed is None:
+        return recorded is None or (isinstance(recorded, str) and recorded.startswith("txn_"))
+    return recorded is None and isinstance(replayed, str) and replayed.startswith("txn_")
+
+
 #: A minted promotion-code `code`: eight uppercase alphanumerics per side
 #: (recorded `BFDACGQS`; ours draws the same shape from the seeded stream).
 _MINTED_CODE = re.compile(r"^[A-Z0-9]{8}$")
@@ -415,6 +445,46 @@ def _seti_ownership_modulo_ids(recorded: Any, replayed: Any) -> bool:
             )
         )
     )
+
+
+#: A ledger-source reference: both sides freshly minted ids of the same
+#: prefix family (`ch_`, `re_`, `du_`, `po_`) — the `**.id` rule on the
+#: polymorphic `balance_transaction.source` (Phase 11).
+_LEDGER_SOURCE_PREFIXES = ("ch_", "re_", "du_", "po_")
+
+
+def _both_ledger_sources(recorded: Any, replayed: Any) -> bool:
+    return (
+        isinstance(recorded, str)
+        and isinstance(replayed, str)
+        and any(recorded.startswith(p) and replayed.startswith(p) for p in _LEDGER_SOURCE_PREFIXES)
+    )
+
+
+#: The dispute ledger rows' descriptions name the charge they belong to — the
+#: id-only rule in its third message-shaped disguise (recorded, cassette 05
+#: and 11): `Chargeback withdrawal for ch_…` / `Chargeback reversal for ch_…`.
+_DISPUTE_BT_DESCRIPTION = re.compile(r"^Chargeback (?:withdrawal|reversal) for ch_[A-Za-z0-9]+$")
+
+
+def _dispute_bt_description_modulo_id(recorded: Any, replayed: Any) -> bool:
+    return (
+        isinstance(recorded, str)
+        and isinstance(replayed, str)
+        and bool(
+            _DISPUTE_BT_DESCRIPTION.fullmatch(recorded)
+            and _DISPUTE_BT_DESCRIPTION.fullmatch(replayed)
+        )
+    )
+
+
+#: The settlement-status pair a balance transaction's own `status` may differ
+#: by: the recorded account marks dispute withdrawals available immediately,
+#: this world's T+2 rule holds them pending under a frozen clock (Phase 11).
+#: No other object's `status` can record `available`, so the predicate cannot
+#: mask a charge, refund, payout or dispute status regression.
+def _bt_settlement_status(recorded: Any, replayed: Any) -> bool:
+    return recorded == "available" and replayed == "pending"
 
 
 #: The dispute settle collapse (Phase 9): live test mode resolves the magic
@@ -843,14 +913,14 @@ ALLOWED_DIFFERENCES: list[AllowedDifference] = [
     ),
     AllowedDifference(
         "**.balance_transaction",
-        "The balance ledger lands in Phase 11; until then this world's "
-        "charges carry no ledger reference where the live API mints one at "
-        "capture (recorded: null until capture even live, under the "
-        "default `automatic_async` settlement).",
-        predicate=lambda recorded, replayed: (
-            replayed is None
-            and (recorded is None or (isinstance(recorded, str) and recorded.startswith("txn_")))
-        ),
+        "The ledger reference a charge, refund or payout carries: freshly "
+        "minted `txn_` ids both sides; null recorded against a replayed id "
+        "(the async settlement window — live Stripe mints the charge's row "
+        "moments after capture; this world's ledger is synchronous, Phase 11); "
+        "or the dispute's spec-undeclared singular field, absent here. See "
+        "`_ledger_reference` for the shapes and the compensation for the "
+        "null overlap.",
+        predicate=_ledger_reference,
     ),
     AllowedDifference(
         "**.receipt_url",
@@ -1008,11 +1078,25 @@ ALLOWED_DIFFERENCES: list[AllowedDifference] = [
     ),
     AllowedDifference(
         "**.balance_transactions",
-        "The balance ledger lands in Phase 11; until then a dispute's "
-        "documented zero-one-or-two `adjustment` rows are none here (the "
-        "recorded bodies carry the withdrawal row from creation — a CAD-FX "
-        "artifact of the recording account besides).",
-        predicate=lambda recorded, replayed: isinstance(recorded, list) and replayed == [],
+        "A dispute's derived ledger rows (Phase 11): the recording account "
+        "settles in CAD, so the recorded withdrawal/reversal amounts are "
+        "FX-converted from the USD charges and name the recording run's "
+        "charge ids; this world derives the same rows natively in the "
+        "charge's own currency — same types, same reporting categories, "
+        "different money and ids. Predicated to lists of bt objects so a "
+        "shape regression still fails.",
+        predicate=lambda recorded, replayed: (
+            isinstance(recorded, list)
+            and isinstance(replayed, list)
+            and all(
+                isinstance(item, dict) and item.get("object") == "balance_transaction"
+                for item in recorded
+            )
+            and all(
+                isinstance(item, dict) and item.get("object") == "balance_transaction"
+                for item in replayed
+            )
+        ),
     ),
     AllowedDifference(
         "**.error.message",
@@ -1118,6 +1202,144 @@ ALLOWED_DIFFERENCES: list[AllowedDifference] = [
             recorded == ["card", "bancontact", "klarna", "link", "pix", "satispay"]
             and replayed == ["card"]
         ),
+    ),
+    # --- the ledger-and-payouts block (Phase 11) ---
+    AllowedDifference(
+        "**.available_on",
+        "The settlement instant is derived from the creation clock plus the "
+        "account's settlement schedule (`settlement_business_days`, a "
+        "LedgerSpec constant — no API-discoverable value exists, the research "
+        "lane's gap 3), so it differs for the same clock reason as `created`.",
+        predicate=lambda recorded, replayed: (
+            isinstance(recorded, int) and isinstance(replayed, int)
+        ),
+    ),
+    AllowedDifference(
+        "**.arrival_date",
+        "A payout's expected arrival follows the destination's banking "
+        "schedule, which a frozen clock and a stub destination cannot model; "
+        "this world pins the settlement window. Same int-pair shape as "
+        "`available_on`.",
+        predicate=lambda recorded, replayed: (
+            isinstance(recorded, int) and isinstance(replayed, int)
+        ),
+    ),
+    AllowedDifference(
+        "**.source",
+        "The id rule on the polymorphic `balance_transaction.source` (charge, "
+        "refund, dispute and payout ids), predicated to same-prefix pairs so "
+        "the recorded nulls the money path carries keep comparing through the "
+        "entry above.",
+        predicate=_both_ledger_sources,
+    ),
+    AllowedDifference(
+        "**.fee",
+        "The processing fee is account pricing, not spec behavior (the "
+        "research lane's gap 1): the recorded account's schedule differs from "
+        "this world's declared `FeeSchedule` constant, on the percent part "
+        "only. Predicated to int pairs; `fee_details` below carries the same "
+        "difference in its line items.",
+        predicate=lambda recorded, replayed: (
+            isinstance(recorded, int) and isinstance(replayed, int)
+        ),
+    ),
+    AllowedDifference(
+        "**.net",
+        "`net = amount - fee`, so the fee difference lands here by arithmetic "
+        "— the identity itself is enforced by the schema's CHECK and the "
+        "ledger invariants, not compared against the recording.",
+        predicate=lambda recorded, replayed: (
+            isinstance(recorded, int) and isinstance(replayed, int)
+        ),
+    ),
+    AllowedDifference(
+        "**.fee_details[*].amount",
+        "The fee breakdown's line-item amounts — the pricing difference "
+        "`**.fee` carries, one level down.",
+        predicate=lambda recorded, replayed: (
+            isinstance(recorded, int) and isinstance(replayed, int)
+        ),
+    ),
+    AllowedDifference(
+        "**.description",
+        "The dispute ledger rows' descriptions name the charge they belong "
+        "to — the id-only rule (recorded, cassettes 05 and 11). Predicated to "
+        "the two Chargeback forms so every other description stays "
+        "byte-exact.",
+        predicate=_dispute_bt_description_modulo_id,
+    ),
+    AllowedDifference(
+        "body.status",
+        "A balance transaction's settlement status: the recording account "
+        "marks dispute withdrawals available immediately, this world's T+2 "
+        "rule holds them pending under a frozen clock (Phase 11). No other "
+        "object's `status` can record `available`, so the predicate cannot "
+        "mask a status regression elsewhere.",
+        predicate=_bt_settlement_status,
+    ),
+    AllowedDifference(
+        "body.data[*].status",
+        "The list-bodies form of the settlement-status entry above.",
+        predicate=_bt_settlement_status,
+    ),
+    # The dispute settle collapse, met again on this slice's winning-evidence
+    # submit (the scenario-05 entries above carry the general declaration).
+    AllowedDifference(
+        "body.status",
+        "The settle collapse on the ledger slice's winning-evidence submit "
+        "(scenario 05's entries carry the declaration): live answers "
+        "`under_review` and resolves seconds later; the frozen clock settles "
+        "inside the call.",
+        scenario="11_ledger_payouts",
+        predicate=_settle_status,
+    ),
+    AllowedDifference(
+        "body.is_charge_refundable",
+        "The refund gate the settle collapse moves, on this slice's submit — "
+        "scenario 05's entry, scoped here the same way.",
+        scenario="11_ledger_payouts",
+        predicate=lambda recorded, replayed: (
+            (recorded is False and replayed is True) or (recorded is True and replayed is False)
+        ),
+    ),
+    AllowedDifference(
+        "body.source.status",
+        "The settle collapse seen through `expand[]=source` off a dispute's "
+        "withdrawal row: the inflated dispute body is one hop ahead the same "
+        "way its own body is.",
+        predicate=_settle_status,
+    ),
+    AllowedDifference(
+        "body.source.is_charge_refundable",
+        "The refund gate through the same expansion.",
+        predicate=lambda recorded, replayed: (
+            (recorded is False and replayed is True) or (recorded is True and replayed is False)
+        ),
+    ),
+    # The computed balance on the recording account is the account's whole
+    # pre-existing ledger — a CAD settlement account with a dispute history —
+    # where the replay's balance derives from the scenario's own objects
+    # alone. Whole-key entries, scoped to the one scenario that reads it.
+    AllowedDifference(
+        "body.available",
+        "The recording account's available balance is pre-existing account "
+        "state (its own CAD ledger), not scenario state; the replay's is "
+        "computed from the scenario's rows. Scoped to the scenario that "
+        "reads /v1/balance.",
+        scenario="11_ledger_payouts",
+    ),
+    AllowedDifference(
+        "body.pending",
+        "The pending half of the same computed-balance difference.",
+        scenario="11_ledger_payouts",
+    ),
+    AllowedDifference(
+        "body.refund_and_dispute_prefunding",
+        "The recorded account reports an all-zero prefunding block in its "
+        "settlement currency; this world has no prefunding ledger rows to "
+        "report and omits the key — spec-legal (only available/livemode/"
+        "object/pending are required), the spec-is-authority ruling.",
+        scenario="11_ledger_payouts",
     ),
     # Scenario 3 exists to record what a malformed Stripe-Version answers.
     # The world deliberately serves one fixed version with no header channel
@@ -1277,6 +1499,32 @@ STRUCTURAL_DIFFERENCES: list[str] = [
     "version, timing varying by dispute track). This world stores "
     "submitted evidence verbatim; the predicated entries above carry the "
     "recorded bodies' enriched values.",
+    "The payout success path is unrecordable on this account: the sandbox "
+    "has no external account in any currency (every create answers `Sorry, "
+    "you don't have any external accounts in that currency (cad).`), the "
+    "recording key cannot add one (`POST /v1/accounts/{id}/external_accounts` "
+    "→ 403 `more_permissions_required`), and top-ups are unsupported for its "
+    "country (probed, Phase 11). The payout create/cancel/reverse success "
+    "bodies, the draw-down and the wrong-state refusals are therefore "
+    "spec-derived and unit-tested (`tests/test_payouts.py`), not "
+    "cassette-pinned; cassette 11 carries every account-independent refusal "
+    "the endpoint answers.",
+    "The dispute fee rule the recordings pin, correcting functional spec §7: "
+    "the settled-won dispute carries exactly two rows — the withdrawal "
+    "(-amount, fee 1500, kept) and the reversal (+amount, fee 0) — with no "
+    "separate countered-fee row and no fee refund on the win (cassette 05, "
+    "re-read on cad-native rows in cassette 11). The spec's two-fee sentence "
+    "is corrected in the same phase per the implementation plan's recipe.",
+    "The plain-`currency` parameter refusal is transcribed from the live "
+    "payout endpoint (Phase 11 probe) — the same maintenance choice as the "
+    "map-parameter list above, and a different list: the payout spelling "
+    "carries no `eurc`/`usdt`/`open_usd` and no trailing period. Its "
+    "freshness is a declared property, not a replay-checked one.",
+    "Instant payouts draw `instant_available`, a bucket no money path in "
+    "this world fills; `method: instant` is accepted and draws the ordinary "
+    "available balance instead. The `instant_available` bucket itself is "
+    "omitted from /v1/balance while empty (spec-optional), so the "
+    "substituted draw is unobservable through the tools.",
 ]
 
 # --- Matching --------------------------------------------------------------------

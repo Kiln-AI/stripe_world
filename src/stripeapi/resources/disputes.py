@@ -20,10 +20,14 @@ the settle is collapsed into the submitting call. The submit response's
 `status` / `is_charge_refundable` therefore differ from the recording by
 exactly one hop — two scenario-scoped allow-list entries carry it.
 
-`balance_transactions` is `[]` until the ledger phase derives the two
-`adjustment` rows (billing_engine §6's table); Stripe's automatic evidence
-enrichment from the customer record is not modeled — submitted evidence is
-stored verbatim.
+`balance_transactions` is derived from the ledger (data_model §4's ruling):
+the chargeback withdrawal row at creation, the reversal added on a win — both
+recorded in cassette 05's settled dispute bodies, which also correct the
+functional spec's fee reading: the 1500 received fee is kept on a win and no
+separate countered-fee row exists. Inquiries write nothing until escalated
+(recorded: the warning-track bodies carry no rows); the escalation pulls the
+funds then. Stripe's automatic evidence enrichment from the customer record
+is not modeled — submitted evidence is stored verbatim.
 """
 
 from collections.abc import Mapping
@@ -32,9 +36,10 @@ from typing import TYPE_CHECKING, Any
 import seahaven
 
 from stripeapi import _ids, _json, _seq, _time
+from stripeapi.billing import ledger
 from stripeapi.dispatch.params import Param, ParamSpec
 from stripeapi.dispatch.resource import ListFilter, ResourceSpec, register
-from stripeapi.resources import _lookup, charges, events
+from stripeapi.resources import _lookup, balance_transactions, charges, events
 from stripeapi.serialize.fields import FieldMap, presence_sets, serializer_for
 from stripeapi.spec import spec_document
 from stripeapi.stripe_errors import invalid_request
@@ -197,10 +202,16 @@ FIELDS = FieldMap(
     booleans=frozenset({"is_charge_refundable"}),
     constants={"livemode": False},
     derived={
-        # The ledger lands in Phase 11; until then the documented "zero, one,
-        # or two" adjustment rows this field holds are none (the recorded
-        # bodies' rows are an allow-list entry, not a silent divergence).
-        "balance_transactions": lambda ctx, row: [],
+        # The ledger's rows for this dispute, full objects always (the field
+        # is `array<ref:balance_transaction>`, never ids): the withdrawal at
+        # creation or escalation, the reversal on a win (data_model §4).
+        "balance_transactions": lambda ctx, row: [
+            balance_transactions.serialize(ctx, bt)
+            for bt in ctx.db.rows(
+                "SELECT * FROM balance_transactions WHERE source = ? ORDER BY x_seq",
+                row["id"],
+            )
+        ],
     },
     always_present=always_present,
     omit_when_none=omit_when_none,
@@ -244,6 +255,58 @@ def compute_due_by(created_iso: str) -> int:
 
 
 # --- creation (driven by the charge attempt) ----------------------------------------
+
+
+def _withdrawal_fee_details(currency: str, fee: int) -> list[dict[str, Any]]:
+    """The recorded `Dispute fee` detail line (cassette 05): a flat stripe_fee
+    entry with no application."""
+    return [
+        {
+            "amount": fee,
+            "application": None,
+            "currency": currency,
+            "description": "Dispute fee",
+            "type": "stripe_fee",
+        }
+    ]
+
+
+def record_withdrawal(ctx: seahaven.Ctx, dispute_row: Mapping[str, Any]) -> None:
+    """The dispute's ledger withdrawal — `type: adjustment`,
+    `reporting_category: dispute`, the negative amount, the flat received fee
+    (all recorded, Phase 11). Idempotence is structural: called exactly once
+    per dispute, at creation for the chargeback track and at escalation for
+    an inquiry."""
+    fee = ledger.ledger_spec(ctx).dispute_received_fee
+    ledger.record(
+        ctx,
+        type_="adjustment",
+        amount=-dispute_row["amount"],
+        fee=fee,
+        currency=dispute_row["currency"],
+        source_id=dispute_row["id"],
+        description=f"Chargeback withdrawal for {dispute_row['charge']}",
+        fee_details=_withdrawal_fee_details(dispute_row["currency"], fee),
+        reporting_category="dispute",
+    )
+
+
+def record_reversal(ctx: seahaven.Ctx, dispute_row: Mapping[str, Any]) -> None:
+    """The win's reversal row — the funds back, fee-free,
+    `reporting_category: dispute_reversal` (recorded, cassette 05's settled
+    dispute: the 1500 received fee is kept, which corrects the functional
+    spec's refunded-countered-fee reading)."""
+    ledger.record(
+        ctx,
+        type_="adjustment",
+        amount=dispute_row["amount"],
+        fee=0,
+        currency=dispute_row["currency"],
+        source_id=dispute_row["id"],
+        description=f"Chargeback reversal for {dispute_row['charge']}",
+        fee_details=[],
+        reporting_category="dispute_reversal",
+    )
 
 
 def maybe_create_dispute(
@@ -300,6 +363,13 @@ def maybe_create_dispute(
         "warning_needs_response" if track == "inquiry" else "needs_response",
     )
     ctx.db.execute("UPDATE charges SET disputed = 1 WHERE id = ?", charge_row["id"])
+    if track != "inquiry":
+        # The chargeback pulls its funds immediately; an inquiry withdraws
+        # nothing (that is what keeps it refundable, recorded) — the
+        # escalation writes the withdrawal instead.
+        record_withdrawal(
+            ctx, _lookup.require_row(ctx, "disputes", "dispute", id_, param="dispute")
+        )
     body = serialize(ctx, _lookup.require_row(ctx, "disputes", "dispute", id_, param="dispute"))
     events.emit_event(ctx, type="charge.dispute.created", obj=body)
     events.emit_event(ctx, type="charge.dispute.funds_withdrawn", obj=body)
@@ -390,6 +460,14 @@ def _apply_update(ctx: seahaven.Ctx, req: Request, row: Mapping[str, Any]) -> di
         metadata_text,
         row["id"],
     )
+    # The escalated inquiry pulls the funds the inquiry never did (the
+    # Phase 9 ruling); the withdrawal happens exactly once — a
+    # chargeback-track dispute already wrote it at creation.
+    already_withdrew = ctx.db.one("SELECT id FROM balance_transactions WHERE source = ?", row["id"])
+    if magic == "needs_response" and not already_withdrew:
+        record_withdrawal(ctx, row)
+    if magic == "won":
+        record_reversal(ctx, row)
     body = serialize(ctx, _require_dispute(ctx, row["id"]))
     _emit_update_pair(ctx, body, row["charge"])
     if magic == "won":

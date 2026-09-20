@@ -25,6 +25,8 @@ from typing import TYPE_CHECKING, Any
 import seahaven
 
 from stripeapi import _ids, _json, _seq, _time
+from stripeapi.billing import ledger
+from stripeapi.billing._money import stripe_fee
 from stripeapi.dispatch.params import Param, ParamSpec
 from stripeapi.dispatch.resource import (
     ListFilter,
@@ -39,7 +41,15 @@ from stripeapi.stripe_errors import card_error, invalid_request
 if TYPE_CHECKING:
     from stripeapi.dispatch.response import Request
 
-__all__ = ["FIELDS", "SPEC", "capture", "create", "insert_charge", "serialize"]
+__all__ = [
+    "FIELDS",
+    "SPEC",
+    "capture",
+    "create",
+    "insert_charge",
+    "record_capture_ledger",
+    "serialize",
+]
 
 CUS = ("cus_",)
 PM = ("pm_",)
@@ -304,6 +314,52 @@ def payment_method_details(
     return {"type": "card", "card": details}
 
 
+def record_capture_ledger(
+    ctx: seahaven.Ctx,
+    charge_id: str,
+    *,
+    amount_captured: int,
+    currency: str,
+    description: str | None,
+) -> dict[str, Any]:
+    """The charge's ledger row, written once per capture: `type: charge`,
+    `reporting_category: charge` (both recorded, Phase 11 — the type is the
+    modern `charge`, resolving the legacy/`payment` pair question), the gross
+    the CAPTURED amount, the fee the account schedule, the description the
+    charge's own (recorded, cassette 11), and the single
+    `Stripe processing fees` detail the recorded native-currency rows carry.
+
+    The one place `charges.balance_transaction` is set; the confirm path (an
+    immediate capture) and the capture transition both come through here, so
+    the live async window — a fresh auto-captured charge answers
+    `balance_transaction: null` and gains its row moments later (cassette 04
+    steps 10 vs 49) — is collapsed to synchronous here, a declared flipped
+    allow-list entry."""
+    spec = ledger.ledger_spec(ctx)
+    fee = stripe_fee(amount_captured, spec.fees)
+    bt = ledger.record(
+        ctx,
+        type_="charge",
+        amount=amount_captured,
+        fee=fee,
+        currency=currency,
+        source_id=charge_id,
+        description=description,
+        fee_details=[
+            {
+                "amount": fee,
+                "application": None,
+                "currency": currency,
+                "description": "Stripe processing fees",
+                "type": "stripe_fee",
+            }
+        ],
+        reporting_category="charge",
+    )
+    ctx.db.execute("UPDATE charges SET balance_transaction = ? WHERE id = ?", bt["id"], charge_id)
+    return bt
+
+
 def insert_charge(
     ctx: seahaven.Ctx,
     *,
@@ -325,8 +381,10 @@ def insert_charge(
 ) -> dict[str, Any]:
     """Write one charge row and return it re-read. The one place a `ch_` row
     is born; the PaymentIntent transitions and (later) the billing engine
-    both come through here so the shape cannot fork. `balance_transaction`
-    stays NULL — the ledger lands in Phase 11."""
+    both come through here so the shape cannot fork. A charge that captures
+    inside this call takes its ledger row immediately
+    (`record_capture_ledger`); a manual hold's row lands at the capture
+    transition."""
     id_ = _ids.stripe_id(ctx, "ch_")
     created = ctx.clock.iso()
     failed = failure_code is not None
@@ -373,6 +431,10 @@ def insert_charge(
     columns = ", ".join(cols)
     placeholders = ", ".join("?" for _ in cols)
     ctx.db.execute(f"INSERT INTO charges ({columns}) VALUES ({placeholders})", *cols.values())
+    if captured and not failed:
+        record_capture_ledger(
+            ctx, id_, amount_captured=amount, currency=currency, description=description
+        )
     return _lookup.require_row(ctx, "charges", "charge", id_, param="charge")
 
 

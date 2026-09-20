@@ -2,7 +2,8 @@
 -- STRICT tables, explicit primary keys, no wall-clock expression anywhere, money INTEGER
 -- minor units, JSON columns guarded by json_valid + json_type. The payments tables land one
 -- resource phase at a time: payment_methods (Phase 6), the money path (Phase 8), refunds
--- and disputes (Phase 9).
+-- and disputes (Phase 9), setup_intents (Phase 10), the balance ledger and payouts
+-- (Phase 11).
 
 CREATE TABLE payment_methods (
     id              TEXT PRIMARY KEY,
@@ -34,17 +35,11 @@ CREATE INDEX payment_methods_by_type     ON payment_methods (type, x_seq DESC);
 
 -- charges ↔ payment_intents are mutually referential and both crossing columns
 -- are nullable, so the write order is PI (latest_charge NULL) → charge → UPDATE
--- PI, satisfying non-deferred FKs at every step (data_model §4).
---
--- Recording-driven correction to data_model §4 (Phase 8, 2026-09-20): the two
--- balance-ledger columns land WITHOUT their `REFERENCES balance_transactions`
--- clauses. SQLite refuses to prepare any INSERT into a table whose FK parent
--- does not exist — NULL column values do not help — and the ledger table is
--- Phase 11's, so the verbatim clauses would make the whole money path
--- unwritable until then. The FKs join in Phase 11, when the parent exists;
--- until then both columns are NULL anyway (recorded: no ledger row exists at
--- charge time except after a manual capture, and that difference is an
--- allow-list entry).
+-- PI, satisfying non-deferred FKs at every step (data_model §4). The charge's
+-- two ledger columns referenced a table that did not exist until Phase 11, so
+-- they landed without their FK clauses then (SQLite refuses to prepare an
+-- INSERT into a table whose FK parent was never created); Phase 11 restores
+-- the clauses beside the ledger table itself.
 
 CREATE TABLE payment_intents (
     id                          TEXT PRIMARY KEY,
@@ -91,7 +86,7 @@ CREATE TABLE charges (
     amount                         INTEGER NOT NULL,
     amount_captured                INTEGER NOT NULL DEFAULT 0,
     amount_refunded                INTEGER NOT NULL DEFAULT 0,
-    balance_transaction            TEXT,
+    balance_transaction            TEXT REFERENCES balance_transactions (id),
     billing_details                TEXT NOT NULL CHECK (json_valid(billing_details) AND json_type(billing_details) = 'object'),
     calculated_statement_descriptor TEXT,
     captured                       INTEGER NOT NULL CHECK (captured IN (0, 1)),
@@ -99,7 +94,7 @@ CREATE TABLE charges (
     customer                       TEXT REFERENCES customers (id),
     description                    TEXT,
     disputed                       INTEGER NOT NULL DEFAULT 0 CHECK (disputed IN (0, 1)),
-    failure_balance_transaction    TEXT,
+    failure_balance_transaction    TEXT REFERENCES balance_transactions (id),
     failure_code                   TEXT,
     failure_message                TEXT,
     fraud_details                  TEXT CHECK (fraud_details IS NULL OR (json_valid(fraud_details) AND json_type(fraud_details) = 'object')),
@@ -124,25 +119,23 @@ CREATE UNIQUE INDEX charges_by_seq        ON charges (x_seq DESC);
 CREATE INDEX charges_by_customer       ON charges (customer, x_seq DESC);
 CREATE INDEX charges_by_payment_intent ON charges (payment_intent, x_seq DESC);
 
--- refunds + disputes (Phase 9, probed 2026-09-20). The two ledger-reference
--- columns land WITHOUT their `REFERENCES balance_transactions` clauses — the
--- same Phase 8 precedent as charges.balance_transaction above: SQLite refuses
--- to prepare an INSERT whose FK parent does not exist, and the ledger table
--- is Phase 11's. Until then both columns are NULL (recorded: refunds carry a
--- txn_ at creation live; the difference is allow-listed).
+-- refunds + disputes (Phase 9, probed 2026-09-20). The ledger table exists
+-- from Phase 11 on, so both reference columns carry their FK clauses — the
+-- Phase 8 deferral comment above is discharged by the same phase that first
+-- writes them (recorded: refunds carry a txn_ at creation live).
 
 CREATE TABLE refunds (
     id                          TEXT PRIMARY KEY,
     x_seq                       INTEGER NOT NULL,
     created                     TEXT NOT NULL,
     amount                      INTEGER NOT NULL,
-    balance_transaction         TEXT,
+    balance_transaction         TEXT REFERENCES balance_transactions (id),
     charge                      TEXT REFERENCES charges (id),
     currency                    TEXT NOT NULL,
     customer                    TEXT REFERENCES customers (id),
     description                 TEXT,
     destination_details         TEXT CHECK (destination_details IS NULL OR (json_valid(destination_details) AND json_type(destination_details) = 'object')),
-    failure_balance_transaction TEXT,
+    failure_balance_transaction TEXT REFERENCES balance_transactions (id),
     failure_reason              TEXT,
     instructions_email          TEXT,
     metadata                    TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata) AND json_type(metadata) = 'object'),
@@ -232,3 +225,91 @@ CREATE TABLE setup_intents (
 CREATE UNIQUE INDEX setup_intents_by_seq        ON setup_intents (x_seq DESC);
 CREATE INDEX setup_intents_by_customer       ON setup_intents (customer, x_seq DESC);
 CREATE INDEX setup_intents_by_payment_method ON setup_intents (payment_method, x_seq DESC);
+
+-- The balance ledger and payouts (Phase 11, probed 2026-09-20). Every wire
+-- fact below is pinned by cassette 05's dispute bodies, the live bt listings
+-- and the Phase 11 probe round: charge bt is type `charge`, refund bt type
+-- `refund` (resolving the research's legacy/newer pair question at this
+-- version), both dispute rows type `adjustment` under reporting categories
+-- `dispute` / `dispute_reversal`. `balance_transactions` ↔ `payouts` are the
+-- fourth mutually-referential pair; both crossing columns are nullable, same
+-- two-step write as the other three.
+
+CREATE TABLE balance_transactions (
+    id                 TEXT PRIMARY KEY,
+    x_seq              INTEGER NOT NULL,
+    created            TEXT NOT NULL,
+    amount             INTEGER NOT NULL,
+    available_on       TEXT NOT NULL,
+    balance_type       TEXT NOT NULL DEFAULT 'payments' CHECK (balance_type IN
+                           ('issuing', 'payments', 'refund_and_dispute_prefunding', 'risk_reserved')),
+    currency           TEXT NOT NULL,
+    description        TEXT,
+    exchange_rate      TEXT,
+    fee                INTEGER NOT NULL DEFAULT 0,
+    fee_details        TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(fee_details) AND json_type(fee_details) = 'array'),
+    net                INTEGER NOT NULL,
+    reporting_category TEXT NOT NULL,   -- open string: spec declares no set and links out
+    -- 16-way polymorphic reference (charge | refund | dispute | payout in scope). No FK
+    -- is possible against four tables; resources/_lookup.py resolves it on expansion and
+    -- an invariant test asserts every `source` resolves in exactly one table.
+    source             TEXT,
+    -- doc-only enum: "either available or pending"
+    status             TEXT NOT NULL CHECK (status IN ('available', 'pending')),
+    type               TEXT NOT NULL CHECK (type IN (
+        'adjustment','advance','advance_funding','anticipation_repayment','application_fee',
+        'application_fee_refund','charge','climate_order_purchase','climate_order_refund',
+        'connect_collection_transfer','contribution','fee_credit_funding','inbound_transfer',
+        'inbound_transfer_reversal','issuing_authorization_hold','issuing_authorization_release',
+        'issuing_dispute','issuing_transaction','obligation_outbound','obligation_reversal_inbound',
+        'payment','payment_failure_refund','payment_network_reserve_hold',
+        'payment_network_reserve_release','payment_refund','payment_reversal','payment_unreconciled',
+        'payout','payout_cancel','payout_failure','payout_minimum_balance_hold',
+        'payout_minimum_balance_release','refund','refund_failure','reserve_hold','reserve_release',
+        'reserve_transaction','reserved_funds','stripe_balance_payment_debit',
+        'stripe_balance_payment_debit_reversal','stripe_fee','stripe_fx_fee','tax_fee','tax_fund',
+        'topup','topup_reversal','transfer','transfer_cancel','transfer_failure','transfer_refund')),
+    -- world-internal: the payout this row was swept into, answering
+    -- GET /v1/balance_transactions?payout=… . Not an API field.
+    x_payout           TEXT REFERENCES payouts (id),
+    CHECK (net = amount - fee)
+) STRICT;
+
+CREATE UNIQUE INDEX balance_transactions_by_seq      ON balance_transactions (x_seq DESC);
+CREATE INDEX balance_transactions_by_type         ON balance_transactions (type, x_seq DESC);
+CREATE INDEX balance_transactions_by_source       ON balance_transactions (source, x_seq DESC);
+CREATE INDEX balance_transactions_by_payout       ON balance_transactions (x_payout, x_seq DESC);
+-- the available/pending split in §6.4 of the architecture is a scan of this index
+CREATE INDEX balance_transactions_by_available_on ON balance_transactions (available_on, currency);
+
+CREATE TABLE payouts (
+    id                          TEXT PRIMARY KEY,
+    x_seq                       INTEGER NOT NULL,
+    created                     TEXT NOT NULL,
+    amount                      INTEGER NOT NULL,
+    arrival_date                TEXT NOT NULL,
+    automatic                   INTEGER NOT NULL CHECK (automatic IN (0, 1)),
+    balance_transaction         TEXT REFERENCES balance_transactions (id),
+    currency                    TEXT NOT NULL,
+    description                 TEXT,
+    destination                 TEXT,   -- stub: `ba_…` / `card_…`, never resolved
+    failure_balance_transaction TEXT REFERENCES balance_transactions (id),
+    failure_code                TEXT,
+    failure_message             TEXT,
+    metadata                    TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata) AND json_type(metadata) = 'object'),
+    -- doc-only enum
+    method                      TEXT NOT NULL DEFAULT 'standard' CHECK (method IN ('standard', 'instant')),
+    original_payout             TEXT REFERENCES payouts (id),
+    reconciliation_status       TEXT NOT NULL DEFAULT 'not_applicable'
+                                  CHECK (reconciliation_status IN ('completed', 'in_progress', 'not_applicable')),
+    reversed_by                 TEXT REFERENCES payouts (id),
+    -- doc-only enum
+    source_type                 TEXT NOT NULL DEFAULT 'bank_account' CHECK (source_type IN ('card', 'fpx', 'bank_account')),
+    statement_descriptor        TEXT,
+    -- doc-only enum
+    status                      TEXT NOT NULL CHECK (status IN ('paid', 'pending', 'in_transit', 'canceled', 'failed')),
+    type                        TEXT NOT NULL CHECK (type IN ('bank_account', 'card'))
+) STRICT;
+
+CREATE UNIQUE INDEX payouts_by_seq      ON payouts (x_seq DESC);
+CREATE INDEX payouts_by_status       ON payouts (status, x_seq DESC);

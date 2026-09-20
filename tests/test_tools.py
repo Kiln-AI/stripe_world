@@ -83,12 +83,16 @@ def test_the_wired_surface_is_small_and_named() -> None:
     coupons, four promotion_codes, four tax_rates), the money path's twelve
     (seven payment_intents, five charges), the refunds-and-disputes
     phase's seventeen (five /v1/refunds, five charge-scoped refund routes,
-    four /v1/disputes, three charge-scoped dispute routes), and the
-    setup-intents phase's seven. The rest are routed data awaiting their
-    resource phases, and calling one is an honest `INTERNAL` naming the op
-    (see `test_dispatch.py`)."""
+    four /v1/disputes, three charge-scoped dispute routes), the
+    setup-intents phase's seven, and the ledger-and-payouts phase's nine
+    (one balance, two balance_transactions, six payouts). The rest are routed
+    data awaiting their resource phases, and calling one is an honest
+    `INTERNAL` naming the op (see `test_dispatch.py`)."""
     wired = [route.op_id for route in _all_routes() if route.params is not None]
     assert wired == [
+        "GetBalance",
+        "GetBalanceTransactions",
+        "GetBalanceTransactionsId",
         "GetCharges",
         "PostCharges",
         "GetChargesCharge",
@@ -131,6 +135,12 @@ def test_the_wired_surface_is_small_and_named() -> None:
         "PostPaymentMethodsPaymentMethod",
         "PostPaymentMethodsPaymentMethodAttach",
         "PostPaymentMethodsPaymentMethodDetach",
+        "GetPayouts",
+        "PostPayouts",
+        "GetPayoutsPayout",
+        "PostPayoutsPayout",
+        "PostPayoutsPayoutCancel",
+        "PostPayoutsPayoutReverse",
         "GetPrices",
         "PostPrices",
         "GetPricesPrice",

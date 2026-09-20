@@ -70,6 +70,7 @@ Kind = Literal[
     "range",
     "timestamp",
     "int_literal",
+    "currency",
 ]
 
 #: The five parameters lifted out of `Request.params` (§3.4 of the dispatcher
@@ -296,6 +297,8 @@ def _check(
         if not isinstance(value, int) or isinstance(value, bool):
             raise _invalid("integer", path, f"Invalid integer: {value}")
         return _time.from_unix(value)
+    if kind == "currency":
+        return _check_currency(param, value, path)
     if kind == "range":
         return _check_range(param, value, path)
     if kind == "object":
@@ -536,6 +539,48 @@ _SUPPORTED_MAP_CURRENCIES = frozenset(
         "mro",
     )
 )
+
+
+#: The currencies a plain `currency` parameter accepts, transcribed in
+#: Stripe's own order from the live payout refusal at the pinned version
+#: (Phase 11 probe). A DIFFERENT list from the map-parameter one above: the
+#: payout spelling carries no `eurc` / `usdt` / `open_usd` — two live lists,
+#: two constants, the same transcription-maintenance declaration.
+_SUPPORTED_CURRENCIES_TEXT = (
+    "usd, aed, afn, all, amd, ang, aoa, ars, aud, awg, azn, bam, bbd, bdt"
+    ", bgn, bhd, bif, bmd, bnd, bob, brl, bsd, bwp, byn, bzd, cad, cdf, chf"
+    ", clp, cny, cop, crc, cve, czk, djf, dkk, dop, dzd, egp, etb, eur, fjd"
+    ", fkp, gbp, gel, gip, gmd, gnf, gtq, gyd, hkd, hnl, hrk, htg, huf, idr"
+    ", ils, inr, isk, jmd, jod, jpy, kes, kgs, khr, kmf, krw, kwd, kyd, kzt"
+    ", lak, lbp, lkr, lrd, lsl, mad, mdl, mga, mkd, mmk, mnt, mop, mur, mvr"
+    ", mwk, mxn, myr, mzn, nad, ngn, nio, nok, npr, nzd, omr, pab, pen, pgk"
+    ", php, pkr, pln, pyg, qar, ron, rsd, rub, rwf, sar, sbd, scr, sek, sgd"
+    ", shp, sle, sos, srd, std, szl, thb, tjs, tnd, top, try, ttd, twd, tzs"
+    ", uah, ugx, uyu, uzs, vnd, vuv, wst, xaf, xcd, xcg, xof, xpf, yer, zar"
+    ", zmw, usdc, btn, ghs, eek, lvl, svc, vef, ltl, sll, mro"
+)
+
+_SUPPORTED_CURRENCIES = frozenset(_SUPPORTED_CURRENCIES_TEXT.split(", "))
+
+
+def _check_currency(param: Param, value: object, path: str) -> str:
+    """A plain `currency` parameter: a lowercase three-letter code from the
+    supported set, else the live full-list refusal (probed verbatim on
+    `POST /v1/payouts`, Phase 11 — the same message shape the map-parameter
+    check answers, from the payout endpoint's own shorter list)."""
+    if not isinstance(value, str):
+        raise _invalid("string", path, f"Invalid string: {value!r}")
+    if value not in _SUPPORTED_CURRENCIES:
+        # No trailing period: the payout endpoint's spelling ends with the
+        # list itself (probed, cassette 11), where the map-parameter refusal
+        # closes with one — two live spellings, two shapes.
+        raise invalid_request(
+            f"Invalid currency: {value}. Stripe currently supports these currencies: "
+            f"{_SUPPORTED_CURRENCIES_TEXT}",
+            param=path,
+            pre_execution=True,
+        )
+    return value
 
 
 def _check_map(param: Param, value: object, path: str, id_status: int = 400) -> dict[str, Any]:

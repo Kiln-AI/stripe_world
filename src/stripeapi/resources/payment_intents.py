@@ -828,6 +828,16 @@ def capture(ctx: seahaven.Ctx, req: Request) -> dict[str, Any]:
         amount_to_capture,
         charge_id,
     )
+    # The hold's ledger row lands here — the captured funds are the only
+    # funds that ever move (the recorded manual-capture charge carries its
+    # txn in the capture's own response, cassette 04 step 19).
+    charges.record_capture_ledger(
+        ctx,
+        charge_id,
+        amount_captured=amount_to_capture,
+        currency=row["currency"],
+        description=row["description"],
+    )
     # `metadata` is a declared parameter of the capture operation (pinned
     # spec) and merges like every update's (the engine's own two-line
     # pattern, dispatch/resource.py) — CR round 1 caught it being accepted
