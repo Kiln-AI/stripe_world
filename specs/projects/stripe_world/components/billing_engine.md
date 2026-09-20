@@ -376,7 +376,8 @@ nothing here invents one.
 | Expired coupon applied | 400 | `invalid_request_error` | `coupon_expired` |
 | Payout exceeding the available balance | 400 | `invalid_request_error` | `balance_insufficient` |
 | Refund a charge with an open dispute | 400 | `invalid_request_error` | `charge_disputed` |
-| Refund beyond the remaining amount | 400 | `invalid_request_error` | `charge_already_refunded` |
+| Refund beyond the remaining amount on a partially refunded charge | 400 | `invalid_request_error` | *(none)* — `param: "amount"`, `Refund amount ($40.00) is greater than unrefunded amount on charge ($30.00)` (probed, Phase 9; this table's `charge_already_refunded` was the fully-refunded case only) |
+| Refund a fully refunded charge | 400 | `invalid_request_error` | `charge_already_refunded` |
 
 `WorldBug` (not a Stripe error) is reserved for authoring faults the agent cannot cause: an unknown
 `balance_transaction.type`, an unknown event type, a zero-length billing period, a negative argument

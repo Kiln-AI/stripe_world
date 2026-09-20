@@ -273,6 +273,12 @@ def _x_behavior(card: magic_cards.CardBehavior, card_dict: dict) -> str | None:
             tokens.append("attach_refused")
     if card.dispute is not None:
         tokens.append(f"dispute={card.dispute}")
+        if card.dispute_track == "inquiry":
+            # The inquiry variant lands a `warning_*` dispute instead of a
+            # chargeback (probed, Phase 9); the tag carries which.
+            tokens.append("dispute_track=inquiry")
+    if card.refund_async is not None:
+        tokens.append(f"refund_async={card.refund_async}")
     if card.three_d_secure == "authentication_required":
         tokens.append("three_d_secure=required")
     preferred = (card_dict.get("networks") or {}).get("preferred")

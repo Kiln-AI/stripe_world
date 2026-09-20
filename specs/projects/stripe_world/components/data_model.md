@@ -300,7 +300,7 @@ in shape and simpler to assert.
 | `payment_intent` | `pi_` | |
 | `charge` | `ch_` | |
 | `refund` | `re_` | |
-| `dispute` | `dp_` | |
+| `dispute` | `du_` | Probed 2026-09-20 at the pinned version (Phase 9): live disputes mint `du_…`, correcting the stripe-mock `dp_` this table first carried. |
 | `setup_intent` | `seti_` | |
 | `balance_transaction` | `txn_` | |
 | `payout` | `po_` | |

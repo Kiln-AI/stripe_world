@@ -1,7 +1,8 @@
 -- StripeAPI payments tables (components/data_model.md §4). Same conventions as 001_core:
 -- STRICT tables, explicit primary keys, no wall-clock expression anywhere, money INTEGER
 -- minor units, JSON columns guarded by json_valid + json_type. The payments tables land one
--- resource phase at a time: payment_methods (Phase 6), then the money path (Phase 8).
+-- resource phase at a time: payment_methods (Phase 6), the money path (Phase 8), refunds
+-- and disputes (Phase 9).
 
 CREATE TABLE payment_methods (
     id              TEXT PRIMARY KEY,
@@ -122,3 +123,75 @@ CREATE TABLE charges (
 CREATE UNIQUE INDEX charges_by_seq        ON charges (x_seq DESC);
 CREATE INDEX charges_by_customer       ON charges (customer, x_seq DESC);
 CREATE INDEX charges_by_payment_intent ON charges (payment_intent, x_seq DESC);
+
+-- refunds + disputes (Phase 9, probed 2026-09-20). The two ledger-reference
+-- columns land WITHOUT their `REFERENCES balance_transactions` clauses — the
+-- same Phase 8 precedent as charges.balance_transaction above: SQLite refuses
+-- to prepare an INSERT whose FK parent does not exist, and the ledger table
+-- is Phase 11's. Until then both columns are NULL (recorded: refunds carry a
+-- txn_ at creation live; the difference is allow-listed).
+
+CREATE TABLE refunds (
+    id                          TEXT PRIMARY KEY,
+    x_seq                       INTEGER NOT NULL,
+    created                     TEXT NOT NULL,
+    amount                      INTEGER NOT NULL,
+    balance_transaction         TEXT,
+    charge                      TEXT REFERENCES charges (id),
+    currency                    TEXT NOT NULL,
+    customer                    TEXT REFERENCES customers (id),
+    description                 TEXT,
+    destination_details         TEXT CHECK (destination_details IS NULL OR (json_valid(destination_details) AND json_type(destination_details) = 'object')),
+    failure_balance_transaction TEXT,
+    failure_reason              TEXT,
+    instructions_email          TEXT,
+    metadata                    TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata) AND json_type(metadata) = 'object'),
+    payment_intent              TEXT REFERENCES payment_intents (id),
+    payment_method              TEXT REFERENCES payment_methods (id),
+    pending_reason              TEXT CHECK (pending_reason IS NULL OR pending_reason IN ('charge_pending', 'insufficient_funds', 'processing')),
+    reason                      TEXT CHECK (reason IS NULL OR reason IN
+                                    ('duplicate', 'expired_uncaptured_charge', 'fraudulent', 'requested_by_customer')),
+    receipt_number              TEXT,
+    -- doc-only enum: spec types this `string`, the description closes the set
+    status                      TEXT CHECK (status IS NULL OR status IN
+                                    ('pending', 'requires_action', 'succeeded', 'failed', 'canceled'))
+) STRICT;
+
+CREATE UNIQUE INDEX refunds_by_seq        ON refunds (x_seq DESC);
+CREATE INDEX refunds_by_charge         ON refunds (charge, x_seq DESC);
+CREATE INDEX refunds_by_payment_intent ON refunds (payment_intent, x_seq DESC);
+
+-- Dispute ids are `du_` at the pinned version — probed 2026-09-20, every
+-- live dispute minted `du_…`, correcting data_model §4/§3.2's `dp_` (the
+-- stripe-mock fixtures' older shape). dispute.balance_transactions is
+-- derived from the ledger (Phase 11), not a column; until then the
+-- serializer emits [].
+CREATE TABLE disputes (
+    id                         TEXT PRIMARY KEY,
+    x_seq                      INTEGER NOT NULL,
+    created                    TEXT NOT NULL,
+    amount                     INTEGER NOT NULL,
+    charge                     TEXT NOT NULL REFERENCES charges (id),
+    currency                   TEXT NOT NULL,
+    enhanced_eligibility_types TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(enhanced_eligibility_types) AND json_type(enhanced_eligibility_types) = 'array'),
+    evidence                   TEXT NOT NULL CHECK (json_valid(evidence) AND json_type(evidence) = 'object'),
+    evidence_details           TEXT NOT NULL CHECK (json_valid(evidence_details) AND json_type(evidence_details) = 'object'),
+    is_charge_refundable       INTEGER NOT NULL CHECK (is_charge_refundable IN (0, 1)),
+    metadata                   TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata) AND json_type(metadata) = 'object'),
+    payment_intent             TEXT REFERENCES payment_intents (id),
+    payment_method_details     TEXT CHECK (payment_method_details IS NULL OR (json_valid(payment_method_details) AND json_type(payment_method_details) = 'object')),
+    -- doc-only enum, 15 values
+    reason                     TEXT NOT NULL CHECK (reason IN
+                                   ('bank_cannot_process','check_returned','credit_not_processed',
+                                    'customer_initiated','debit_not_authorized','duplicate','fraudulent',
+                                    'general','incorrect_account_details','insufficient_funds','noncompliant',
+                                    'product_not_received','product_unacceptable','subscription_canceled',
+                                    'unrecognized')),
+    status                     TEXT NOT NULL CHECK (status IN
+                                   ('lost','needs_response','prevented','under_review','warning_closed',
+                                    'warning_needs_response','warning_under_review','won'))
+) STRICT;
+
+CREATE UNIQUE INDEX disputes_by_seq        ON disputes (x_seq DESC);
+CREATE INDEX disputes_by_charge         ON disputes (charge, x_seq DESC);
+CREATE INDEX disputes_by_payment_intent ON disputes (payment_intent, x_seq DESC);

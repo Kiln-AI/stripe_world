@@ -355,6 +355,52 @@ def _both_pm_ids(recorded: Any, replayed: Any) -> bool:
     )
 
 
+#: The refunds-and-disputes messages whose whole variable content is an
+#: object id (all probed verbatim, Phase 9): the fully-refunded refusal, the
+#: charged-back refusal, the no-dispute scoped read, and the uncaptured-hold
+#: refund refusal.
+_CHARGE_ALREADY_REFUNDED = re.compile(r"^Charge ch_[A-Za-z0-9]+ has already been refunded\.$")
+_CHARGE_CHARGED_BACK = re.compile(
+    r"^Charge ch_[A-Za-z0-9]+ has been charged back; cannot issue a refund\.$"
+)
+_NO_DISPUTE_FOR_CHARGE = re.compile(r"^No dispute for charge: ch_[A-Za-z0-9]+$")
+_UNCAPTURED_REFUND_REFUSED = re.compile(
+    r"^This uncaptured Charge was created by a PaymentIntent \(pi_[A-Za-z0-9]+\)\. "
+    r"You must cancel the PaymentIntent to reverse the authorization instead of "
+    r"refunding the Charge directly\. For more information, see "
+    r"https://stripe\.com/docs/payments/place-a-hold-on-a-payment-method$"
+)
+
+
+def _message_modulo_id(pattern: re.Pattern[str]) -> Callable[[Any, Any], bool]:
+    def check(recorded: Any, replayed: Any) -> bool:
+        return (
+            isinstance(recorded, str)
+            and isinstance(replayed, str)
+            and bool(pattern.fullmatch(recorded))
+            and bool(pattern.fullmatch(replayed))
+        )
+
+    return check
+
+
+#: The dispute settle collapse (Phase 9): live test mode resolves the magic
+#: evidence strings asynchronously, answering `under_review`-shaped statuses
+#: and flipping seconds later; this world's frozen clock settles inside the
+#: submitting call, so the submit response is exactly one hop ahead.
+_SETTLE_COLLAPSED = re.compile(r"^(?:under_review|warning_under_review)$")
+_SETTLE_LANDED = re.compile(r"^(?:won|lost|needs_response)$")
+
+
+def _settle_status(recorded: Any, replayed: Any) -> bool:
+    return (
+        isinstance(recorded, str)
+        and isinstance(replayed, str)
+        and bool(_SETTLE_COLLAPSED.fullmatch(recorded))
+        and bool(_SETTLE_LANDED.fullmatch(replayed))
+    )
+
+
 ALLOWED_DIFFERENCES: list[AllowedDifference] = [
     AllowedDifference(
         "**.id",
@@ -844,6 +890,146 @@ ALLOWED_DIFFERENCES: list[AllowedDifference] = [
         "cut's derived one is present.",
         predicate=_transfer_group_doc_url,
     ),
+    # --- the refunds-and-disputes block (Phase 9) ---
+    AllowedDifference(
+        "**.charge",
+        "The id rule on the charge reference refund and dispute bodies carry, "
+        "predicated to `ch_`-shaped string pairs.",
+        predicate=_both_prefixed_ids("ch_"),
+    ),
+    AllowedDifference(
+        "**.dispute",
+        "The disputed charge's `dispute` names its freshly minted `du_` "
+        "dispute (probed, Phase 9: live dispute ids are `du_…` at the pinned "
+        "version). The field is undeclared on charge in the pinned spec, so "
+        "this world omits it and the spec's property set is the authority — "
+        "the same ruling as every other live-only field.",
+        predicate=lambda recorded, replayed: (
+            isinstance(recorded, str) and recorded.startswith("du_") and replayed is None
+        ),
+    ),
+    AllowedDifference(
+        "**.refunds.total_count",
+        "The charge's inline refunds envelope (under `expand[]=refunds`) "
+        "carries a `total_count` the pinned spec's inline schema does not "
+        "declare; omitted here per the spec-is-authority ruling.",
+        predicate=lambda recorded, replayed: isinstance(recorded, int) and replayed is None,
+    ),
+    AllowedDifference(
+        "body.count",
+        "The live disputes list carries a fifth envelope key, `count`, "
+        "undeclared by the pinned spec's list schema; omitted here like every "
+        "other undeclared live field.",
+        predicate=lambda recorded, replayed: isinstance(recorded, int) and replayed is None,
+    ),
+    AllowedDifference(
+        "**.destination_details.card.reference",
+        "The acquirer reference number is network randomness that appears "
+        "once the refund settles at the network (seconds later live); this "
+        "world's refund never leaves `pending`, so the field stays absent.",
+        predicate=lambda recorded, replayed: replayed is None,
+    ),
+    AllowedDifference(
+        "**.destination_details.card.reference_status",
+        "The acquirer reference flips `pending` → `available` on network "
+        "settlement timing a frozen clock cannot model; `pending` is emitted "
+        "here and either member of the pair is the form.",
+        predicate=lambda recorded, replayed: (
+            recorded in ("available", "pending") and replayed in ("available", "pending")
+        ),
+    ),
+    AllowedDifference(
+        "**.due_by",
+        "The evidence deadline is computed from the creation instant "
+        "(end of the UTC day eight days out, the recorded model), so it "
+        "differs for the same clock reason as `created`.",
+        predicate=lambda recorded, replayed: (
+            isinstance(recorded, int) and isinstance(replayed, int)
+        ),
+    ),
+    AllowedDifference(
+        "**.evidence.customer_name",
+        "Stripe enriches dispute evidence from the customer record "
+        "(`customer_name`, and its description when unnamed — observed, not "
+        "documented); this world stores submitted evidence verbatim, so the "
+        "auto-filled value has no counterpart here.",
+        predicate=lambda recorded, replayed: (
+            (recorded is None or isinstance(recorded, str)) and replayed is None
+        ),
+    ),
+    AllowedDifference(
+        "**.evidence.customer_email_address",
+        "The email half of Stripe's customer-record evidence enrichment; not "
+        "modeled, like `customer_name` beside it.",
+        predicate=lambda recorded, replayed: (
+            (recorded is None or isinstance(recorded, str)) and replayed is None
+        ),
+    ),
+    AllowedDifference(
+        "**.evidence.product_description",
+        "Stripe also enriches evidence from the charge's own description "
+        "(observed, Phase 9); not modeled.",
+        predicate=lambda recorded, replayed: (
+            (recorded is None or isinstance(recorded, str)) and replayed is None
+        ),
+    ),
+    AllowedDifference(
+        "**.balance_transactions",
+        "The balance ledger lands in Phase 11; until then a dispute's "
+        "documented zero-one-or-two `adjustment` rows are none here (the "
+        "recorded bodies carry the withdrawal row from creation — a CAD-FX "
+        "artifact of the recording account besides).",
+        predicate=lambda recorded, replayed: isinstance(recorded, list) and replayed == [],
+    ),
+    AllowedDifference(
+        "**.error.message",
+        "The fully-refunded refusal names the charge id — the id-only rule "
+        "(probed verbatim, Phase 9).",
+        predicate=_message_modulo_id(_CHARGE_ALREADY_REFUNDED),
+    ),
+    AllowedDifference(
+        "**.error.message",
+        "The charged-back refusal names the charge id — the id-only rule "
+        "(probed verbatim, Phase 9).",
+        predicate=_message_modulo_id(_CHARGE_CHARGED_BACK),
+    ),
+    AllowedDifference(
+        "**.error.message",
+        "The charge-scoped dispute read of an undisputed charge names the "
+        "charge id — the id-only rule (probed verbatim, Phase 9).",
+        predicate=_message_modulo_id(_NO_DISPUTE_FOR_CHARGE),
+    ),
+    AllowedDifference(
+        "**.error.message",
+        "The uncaptured-hold refund refusal names the PaymentIntent id — the "
+        "id-only rule (probed verbatim, Phase 9).",
+        predicate=_message_modulo_id(_UNCAPTURED_REFUND_REFUSED),
+    ),
+    # The dispute settle collapse, scoped to the scenario that records it so
+    # no other status comparison can hide behind it.
+    AllowedDifference(
+        "body.status",
+        "Live test mode resolves the magic evidence strings asynchronously: "
+        "the submit response carries `under_review` (inquiries "
+        "`warning_under_review`) and the won/lost/escalated state lands "
+        "seconds later. A frozen clock cannot wait out issuer review, so "
+        "this world settles inside the call — the submit response is exactly "
+        "one hop ahead, and every later read matches. Scoped to the scenario "
+        "recording it; the general declaration is in STRUCTURAL_DIFFERENCES.",
+        scenario="05_refunds_disputes",
+        predicate=_settle_status,
+    ),
+    AllowedDifference(
+        "body.is_charge_refundable",
+        "The refund gate the settle collapse moves: the winning submit "
+        "flips `is_charge_refundable` open synchronously here and the "
+        "inquiry escalation closes it, both asynchronously live. Scoped "
+        "with the `body.status` entry beside it.",
+        scenario="05_refunds_disputes",
+        predicate=lambda recorded, replayed: (
+            (recorded is False and replayed is True) or (recorded is True and replayed is False)
+        ),
+    ),
     # Scenario 3 exists to record what a malformed Stripe-Version answers.
     # The world deliberately serves one fixed version with no header channel
     # and no negotiation (functional spec §6.5), so the whole response —
@@ -970,6 +1156,38 @@ STRUCTURAL_DIFFERENCES: list[str] = [
     "Stripe's docs/support pointers, which this world has no dashboard to "
     "source — the suffix is the predicated `**.error.message` entry above, "
     "not a silent pass.",
+    "Dispute settlement is collapsed into the submitting call: live test "
+    "mode answers `winning_evidence` with `under_review` and resolves the "
+    "win asynchronously (~5 s, with `charge.dispute.funds_reinstated` then "
+    "`charge.dispute.closed`), and `losing_evidence` / "
+    "`escalate_inquiry_evidence` likewise. A frozen clock cannot wait out "
+    "issuer review, and `won`/`lost` must be reachable — the refund gate, "
+    "`is_charge_refundable` and the dispute eval all need them — so the "
+    "magic strings settle synchronously and the submit response differs by "
+    "exactly one status hop (scenario 05's scoped entries). `/close` is "
+    "synchronous even live and needs no entry.",
+    "Refund settlement events are not modeled: the live API emits a "
+    "`refund.updated` + `charge.refund.updated` pair per refund when the "
+    "acquirer reference becomes available (network timing), and flips "
+    "`destination_details.card.reference_status` pending → available with "
+    "it. This world's refunds never leave `pending`, so neither the events "
+    "nor the flip exist here; the recorded bodies' available-state fields "
+    "are predicated entries above.",
+    "The async refund cards never transition: charging `4000000000007726` "
+    "begins refunds `pending` (modeled — that is the documented initial "
+    "state) which live settles to `succeeded`, and `4000000000005126` "
+    "begins `succeeded` which live flips to `failed` with "
+    "`refund.failed`. A frozen clock fires neither transition, and the "
+    "bookkeeping counts settled refunds only (invariant I7), so a pending "
+    "refund here is a permanently open state an agent may cancel inside "
+    "the test-mode 30-minute window — which never closes either.",
+    "Dispute evidence enrichment is not modeled: Stripe fills "
+    "`evidence.customer_name`, `customer_email_address` and "
+    "`product_description` from the customer record and the charge "
+    "description without them being submitted (observed at the pinned "
+    "version, timing varying by dispute track). This world stores "
+    "submitted evidence verbatim; the predicated entries above carry the "
+    "recorded bodies' enriched values.",
 ]
 
 # --- Matching --------------------------------------------------------------------

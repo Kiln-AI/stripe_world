@@ -33,6 +33,7 @@ def test_an_instance_of_empty_has_the_schema_and_no_rows(instance: seahaven.Inst
         "counters",
         "coupons",
         "customers",
+        "disputes",
         "events",
         "idempotency_keys",
         "payment_intents",
@@ -40,6 +41,7 @@ def test_an_instance_of_empty_has_the_schema_and_no_rows(instance: seahaven.Inst
         "prices",
         "products",
         "promotion_codes",
+        "refunds",
         "tax_rates",
     ]
     # No tracked table carries a row: no customer, no event, no payment

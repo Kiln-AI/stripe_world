@@ -80,10 +80,12 @@ def test_the_wired_surface_is_small_and_named() -> None:
     """What is served end to end: the customers phase's thirteen routes (five
     core customers, six payment_methods, two customer-scoped payment-method
     reads), the catalog phase's twenty-two (five products, four prices, five
-    coupons, four promotion_codes, four tax_rates), and the money path's
-    twelve (seven payment_intents, five charges). The rest are routed data
-    awaiting their resource phases, and calling one is an honest `INTERNAL`
-    naming the op (see `test_dispatch.py`)."""
+    coupons, four promotion_codes, four tax_rates), the money path's twelve
+    (seven payment_intents, five charges), and the refunds-and-disputes
+    phase's seventeen (five /v1/refunds, five charge-scoped refund routes,
+    four /v1/disputes, three charge-scoped dispute routes). The rest are
+    routed data awaiting their resource phases, and calling one is an honest
+    `INTERNAL` naming the op (see `test_dispatch.py`)."""
     wired = [route.op_id for route in _all_routes() if route.params is not None]
     assert wired == [
         "GetCharges",
@@ -91,6 +93,14 @@ def test_the_wired_surface_is_small_and_named() -> None:
         "GetChargesCharge",
         "PostChargesCharge",
         "PostChargesChargeCapture",
+        "GetChargesChargeDispute",
+        "PostChargesChargeDispute",
+        "PostChargesChargeDisputeClose",
+        "PostChargesChargeRefund",
+        "GetChargesChargeRefunds",
+        "PostChargesChargeRefunds",
+        "GetChargesChargeRefundsRefund",
+        "PostChargesChargeRefundsRefund",
         "GetCoupons",
         "PostCoupons",
         "GetCouponsCoupon",
@@ -103,6 +113,10 @@ def test_the_wired_surface_is_small_and_named() -> None:
         "DeleteCustomersCustomer",
         "GetCustomersCustomerPaymentMethods",
         "GetCustomersCustomerPaymentMethodsPaymentMethod",
+        "GetDisputes",
+        "GetDisputesDispute",
+        "PostDisputesDispute",
+        "PostDisputesDisputeClose",
         "GetPaymentIntents",
         "PostPaymentIntents",
         "GetPaymentIntentsIntent",
@@ -129,6 +143,11 @@ def test_the_wired_surface_is_small_and_named() -> None:
         "PostPromotionCodes",
         "GetPromotionCodesPromotionCode",
         "PostPromotionCodesPromotionCode",
+        "GetRefunds",
+        "PostRefunds",
+        "GetRefundsRefund",
+        "PostRefundsRefund",
+        "PostRefundsRefundCancel",
         "GetTaxRates",
         "PostTaxRates",
         "GetTaxRatesTaxRate",

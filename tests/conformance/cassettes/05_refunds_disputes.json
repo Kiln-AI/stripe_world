@@ -1,0 +1,4087 @@
+{
+  "scenario": "05_refunds_disputes",
+  "description": "Refunds and disputes: partial and remainder refunds with the charge bookkeeping, the over-refund and disputed-charge refusals, the scoped and legacy charge paths, expand[]=refunds, and the dispute lifecycle through winning evidence, an inquiry escalation and a close.",
+  "recorded_at": "2026-09-20T16:11:04+00:00",
+  "stripe_version_pin": "2026-08-26.dahlia",
+  "steps": [
+    {
+      "seq": 0,
+      "method": "POST",
+      "path": "/v1/customers",
+      "path_refs": {},
+      "params": {
+        "email": "s05@conformance.stripeapi.invalid",
+        "description": "scenario 05",
+        "metadata": {
+          "probe": "s05"
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": "customer",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "cus_VIO6iGPEkciHvl",
+        "object": "customer",
+        "address": null,
+        "balance": 0,
+        "created": 1789920624,
+        "currency": null,
+        "customer_account": null,
+        "default_source": null,
+        "delinquent": false,
+        "description": "scenario 05",
+        "discount": null,
+        "email": "s05@conformance.stripeapi.invalid",
+        "invoice_prefix": "RC3LY0Q9",
+        "invoice_settings": {
+          "custom_fields": null,
+          "default_payment_method": null,
+          "footer": null,
+          "rendering_options": null
+        },
+        "livemode": false,
+        "metadata": {
+          "probe": "s05"
+        },
+        "name": null,
+        "next_invoice_sequence": 1,
+        "phone": null,
+        "preferred_locales": [],
+        "shipping": null,
+        "tax_exempt": "none",
+        "test_clock": null
+      }
+    },
+    {
+      "seq": 1,
+      "method": "POST",
+      "path": "/v1/payment_methods",
+      "path_refs": {},
+      "params": {
+        "type": "card",
+        "card": {
+          "token": "tok_visa"
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": "visa",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "pm_1UHnJsHIBYZYyePrjQHhGHzh",
+        "object": "payment_method",
+        "allow_redisplay": "unspecified",
+        "billing_details": {
+          "address": {
+            "city": null,
+            "country": null,
+            "line1": null,
+            "line2": null,
+            "postal_code": null,
+            "state": null
+          },
+          "email": null,
+          "name": null,
+          "phone": null,
+          "tax_id": null
+        },
+        "card": {
+          "brand": "visa",
+          "checks": {
+            "address_line1_check": null,
+            "address_postal_code_check": null,
+            "cvc_check": "unchecked"
+          },
+          "country": "US",
+          "display_brand": "visa",
+          "exp_month": 9,
+          "exp_year": 2027,
+          "fingerprint": "OiMHMa3aYsyDbc1P",
+          "funding": "credit",
+          "generated_from": null,
+          "last4": "4242",
+          "networks": {
+            "available": [
+              "visa"
+            ],
+            "preferred": null
+          },
+          "regulated_status": "unregulated",
+          "three_d_secure_usage": {
+            "supported": true
+          },
+          "wallet": null
+        },
+        "created": 1789920624,
+        "customer": null,
+        "customer_account": null,
+        "livemode": false,
+        "metadata": {},
+        "shared_payment_granted_token": null,
+        "type": "card"
+      }
+    },
+    {
+      "seq": 2,
+      "method": "POST",
+      "path": "/v1/payment_methods/{payment_method}/attach",
+      "path_refs": {
+        "payment_method": {
+          "step": "visa",
+          "field": "id"
+        }
+      },
+      "params": {
+        "customer": {
+          "$ref": {
+            "step": "customer",
+            "field": "id"
+          }
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "pm_1UHnJsHIBYZYyePrjQHhGHzh",
+        "object": "payment_method",
+        "allow_redisplay": "unspecified",
+        "billing_details": {
+          "address": {
+            "city": null,
+            "country": null,
+            "line1": null,
+            "line2": null,
+            "postal_code": null,
+            "state": null
+          },
+          "email": null,
+          "name": null,
+          "phone": null,
+          "tax_id": null
+        },
+        "card": {
+          "brand": "visa",
+          "checks": {
+            "address_line1_check": null,
+            "address_postal_code_check": null,
+            "cvc_check": "pass"
+          },
+          "country": "US",
+          "display_brand": "visa",
+          "exp_month": 9,
+          "exp_year": 2027,
+          "fingerprint": "OiMHMa3aYsyDbc1P",
+          "funding": "credit",
+          "generated_from": null,
+          "last4": "4242",
+          "networks": {
+            "available": [
+              "visa"
+            ],
+            "preferred": null
+          },
+          "regulated_status": "unregulated",
+          "three_d_secure_usage": {
+            "supported": true
+          },
+          "wallet": null
+        },
+        "created": 1789920624,
+        "customer": "cus_VIO6iGPEkciHvl",
+        "customer_account": null,
+        "livemode": false,
+        "metadata": {},
+        "shared_payment_granted_token": null,
+        "type": "card"
+      }
+    },
+    {
+      "seq": 3,
+      "method": "POST",
+      "path": "/v1/payment_intents",
+      "path_refs": {},
+      "params": {
+        "amount": 5000,
+        "currency": "usd",
+        "confirm": true,
+        "payment_method_types": [
+          "card"
+        ],
+        "customer": {
+          "$ref": {
+            "step": "customer",
+            "field": "id"
+          }
+        },
+        "payment_method": {
+          "$ref": {
+            "step": "visa",
+            "field": "id"
+          }
+        },
+        "description": "scenario 05 charge"
+      },
+      "idempotency_key": null,
+      "binds_as": "pi_main",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "pi_3UHnJtHIBYZYyePr07DClsD4",
+        "object": "payment_intent",
+        "allowed_payment_method_types": null,
+        "amount": 5000,
+        "amount_capturable": 0,
+        "amount_details": {
+          "tip": {}
+        },
+        "amount_received": 5000,
+        "application": null,
+        "application_fee_amount": null,
+        "automatic_payment_methods": null,
+        "canceled_at": null,
+        "cancellation_reason": null,
+        "capture_method": "automatic_async",
+        "client_secret": "pi_3UHnJtHIBYZYyePr07DClsD4_secret_3ufbYn5w04Mb7vSrbV0MOOGpv",
+        "confirmation_method": "automatic",
+        "created": 1789920625,
+        "currency": "usd",
+        "customer": "cus_VIO6iGPEkciHvl",
+        "customer_account": null,
+        "description": "scenario 05 charge",
+        "excluded_payment_method_types": null,
+        "last_payment_error": null,
+        "latest_charge": "ch_3UHnJtHIBYZYyePr0OHvLnhd",
+        "livemode": false,
+        "managed_payments": {
+          "enabled": false
+        },
+        "metadata": {},
+        "next_action": null,
+        "on_behalf_of": null,
+        "payment_method": "pm_1UHnJsHIBYZYyePrjQHhGHzh",
+        "payment_method_configuration_details": null,
+        "payment_method_options": {
+          "card": {
+            "installments": null,
+            "mandate_options": null,
+            "network": null,
+            "request_three_d_secure": "automatic"
+          }
+        },
+        "payment_method_types": [
+          "card"
+        ],
+        "payment_record": null,
+        "processing": null,
+        "receipt_email": null,
+        "review": null,
+        "setup_future_usage": null,
+        "shared_payment_granted_token": null,
+        "shipping": null,
+        "source": null,
+        "statement_descriptor": null,
+        "statement_descriptor_suffix": null,
+        "status": "succeeded",
+        "transfer_data": null,
+        "transfer_group": null
+      }
+    },
+    {
+      "seq": 4,
+      "method": "POST",
+      "path": "/v1/refunds",
+      "path_refs": {},
+      "params": {
+        "charge": {
+          "$ref": {
+            "step": "pi_main",
+            "field": "latest_charge"
+          }
+        },
+        "amount": 1500,
+        "reason": "duplicate",
+        "metadata": {
+          "p": "s05"
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": "refund_partial",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "re_3UHnJtHIBYZYyePr0NWaslIl",
+        "object": "refund",
+        "amount": 1500,
+        "balance_transaction": "txn_3UHnJtHIBYZYyePr0jvjEOL0",
+        "charge": "ch_3UHnJtHIBYZYyePr0OHvLnhd",
+        "created": 1789920626,
+        "currency": "usd",
+        "customer": "cus_VIO6iGPEkciHvl",
+        "customer_account": null,
+        "destination_details": {
+          "card": {
+            "reference_status": "pending",
+            "reference_type": "acquirer_reference_number",
+            "type": "refund"
+          },
+          "type": "card"
+        },
+        "metadata": {
+          "p": "s05"
+        },
+        "payment_intent": "pi_3UHnJtHIBYZYyePr07DClsD4",
+        "payment_method": "pm_1UHnJsHIBYZYyePrjQHhGHzh",
+        "reason": "duplicate",
+        "receipt_number": null,
+        "source_transfer_reversal": null,
+        "status": "succeeded",
+        "transfer_reversal": null
+      }
+    },
+    {
+      "seq": 5,
+      "method": "GET",
+      "path": "/v1/charges/{charge}",
+      "path_refs": {
+        "charge": {
+          "step": "pi_main",
+          "field": "latest_charge"
+        }
+      },
+      "params": {},
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "ch_3UHnJtHIBYZYyePr0OHvLnhd",
+        "object": "charge",
+        "amount": 5000,
+        "amount_captured": 5000,
+        "amount_refunded": 1500,
+        "application": null,
+        "application_fee": null,
+        "application_fee_amount": null,
+        "balance_transaction": "txn_3UHnJtHIBYZYyePr0sUX5Z4f",
+        "billing_details": {
+          "address": {
+            "city": null,
+            "country": null,
+            "line1": null,
+            "line2": null,
+            "postal_code": null,
+            "state": null
+          },
+          "email": null,
+          "name": null,
+          "phone": null,
+          "tax_id": null
+        },
+        "calculated_statement_descriptor": "Stripe",
+        "captured": true,
+        "created": 1789920625,
+        "currency": "usd",
+        "customer": "cus_VIO6iGPEkciHvl",
+        "description": "scenario 05 charge",
+        "destination": null,
+        "dispute": null,
+        "disputed": false,
+        "failure_balance_transaction": null,
+        "failure_code": null,
+        "failure_message": null,
+        "fraud_details": {},
+        "livemode": false,
+        "metadata": {},
+        "on_behalf_of": null,
+        "order": null,
+        "outcome": {
+          "advice_code": null,
+          "network_advice_code": null,
+          "network_decline_code": null,
+          "network_status": "approved_by_network",
+          "reason": null,
+          "risk_level": "normal",
+          "risk_score": 41,
+          "seller_message": "Payment complete.",
+          "type": "authorized"
+        },
+        "paid": true,
+        "payment_intent": "pi_3UHnJtHIBYZYyePr07DClsD4",
+        "payment_method": "pm_1UHnJsHIBYZYyePrjQHhGHzh",
+        "payment_method_details": {
+          "card": {
+            "amount_authorized": 5000,
+            "authorization_code": "224755",
+            "brand": "visa",
+            "checks": {
+              "address_line1_check": null,
+              "address_postal_code_check": null,
+              "cvc_check": "pass"
+            },
+            "country": "US",
+            "electronic_commerce_indicator": "07",
+            "exp_month": 9,
+            "exp_year": 2027,
+            "extended_authorization": {
+              "status": "disabled"
+            },
+            "fingerprint": "OiMHMa3aYsyDbc1P",
+            "funding": "credit",
+            "incremental_authorization": {
+              "status": "unavailable"
+            },
+            "installments": null,
+            "last4": "4242",
+            "mandate": null,
+            "multicapture": {
+              "status": "unavailable"
+            },
+            "network": "visa",
+            "network_token": {
+              "used": false
+            },
+            "network_transaction_id": "791057772779751",
+            "overcapture": {
+              "maximum_amount_capturable": 5000,
+              "status": "unavailable"
+            },
+            "regulated_status": "unregulated",
+            "three_d_secure": null,
+            "transaction_link_id": null,
+            "wallet": null
+          },
+          "type": "card"
+        },
+        "radar_options": {},
+        "receipt_email": null,
+        "receipt_number": null,
+        "receipt_url": "<redacted:receipt_url>",
+        "refunded": false,
+        "review": null,
+        "shipping": null,
+        "source": null,
+        "source_transfer": null,
+        "statement_descriptor": null,
+        "statement_descriptor_suffix": null,
+        "status": "succeeded",
+        "transfer_data": null,
+        "transfer_group": null
+      }
+    },
+    {
+      "seq": 6,
+      "method": "GET",
+      "path": "/v1/charges/{charge}",
+      "path_refs": {
+        "charge": {
+          "step": "pi_main",
+          "field": "latest_charge"
+        }
+      },
+      "params": {
+        "expand": [
+          "refunds"
+        ]
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "ch_3UHnJtHIBYZYyePr0OHvLnhd",
+        "object": "charge",
+        "amount": 5000,
+        "amount_captured": 5000,
+        "amount_refunded": 1500,
+        "application": null,
+        "application_fee": null,
+        "application_fee_amount": null,
+        "balance_transaction": "txn_3UHnJtHIBYZYyePr0sUX5Z4f",
+        "billing_details": {
+          "address": {
+            "city": null,
+            "country": null,
+            "line1": null,
+            "line2": null,
+            "postal_code": null,
+            "state": null
+          },
+          "email": null,
+          "name": null,
+          "phone": null,
+          "tax_id": null
+        },
+        "calculated_statement_descriptor": "Stripe",
+        "captured": true,
+        "created": 1789920625,
+        "currency": "usd",
+        "customer": "cus_VIO6iGPEkciHvl",
+        "description": "scenario 05 charge",
+        "destination": null,
+        "dispute": null,
+        "disputed": false,
+        "failure_balance_transaction": null,
+        "failure_code": null,
+        "failure_message": null,
+        "fraud_details": {},
+        "livemode": false,
+        "metadata": {},
+        "on_behalf_of": null,
+        "order": null,
+        "outcome": {
+          "advice_code": null,
+          "network_advice_code": null,
+          "network_decline_code": null,
+          "network_status": "approved_by_network",
+          "reason": null,
+          "risk_level": "normal",
+          "risk_score": 41,
+          "seller_message": "Payment complete.",
+          "type": "authorized"
+        },
+        "paid": true,
+        "payment_intent": "pi_3UHnJtHIBYZYyePr07DClsD4",
+        "payment_method": "pm_1UHnJsHIBYZYyePrjQHhGHzh",
+        "payment_method_details": {
+          "card": {
+            "amount_authorized": 5000,
+            "authorization_code": "224755",
+            "brand": "visa",
+            "checks": {
+              "address_line1_check": null,
+              "address_postal_code_check": null,
+              "cvc_check": "pass"
+            },
+            "country": "US",
+            "electronic_commerce_indicator": "07",
+            "exp_month": 9,
+            "exp_year": 2027,
+            "extended_authorization": {
+              "status": "disabled"
+            },
+            "fingerprint": "OiMHMa3aYsyDbc1P",
+            "funding": "credit",
+            "incremental_authorization": {
+              "status": "unavailable"
+            },
+            "installments": null,
+            "last4": "4242",
+            "mandate": null,
+            "multicapture": {
+              "status": "unavailable"
+            },
+            "network": "visa",
+            "network_token": {
+              "used": false
+            },
+            "network_transaction_id": "791057772779751",
+            "overcapture": {
+              "maximum_amount_capturable": 5000,
+              "status": "unavailable"
+            },
+            "regulated_status": "unregulated",
+            "three_d_secure": null,
+            "transaction_link_id": null,
+            "wallet": null
+          },
+          "type": "card"
+        },
+        "radar_options": {},
+        "receipt_email": null,
+        "receipt_number": null,
+        "receipt_url": "<redacted:receipt_url>",
+        "refunded": false,
+        "refunds": {
+          "object": "list",
+          "data": [
+            {
+              "id": "re_3UHnJtHIBYZYyePr0NWaslIl",
+              "object": "refund",
+              "amount": 1500,
+              "balance_transaction": "txn_3UHnJtHIBYZYyePr0jvjEOL0",
+              "charge": "ch_3UHnJtHIBYZYyePr0OHvLnhd",
+              "created": 1789920626,
+              "currency": "usd",
+              "customer": "cus_VIO6iGPEkciHvl",
+              "customer_account": null,
+              "destination_details": {
+                "card": {
+                  "reference_status": "pending",
+                  "reference_type": "acquirer_reference_number",
+                  "type": "refund"
+                },
+                "type": "card"
+              },
+              "metadata": {
+                "p": "s05"
+              },
+              "payment_intent": "pi_3UHnJtHIBYZYyePr07DClsD4",
+              "payment_method": "pm_1UHnJsHIBYZYyePrjQHhGHzh",
+              "reason": "duplicate",
+              "receipt_number": null,
+              "source_transfer_reversal": null,
+              "status": "succeeded",
+              "transfer_reversal": null
+            }
+          ],
+          "has_more": false,
+          "total_count": 1,
+          "url": "/v1/charges/ch_3UHnJtHIBYZYyePr0OHvLnhd/refunds"
+        },
+        "review": null,
+        "shipping": null,
+        "source": null,
+        "source_transfer": null,
+        "statement_descriptor": null,
+        "statement_descriptor_suffix": null,
+        "status": "succeeded",
+        "transfer_data": null,
+        "transfer_group": null
+      }
+    },
+    {
+      "seq": 7,
+      "method": "POST",
+      "path": "/v1/refunds",
+      "path_refs": {},
+      "params": {
+        "charge": {
+          "$ref": {
+            "step": "pi_main",
+            "field": "latest_charge"
+          }
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "re_3UHnJtHIBYZYyePr06IOkOYG",
+        "object": "refund",
+        "amount": 3500,
+        "balance_transaction": "txn_3UHnJtHIBYZYyePr07iGKQlo",
+        "charge": "ch_3UHnJtHIBYZYyePr0OHvLnhd",
+        "created": 1789920627,
+        "currency": "usd",
+        "customer": "cus_VIO6iGPEkciHvl",
+        "customer_account": null,
+        "destination_details": {
+          "card": {
+            "reference_status": "pending",
+            "reference_type": "acquirer_reference_number",
+            "type": "refund"
+          },
+          "type": "card"
+        },
+        "metadata": {},
+        "payment_intent": "pi_3UHnJtHIBYZYyePr07DClsD4",
+        "payment_method": "pm_1UHnJsHIBYZYyePrjQHhGHzh",
+        "reason": null,
+        "receipt_number": null,
+        "source_transfer_reversal": null,
+        "status": "succeeded",
+        "transfer_reversal": null
+      }
+    },
+    {
+      "seq": 8,
+      "method": "POST",
+      "path": "/v1/refunds",
+      "path_refs": {},
+      "params": {
+        "charge": {
+          "$ref": {
+            "step": "pi_main",
+            "field": "latest_charge"
+          }
+        },
+        "amount": 1
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 400,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "error": {
+          "code": "charge_already_refunded",
+          "doc_url": "https://stripe.com/docs/error-codes/charge-already-refunded",
+          "message": "Charge ch_3UHnJtHIBYZYyePr0OHvLnhd has already been refunded.",
+          "request_log_url": "<redacted:request_log_url>",
+          "type": "invalid_request_error"
+        }
+      }
+    },
+    {
+      "seq": 9,
+      "method": "POST",
+      "path": "/v1/payment_intents",
+      "path_refs": {},
+      "params": {
+        "amount": 3200,
+        "currency": "usd",
+        "confirm": true,
+        "payment_method_types": [
+          "card"
+        ],
+        "customer": {
+          "$ref": {
+            "step": "customer",
+            "field": "id"
+          }
+        },
+        "payment_method": {
+          "$ref": {
+            "step": "visa",
+            "field": "id"
+          }
+        },
+        "description": "scenario 05 charge"
+      },
+      "idempotency_key": null,
+      "binds_as": "pi_intent",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "pi_3UHnJwHIBYZYyePr0GKHtqnq",
+        "object": "payment_intent",
+        "allowed_payment_method_types": null,
+        "amount": 3200,
+        "amount_capturable": 0,
+        "amount_details": {
+          "tip": {}
+        },
+        "amount_received": 3200,
+        "application": null,
+        "application_fee_amount": null,
+        "automatic_payment_methods": null,
+        "canceled_at": null,
+        "cancellation_reason": null,
+        "capture_method": "automatic_async",
+        "client_secret": "pi_3UHnJwHIBYZYyePr0GKHtqnq_secret_ehoYxp3w16ukf4NhGZmJi3tNf",
+        "confirmation_method": "automatic",
+        "created": 1789920628,
+        "currency": "usd",
+        "customer": "cus_VIO6iGPEkciHvl",
+        "customer_account": null,
+        "description": "scenario 05 charge",
+        "excluded_payment_method_types": null,
+        "last_payment_error": null,
+        "latest_charge": "ch_3UHnJwHIBYZYyePr0MCZyprs",
+        "livemode": false,
+        "managed_payments": {
+          "enabled": false
+        },
+        "metadata": {},
+        "next_action": null,
+        "on_behalf_of": null,
+        "payment_method": "pm_1UHnJsHIBYZYyePrjQHhGHzh",
+        "payment_method_configuration_details": null,
+        "payment_method_options": {
+          "card": {
+            "installments": null,
+            "mandate_options": null,
+            "network": null,
+            "request_three_d_secure": "automatic"
+          }
+        },
+        "payment_method_types": [
+          "card"
+        ],
+        "payment_record": null,
+        "processing": null,
+        "receipt_email": null,
+        "review": null,
+        "setup_future_usage": null,
+        "shared_payment_granted_token": null,
+        "shipping": null,
+        "source": null,
+        "statement_descriptor": null,
+        "statement_descriptor_suffix": null,
+        "status": "succeeded",
+        "transfer_data": null,
+        "transfer_group": null
+      }
+    },
+    {
+      "seq": 10,
+      "method": "POST",
+      "path": "/v1/refunds",
+      "path_refs": {},
+      "params": {
+        "payment_intent": {
+          "$ref": {
+            "step": "pi_intent",
+            "field": "id"
+          }
+        },
+        "amount": 700
+      },
+      "idempotency_key": null,
+      "binds_as": "refund_by_intent",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "re_3UHnJwHIBYZYyePr0Nud3u78",
+        "object": "refund",
+        "amount": 700,
+        "balance_transaction": "txn_3UHnJwHIBYZYyePr0C9MO11K",
+        "charge": "ch_3UHnJwHIBYZYyePr0MCZyprs",
+        "created": 1789920629,
+        "currency": "usd",
+        "customer": "cus_VIO6iGPEkciHvl",
+        "customer_account": null,
+        "destination_details": {
+          "card": {
+            "reference_status": "pending",
+            "reference_type": "acquirer_reference_number",
+            "type": "refund"
+          },
+          "type": "card"
+        },
+        "metadata": {},
+        "payment_intent": "pi_3UHnJwHIBYZYyePr0GKHtqnq",
+        "payment_method": "pm_1UHnJsHIBYZYyePrjQHhGHzh",
+        "reason": null,
+        "receipt_number": null,
+        "source_transfer_reversal": null,
+        "status": "succeeded",
+        "transfer_reversal": null
+      }
+    },
+    {
+      "seq": 11,
+      "method": "POST",
+      "path": "/v1/refunds",
+      "path_refs": {},
+      "params": {
+        "payment_intent": {
+          "$ref": {
+            "step": "pi_intent",
+            "field": "id"
+          }
+        },
+        "amount": 3000
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 400,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "error": {
+          "message": "Refund amount ($30.00) is greater than unrefunded amount on charge ($25.00)",
+          "param": "amount",
+          "request_log_url": "<redacted:request_log_url>",
+          "type": "invalid_request_error"
+        }
+      }
+    },
+    {
+      "seq": 12,
+      "method": "POST",
+      "path": "/v1/refunds",
+      "path_refs": {},
+      "params": {
+        "amount": 100
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 400,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "error": {
+          "message": "One of the following params should be provided for this request: payment_intent or charge.",
+          "request_log_url": "<redacted:request_log_url>",
+          "type": "invalid_request_error"
+        }
+      }
+    },
+    {
+      "seq": 13,
+      "method": "POST",
+      "path": "/v1/refunds",
+      "path_refs": {},
+      "params": {
+        "charge": "ch_unknown0000000000000000"
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 404,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "error": {
+          "code": "resource_missing",
+          "doc_url": "https://stripe.com/docs/error-codes/resource-missing",
+          "message": "No such charge: 'ch_unknown0000000000000000'",
+          "param": "id",
+          "request_log_url": "<redacted:request_log_url>",
+          "type": "invalid_request_error"
+        }
+      }
+    },
+    {
+      "seq": 14,
+      "method": "POST",
+      "path": "/v1/refunds/{refund}",
+      "path_refs": {
+        "refund": {
+          "step": "refund_by_intent",
+          "field": "id"
+        }
+      },
+      "params": {
+        "metadata": {
+          "k": "v"
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "re_3UHnJwHIBYZYyePr0Nud3u78",
+        "object": "refund",
+        "amount": 700,
+        "balance_transaction": "txn_3UHnJwHIBYZYyePr0C9MO11K",
+        "charge": "ch_3UHnJwHIBYZYyePr0MCZyprs",
+        "created": 1789920629,
+        "currency": "usd",
+        "customer": "cus_VIO6iGPEkciHvl",
+        "customer_account": null,
+        "destination_details": {
+          "card": {
+            "reference": "5365998173386208",
+            "reference_status": "available",
+            "reference_type": "acquirer_reference_number",
+            "type": "refund"
+          },
+          "type": "card"
+        },
+        "metadata": {
+          "k": "v"
+        },
+        "payment_intent": "pi_3UHnJwHIBYZYyePr0GKHtqnq",
+        "payment_method": "pm_1UHnJsHIBYZYyePrjQHhGHzh",
+        "reason": null,
+        "receipt_number": null,
+        "source_transfer_reversal": null,
+        "status": "succeeded",
+        "transfer_reversal": null
+      }
+    },
+    {
+      "seq": 15,
+      "method": "POST",
+      "path": "/v1/refunds/{refund}/cancel",
+      "path_refs": {
+        "refund": {
+          "step": "refund_by_intent",
+          "field": "id"
+        }
+      },
+      "params": {},
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 400,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "error": {
+          "message": "Canceling this refund is unsupported.",
+          "request_log_url": "<redacted:request_log_url>",
+          "type": "invalid_request_error"
+        }
+      }
+    },
+    {
+      "seq": 16,
+      "method": "GET",
+      "path": "/v1/refunds",
+      "path_refs": {},
+      "params": {
+        "charge": {
+          "$ref": {
+            "step": "pi_main",
+            "field": "latest_charge"
+          }
+        },
+        "limit": 100
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "object": "list",
+        "count": 2,
+        "data": [
+          {
+            "id": "re_3UHnJtHIBYZYyePr06IOkOYG",
+            "object": "refund",
+            "amount": 3500,
+            "balance_transaction": "txn_3UHnJtHIBYZYyePr07iGKQlo",
+            "charge": "ch_3UHnJtHIBYZYyePr0OHvLnhd",
+            "created": 1789920627,
+            "currency": "usd",
+            "customer": "cus_VIO6iGPEkciHvl",
+            "customer_account": null,
+            "destination_details": {
+              "card": {
+                "reference": "9450482898039238",
+                "reference_status": "available",
+                "reference_type": "acquirer_reference_number",
+                "type": "refund"
+              },
+              "type": "card"
+            },
+            "metadata": {},
+            "payment_intent": "pi_3UHnJtHIBYZYyePr07DClsD4",
+            "payment_method": "pm_1UHnJsHIBYZYyePrjQHhGHzh",
+            "reason": null,
+            "receipt_number": null,
+            "source_transfer_reversal": null,
+            "status": "succeeded",
+            "transfer_reversal": null
+          },
+          {
+            "id": "re_3UHnJtHIBYZYyePr0NWaslIl",
+            "object": "refund",
+            "amount": 1500,
+            "balance_transaction": "txn_3UHnJtHIBYZYyePr0jvjEOL0",
+            "charge": "ch_3UHnJtHIBYZYyePr0OHvLnhd",
+            "created": 1789920626,
+            "currency": "usd",
+            "customer": "cus_VIO6iGPEkciHvl",
+            "customer_account": null,
+            "destination_details": {
+              "card": {
+                "reference": "2638935142980699",
+                "reference_status": "available",
+                "reference_type": "acquirer_reference_number",
+                "type": "refund"
+              },
+              "type": "card"
+            },
+            "metadata": {
+              "p": "s05"
+            },
+            "payment_intent": "pi_3UHnJtHIBYZYyePr07DClsD4",
+            "payment_method": "pm_1UHnJsHIBYZYyePrjQHhGHzh",
+            "reason": "duplicate",
+            "receipt_number": null,
+            "source_transfer_reversal": null,
+            "status": "succeeded",
+            "transfer_reversal": null
+          }
+        ],
+        "has_more": false,
+        "url": "/v1/refunds"
+      }
+    },
+    {
+      "seq": 17,
+      "method": "GET",
+      "path": "/v1/charges/{charge}/refunds",
+      "path_refs": {
+        "charge": {
+          "step": "pi_main",
+          "field": "latest_charge"
+        }
+      },
+      "params": {},
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "object": "list",
+        "data": [
+          {
+            "id": "re_3UHnJtHIBYZYyePr06IOkOYG",
+            "object": "refund",
+            "amount": 3500,
+            "balance_transaction": "txn_3UHnJtHIBYZYyePr07iGKQlo",
+            "charge": "ch_3UHnJtHIBYZYyePr0OHvLnhd",
+            "created": 1789920627,
+            "currency": "usd",
+            "customer": "cus_VIO6iGPEkciHvl",
+            "customer_account": null,
+            "destination_details": {
+              "card": {
+                "reference": "9450482898039238",
+                "reference_status": "available",
+                "reference_type": "acquirer_reference_number",
+                "type": "refund"
+              },
+              "type": "card"
+            },
+            "metadata": {},
+            "payment_intent": "pi_3UHnJtHIBYZYyePr07DClsD4",
+            "payment_method": "pm_1UHnJsHIBYZYyePrjQHhGHzh",
+            "reason": null,
+            "receipt_number": null,
+            "source_transfer_reversal": null,
+            "status": "succeeded",
+            "transfer_reversal": null
+          },
+          {
+            "id": "re_3UHnJtHIBYZYyePr0NWaslIl",
+            "object": "refund",
+            "amount": 1500,
+            "balance_transaction": "txn_3UHnJtHIBYZYyePr0jvjEOL0",
+            "charge": "ch_3UHnJtHIBYZYyePr0OHvLnhd",
+            "created": 1789920626,
+            "currency": "usd",
+            "customer": "cus_VIO6iGPEkciHvl",
+            "customer_account": null,
+            "destination_details": {
+              "card": {
+                "reference": "2638935142980699",
+                "reference_status": "available",
+                "reference_type": "acquirer_reference_number",
+                "type": "refund"
+              },
+              "type": "card"
+            },
+            "metadata": {
+              "p": "s05"
+            },
+            "payment_intent": "pi_3UHnJtHIBYZYyePr07DClsD4",
+            "payment_method": "pm_1UHnJsHIBYZYyePrjQHhGHzh",
+            "reason": "duplicate",
+            "receipt_number": null,
+            "source_transfer_reversal": null,
+            "status": "succeeded",
+            "transfer_reversal": null
+          }
+        ],
+        "has_more": false,
+        "url": "/v1/charges/ch_3UHnJtHIBYZYyePr0OHvLnhd/refunds"
+      }
+    },
+    {
+      "seq": 18,
+      "method": "GET",
+      "path": "/v1/charges/{charge}/refunds/{refund}",
+      "path_refs": {
+        "charge": {
+          "step": "pi_main",
+          "field": "latest_charge"
+        },
+        "refund": {
+          "step": "refund_partial",
+          "field": "id"
+        }
+      },
+      "params": {},
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "re_3UHnJtHIBYZYyePr0NWaslIl",
+        "object": "refund",
+        "amount": 1500,
+        "balance_transaction": "txn_3UHnJtHIBYZYyePr0jvjEOL0",
+        "charge": "ch_3UHnJtHIBYZYyePr0OHvLnhd",
+        "created": 1789920626,
+        "currency": "usd",
+        "customer": "cus_VIO6iGPEkciHvl",
+        "customer_account": null,
+        "destination_details": {
+          "card": {
+            "reference": "2638935142980699",
+            "reference_status": "available",
+            "reference_type": "acquirer_reference_number",
+            "type": "refund"
+          },
+          "type": "card"
+        },
+        "metadata": {
+          "p": "s05"
+        },
+        "payment_intent": "pi_3UHnJtHIBYZYyePr07DClsD4",
+        "payment_method": "pm_1UHnJsHIBYZYyePrjQHhGHzh",
+        "reason": "duplicate",
+        "receipt_number": null,
+        "source_transfer_reversal": null,
+        "status": "succeeded",
+        "transfer_reversal": null
+      }
+    },
+    {
+      "seq": 19,
+      "method": "GET",
+      "path": "/v1/charges/{charge}/refunds/{refund}",
+      "path_refs": {
+        "charge": {
+          "step": "pi_intent",
+          "field": "latest_charge"
+        },
+        "refund": {
+          "step": "refund_partial",
+          "field": "id"
+        }
+      },
+      "params": {},
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 404,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "error": {
+          "code": "resource_missing",
+          "doc_url": "https://stripe.com/docs/error-codes/resource-missing",
+          "message": "No such refund: 're_3UHnJtHIBYZYyePr0NWaslIl'",
+          "param": "refund",
+          "request_log_url": "<redacted:request_log_url>",
+          "type": "invalid_request_error"
+        }
+      }
+    },
+    {
+      "seq": 20,
+      "method": "POST",
+      "path": "/v1/payment_intents",
+      "path_refs": {},
+      "params": {
+        "amount": 3300,
+        "capture_method": "manual",
+        "currency": "usd",
+        "confirm": true,
+        "payment_method_types": [
+          "card"
+        ],
+        "customer": {
+          "$ref": {
+            "step": "customer",
+            "field": "id"
+          }
+        },
+        "payment_method": {
+          "$ref": {
+            "step": "visa",
+            "field": "id"
+          }
+        },
+        "description": "scenario 05 charge"
+      },
+      "idempotency_key": null,
+      "binds_as": "pi_hold",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "pi_3UHnJzHIBYZYyePr1cdmZkNH",
+        "object": "payment_intent",
+        "allowed_payment_method_types": null,
+        "amount": 3300,
+        "amount_capturable": 3300,
+        "amount_details": {
+          "tip": {}
+        },
+        "amount_received": 0,
+        "application": null,
+        "application_fee_amount": null,
+        "automatic_payment_methods": null,
+        "canceled_at": null,
+        "cancellation_reason": null,
+        "capture_method": "manual",
+        "client_secret": "pi_3UHnJzHIBYZYyePr1cdmZkNH_secret_IlTAZqwonx7iXHI34mKu1iatx",
+        "confirmation_method": "automatic",
+        "created": 1789920631,
+        "currency": "usd",
+        "customer": "cus_VIO6iGPEkciHvl",
+        "customer_account": null,
+        "description": "scenario 05 charge",
+        "excluded_payment_method_types": null,
+        "last_payment_error": null,
+        "latest_charge": "ch_3UHnJzHIBYZYyePr1MvesEQT",
+        "livemode": false,
+        "managed_payments": {
+          "enabled": false
+        },
+        "metadata": {},
+        "next_action": null,
+        "on_behalf_of": null,
+        "payment_method": "pm_1UHnJsHIBYZYyePrjQHhGHzh",
+        "payment_method_configuration_details": null,
+        "payment_method_options": {
+          "card": {
+            "installments": null,
+            "mandate_options": null,
+            "network": null,
+            "request_three_d_secure": "automatic"
+          }
+        },
+        "payment_method_types": [
+          "card"
+        ],
+        "payment_record": null,
+        "processing": null,
+        "receipt_email": null,
+        "review": null,
+        "setup_future_usage": null,
+        "shared_payment_granted_token": null,
+        "shipping": null,
+        "source": null,
+        "statement_descriptor": null,
+        "statement_descriptor_suffix": null,
+        "status": "requires_capture",
+        "transfer_data": null,
+        "transfer_group": null
+      }
+    },
+    {
+      "seq": 21,
+      "method": "POST",
+      "path": "/v1/refunds",
+      "path_refs": {},
+      "params": {
+        "charge": {
+          "$ref": {
+            "step": "pi_hold",
+            "field": "latest_charge"
+          }
+        },
+        "amount": 100
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 400,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "error": {
+          "message": "This uncaptured Charge was created by a PaymentIntent (pi_3UHnJzHIBYZYyePr1cdmZkNH). You must cancel the PaymentIntent to reverse the authorization instead of refunding the Charge directly. For more information, see https://stripe.com/docs/payments/place-a-hold-on-a-payment-method",
+          "request_log_url": "<redacted:request_log_url>",
+          "type": "invalid_request_error"
+        }
+      }
+    },
+    {
+      "seq": 22,
+      "method": "POST",
+      "path": "/v1/payment_intents",
+      "path_refs": {},
+      "params": {
+        "amount": 4100,
+        "currency": "usd",
+        "confirm": true,
+        "payment_method_types": [
+          "card"
+        ],
+        "customer": {
+          "$ref": {
+            "step": "customer",
+            "field": "id"
+          }
+        },
+        "payment_method": {
+          "$ref": {
+            "step": "visa",
+            "field": "id"
+          }
+        },
+        "description": "scenario 05 charge"
+      },
+      "idempotency_key": null,
+      "binds_as": "pi_legacy",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "pi_3UHnK0HIBYZYyePr0sVeBh2N",
+        "object": "payment_intent",
+        "allowed_payment_method_types": null,
+        "amount": 4100,
+        "amount_capturable": 0,
+        "amount_details": {
+          "tip": {}
+        },
+        "amount_received": 4100,
+        "application": null,
+        "application_fee_amount": null,
+        "automatic_payment_methods": null,
+        "canceled_at": null,
+        "cancellation_reason": null,
+        "capture_method": "automatic_async",
+        "client_secret": "pi_3UHnK0HIBYZYyePr0sVeBh2N_secret_7zkbzUDqWiEpE90BOqO8uMcMF",
+        "confirmation_method": "automatic",
+        "created": 1789920632,
+        "currency": "usd",
+        "customer": "cus_VIO6iGPEkciHvl",
+        "customer_account": null,
+        "description": "scenario 05 charge",
+        "excluded_payment_method_types": null,
+        "last_payment_error": null,
+        "latest_charge": "ch_3UHnK0HIBYZYyePr0OZ2aJyo",
+        "livemode": false,
+        "managed_payments": {
+          "enabled": false
+        },
+        "metadata": {},
+        "next_action": null,
+        "on_behalf_of": null,
+        "payment_method": "pm_1UHnJsHIBYZYyePrjQHhGHzh",
+        "payment_method_configuration_details": null,
+        "payment_method_options": {
+          "card": {
+            "installments": null,
+            "mandate_options": null,
+            "network": null,
+            "request_three_d_secure": "automatic"
+          }
+        },
+        "payment_method_types": [
+          "card"
+        ],
+        "payment_record": null,
+        "processing": null,
+        "receipt_email": null,
+        "review": null,
+        "setup_future_usage": null,
+        "shared_payment_granted_token": null,
+        "shipping": null,
+        "source": null,
+        "statement_descriptor": null,
+        "statement_descriptor_suffix": null,
+        "status": "succeeded",
+        "transfer_data": null,
+        "transfer_group": null
+      }
+    },
+    {
+      "seq": 23,
+      "method": "POST",
+      "path": "/v1/charges/{charge}/refund",
+      "path_refs": {
+        "charge": {
+          "step": "pi_legacy",
+          "field": "latest_charge"
+        }
+      },
+      "params": {
+        "amount": 800
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "ch_3UHnK0HIBYZYyePr0OZ2aJyo",
+        "object": "charge",
+        "amount": 4100,
+        "amount_captured": 4100,
+        "amount_refunded": 800,
+        "application": null,
+        "application_fee": null,
+        "application_fee_amount": null,
+        "balance_transaction": null,
+        "billing_details": {
+          "address": {
+            "city": null,
+            "country": null,
+            "line1": null,
+            "line2": null,
+            "postal_code": null,
+            "state": null
+          },
+          "email": null,
+          "name": null,
+          "phone": null,
+          "tax_id": null
+        },
+        "calculated_statement_descriptor": "Stripe",
+        "captured": true,
+        "created": 1789920632,
+        "currency": "usd",
+        "customer": "cus_VIO6iGPEkciHvl",
+        "description": "scenario 05 charge",
+        "destination": null,
+        "dispute": null,
+        "disputed": false,
+        "failure_balance_transaction": null,
+        "failure_code": null,
+        "failure_message": null,
+        "fraud_details": {},
+        "livemode": false,
+        "metadata": {},
+        "on_behalf_of": null,
+        "order": null,
+        "outcome": {
+          "advice_code": null,
+          "network_advice_code": null,
+          "network_decline_code": null,
+          "network_status": "approved_by_network",
+          "reason": null,
+          "risk_level": "normal",
+          "risk_score": 11,
+          "seller_message": "Payment complete.",
+          "type": "authorized"
+        },
+        "paid": true,
+        "payment_intent": "pi_3UHnK0HIBYZYyePr0sVeBh2N",
+        "payment_method": "pm_1UHnJsHIBYZYyePrjQHhGHzh",
+        "payment_method_details": {
+          "card": {
+            "amount_authorized": 4100,
+            "authorization_code": "280202",
+            "brand": "visa",
+            "checks": {
+              "address_line1_check": null,
+              "address_postal_code_check": null,
+              "cvc_check": "pass"
+            },
+            "country": "US",
+            "electronic_commerce_indicator": "07",
+            "exp_month": 9,
+            "exp_year": 2027,
+            "extended_authorization": {
+              "status": "disabled"
+            },
+            "fingerprint": "OiMHMa3aYsyDbc1P",
+            "funding": "credit",
+            "incremental_authorization": {
+              "status": "unavailable"
+            },
+            "installments": null,
+            "last4": "4242",
+            "mandate": null,
+            "multicapture": {
+              "status": "unavailable"
+            },
+            "network": "visa",
+            "network_token": {
+              "used": false
+            },
+            "network_transaction_id": "791057772779751",
+            "overcapture": {
+              "maximum_amount_capturable": 4100,
+              "status": "unavailable"
+            },
+            "regulated_status": "unregulated",
+            "three_d_secure": null,
+            "transaction_link_id": null,
+            "wallet": null
+          },
+          "type": "card"
+        },
+        "radar_options": {},
+        "receipt_email": null,
+        "receipt_number": null,
+        "receipt_url": "<redacted:receipt_url>",
+        "refunded": false,
+        "review": null,
+        "shipping": null,
+        "source": null,
+        "source_transfer": null,
+        "statement_descriptor": null,
+        "statement_descriptor_suffix": null,
+        "status": "succeeded",
+        "transfer_data": null,
+        "transfer_group": null
+      }
+    },
+    {
+      "seq": 24,
+      "method": "POST",
+      "path": "/v1/charges/{charge}/refunds",
+      "path_refs": {
+        "charge": {
+          "step": "pi_legacy",
+          "field": "latest_charge"
+        }
+      },
+      "params": {
+        "amount": 300
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "re_3UHnK0HIBYZYyePr0eMb9hQ0",
+        "object": "refund",
+        "amount": 300,
+        "balance_transaction": "txn_3UHnK0HIBYZYyePr06uChl4B",
+        "charge": "ch_3UHnK0HIBYZYyePr0OZ2aJyo",
+        "created": 1789920634,
+        "currency": "usd",
+        "customer": "cus_VIO6iGPEkciHvl",
+        "customer_account": null,
+        "destination_details": {
+          "card": {
+            "reference_status": "pending",
+            "reference_type": "acquirer_reference_number",
+            "type": "refund"
+          },
+          "type": "card"
+        },
+        "metadata": {},
+        "payment_intent": "pi_3UHnK0HIBYZYyePr0sVeBh2N",
+        "payment_method": "pm_1UHnJsHIBYZYyePrjQHhGHzh",
+        "reason": null,
+        "receipt_number": null,
+        "source_transfer_reversal": null,
+        "status": "succeeded",
+        "transfer_reversal": null
+      }
+    },
+    {
+      "seq": 25,
+      "method": "POST",
+      "path": "/v1/payment_methods",
+      "path_refs": {},
+      "params": {
+        "type": "card",
+        "card": {
+          "token": "tok_visa_createDispute"
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": "dispute_card",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "pm_1UHnK2HIBYZYyePry7dPAACq",
+        "object": "payment_method",
+        "allow_redisplay": "unspecified",
+        "billing_details": {
+          "address": {
+            "city": null,
+            "country": null,
+            "line1": null,
+            "line2": null,
+            "postal_code": null,
+            "state": null
+          },
+          "email": null,
+          "name": null,
+          "phone": null,
+          "tax_id": null
+        },
+        "card": {
+          "brand": "visa",
+          "checks": {
+            "address_line1_check": null,
+            "address_postal_code_check": null,
+            "cvc_check": "unchecked"
+          },
+          "country": "US",
+          "display_brand": "visa",
+          "exp_month": 9,
+          "exp_year": 2027,
+          "fingerprint": "yuAr6iCqkTVBbnf8",
+          "funding": "credit",
+          "generated_from": null,
+          "last4": "0259",
+          "networks": {
+            "available": [
+              "visa"
+            ],
+            "preferred": null
+          },
+          "regulated_status": "unregulated",
+          "three_d_secure_usage": {
+            "supported": true
+          },
+          "wallet": null
+        },
+        "created": 1789920634,
+        "customer": null,
+        "customer_account": null,
+        "livemode": false,
+        "metadata": {},
+        "shared_payment_granted_token": null,
+        "type": "card"
+      }
+    },
+    {
+      "seq": 26,
+      "method": "POST",
+      "path": "/v1/payment_methods/{payment_method}/attach",
+      "path_refs": {
+        "payment_method": {
+          "step": "dispute_card",
+          "field": "id"
+        }
+      },
+      "params": {
+        "customer": {
+          "$ref": {
+            "step": "customer",
+            "field": "id"
+          }
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "pm_1UHnK2HIBYZYyePry7dPAACq",
+        "object": "payment_method",
+        "allow_redisplay": "unspecified",
+        "billing_details": {
+          "address": {
+            "city": null,
+            "country": null,
+            "line1": null,
+            "line2": null,
+            "postal_code": null,
+            "state": null
+          },
+          "email": null,
+          "name": null,
+          "phone": null,
+          "tax_id": null
+        },
+        "card": {
+          "brand": "visa",
+          "checks": {
+            "address_line1_check": null,
+            "address_postal_code_check": null,
+            "cvc_check": "pass"
+          },
+          "country": "US",
+          "display_brand": "visa",
+          "exp_month": 9,
+          "exp_year": 2027,
+          "fingerprint": "yuAr6iCqkTVBbnf8",
+          "funding": "credit",
+          "generated_from": null,
+          "last4": "0259",
+          "networks": {
+            "available": [
+              "visa"
+            ],
+            "preferred": null
+          },
+          "regulated_status": "unregulated",
+          "three_d_secure_usage": {
+            "supported": true
+          },
+          "wallet": null
+        },
+        "created": 1789920634,
+        "customer": "cus_VIO6iGPEkciHvl",
+        "customer_account": null,
+        "livemode": false,
+        "metadata": {},
+        "shared_payment_granted_token": null,
+        "type": "card"
+      }
+    },
+    {
+      "seq": 27,
+      "method": "POST",
+      "path": "/v1/payment_intents",
+      "path_refs": {},
+      "params": {
+        "amount": 6000,
+        "currency": "usd",
+        "customer": {
+          "$ref": {
+            "step": "customer",
+            "field": "id"
+          }
+        },
+        "payment_method": {
+          "$ref": {
+            "step": "dispute_card",
+            "field": "id"
+          }
+        },
+        "confirm": true,
+        "payment_method_types": [
+          "card"
+        ],
+        "description": "scenario 05 disputed"
+      },
+      "idempotency_key": null,
+      "binds_as": "pi_disputed",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "pi_3UHnK3HIBYZYyePr1WZavBkb",
+        "object": "payment_intent",
+        "allowed_payment_method_types": null,
+        "amount": 6000,
+        "amount_capturable": 0,
+        "amount_details": {
+          "tip": {}
+        },
+        "amount_received": 6000,
+        "application": null,
+        "application_fee_amount": null,
+        "automatic_payment_methods": null,
+        "canceled_at": null,
+        "cancellation_reason": null,
+        "capture_method": "automatic_async",
+        "client_secret": "pi_3UHnK3HIBYZYyePr1WZavBkb_secret_bFCXfyLuO2YILF3UB0MZzOA3h",
+        "confirmation_method": "automatic",
+        "created": 1789920635,
+        "currency": "usd",
+        "customer": "cus_VIO6iGPEkciHvl",
+        "customer_account": null,
+        "description": "scenario 05 disputed",
+        "excluded_payment_method_types": null,
+        "last_payment_error": null,
+        "latest_charge": "ch_3UHnK3HIBYZYyePr1n5yzKR6",
+        "livemode": false,
+        "managed_payments": {
+          "enabled": false
+        },
+        "metadata": {},
+        "next_action": null,
+        "on_behalf_of": null,
+        "payment_method": "pm_1UHnK2HIBYZYyePry7dPAACq",
+        "payment_method_configuration_details": null,
+        "payment_method_options": {
+          "card": {
+            "installments": null,
+            "mandate_options": null,
+            "network": null,
+            "request_three_d_secure": "automatic"
+          }
+        },
+        "payment_method_types": [
+          "card"
+        ],
+        "payment_record": null,
+        "processing": null,
+        "receipt_email": null,
+        "review": null,
+        "setup_future_usage": null,
+        "shared_payment_granted_token": null,
+        "shipping": null,
+        "source": null,
+        "statement_descriptor": null,
+        "statement_descriptor_suffix": null,
+        "status": "succeeded",
+        "transfer_data": null,
+        "transfer_group": null
+      }
+    },
+    {
+      "seq": 28,
+      "method": "GET",
+      "path": "/v1/charges/{charge}",
+      "path_refs": {
+        "charge": {
+          "step": "pi_disputed",
+          "field": "latest_charge"
+        }
+      },
+      "params": {},
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "ch_3UHnK3HIBYZYyePr1n5yzKR6",
+        "object": "charge",
+        "amount": 6000,
+        "amount_captured": 6000,
+        "amount_refunded": 0,
+        "application": null,
+        "application_fee": null,
+        "application_fee_amount": null,
+        "balance_transaction": null,
+        "billing_details": {
+          "address": {
+            "city": null,
+            "country": null,
+            "line1": null,
+            "line2": null,
+            "postal_code": null,
+            "state": null
+          },
+          "email": null,
+          "name": null,
+          "phone": null,
+          "tax_id": null
+        },
+        "calculated_statement_descriptor": "Stripe",
+        "captured": true,
+        "created": 1789920635,
+        "currency": "usd",
+        "customer": "cus_VIO6iGPEkciHvl",
+        "description": "scenario 05 disputed",
+        "destination": null,
+        "dispute": "du_1UHnK4HIBYZYyePrJddVMLuH",
+        "disputed": true,
+        "failure_balance_transaction": null,
+        "failure_code": null,
+        "failure_message": null,
+        "fraud_details": {},
+        "livemode": false,
+        "metadata": {},
+        "on_behalf_of": null,
+        "order": null,
+        "outcome": {
+          "advice_code": null,
+          "network_advice_code": null,
+          "network_decline_code": null,
+          "network_status": "approved_by_network",
+          "reason": null,
+          "risk_level": "normal",
+          "risk_score": 44,
+          "seller_message": "Payment complete.",
+          "type": "authorized"
+        },
+        "paid": true,
+        "payment_intent": "pi_3UHnK3HIBYZYyePr1WZavBkb",
+        "payment_method": "pm_1UHnK2HIBYZYyePry7dPAACq",
+        "payment_method_details": {
+          "card": {
+            "amount_authorized": 6000,
+            "authorization_code": "661481",
+            "brand": "visa",
+            "checks": {
+              "address_line1_check": null,
+              "address_postal_code_check": null,
+              "cvc_check": "pass"
+            },
+            "country": "US",
+            "electronic_commerce_indicator": "07",
+            "exp_month": 9,
+            "exp_year": 2027,
+            "extended_authorization": {
+              "status": "disabled"
+            },
+            "fingerprint": "yuAr6iCqkTVBbnf8",
+            "funding": "credit",
+            "incremental_authorization": {
+              "status": "unavailable"
+            },
+            "installments": null,
+            "last4": "0259",
+            "mandate": null,
+            "multicapture": {
+              "status": "unavailable"
+            },
+            "network": "visa",
+            "network_token": {
+              "used": false
+            },
+            "network_transaction_id": "121117651145410",
+            "overcapture": {
+              "maximum_amount_capturable": 6000,
+              "status": "unavailable"
+            },
+            "regulated_status": "unregulated",
+            "three_d_secure": null,
+            "transaction_link_id": null,
+            "wallet": null
+          },
+          "type": "card"
+        },
+        "radar_options": {},
+        "receipt_email": null,
+        "receipt_number": null,
+        "receipt_url": "<redacted:receipt_url>",
+        "refunded": false,
+        "review": null,
+        "shipping": null,
+        "source": null,
+        "source_transfer": null,
+        "statement_descriptor": null,
+        "statement_descriptor_suffix": null,
+        "status": "succeeded",
+        "transfer_data": null,
+        "transfer_group": null
+      }
+    },
+    {
+      "seq": 29,
+      "method": "GET",
+      "path": "/v1/disputes",
+      "path_refs": {},
+      "params": {
+        "charge": {
+          "$ref": {
+            "step": "pi_disputed",
+            "field": "latest_charge"
+          }
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": "dispute_list",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "object": "list",
+        "count": 1,
+        "data": [
+          {
+            "id": "du_1UHnK4HIBYZYyePrJddVMLuH",
+            "object": "dispute",
+            "amount": 6000,
+            "balance_transaction": "txn_1UHnK5HIBYZYyePr8lf6Ptns",
+            "balance_transactions": [
+              {
+                "id": "txn_1UHnK5HIBYZYyePr8lf6Ptns",
+                "object": "balance_transaction",
+                "amount": -8391,
+                "available_on": 1789920636,
+                "balance_type": "payments",
+                "created": 1789920636,
+                "currency": "cad",
+                "description": "Chargeback withdrawal for ch_3UHnK3HIBYZYyePr1n5yzKR6",
+                "exchange_rate": null,
+                "fee": 1500,
+                "fee_details": [
+                  {
+                    "amount": 1500,
+                    "application": null,
+                    "currency": "cad",
+                    "description": "Dispute fee",
+                    "type": "stripe_fee"
+                  }
+                ],
+                "net": -9891,
+                "reporting_category": "dispute",
+                "source": "du_1UHnK4HIBYZYyePrJddVMLuH",
+                "status": "available",
+                "type": "adjustment"
+              }
+            ],
+            "charge": "ch_3UHnK3HIBYZYyePr1n5yzKR6",
+            "created": 1789920636,
+            "currency": "usd",
+            "enhanced_eligibility_types": [],
+            "evidence": {
+              "access_activity_log": null,
+              "billing_address": null,
+              "cancellation_policy": null,
+              "cancellation_policy_disclosure": null,
+              "cancellation_rebuttal": null,
+              "customer_communication": null,
+              "customer_email_address": null,
+              "customer_name": null,
+              "customer_purchase_ip": null,
+              "customer_signature": null,
+              "duplicate_charge_documentation": null,
+              "duplicate_charge_explanation": null,
+              "duplicate_charge_id": null,
+              "enhanced_evidence": {},
+              "product_description": null,
+              "receipt": null,
+              "refund_policy": null,
+              "refund_policy_disclosure": null,
+              "refund_refusal_explanation": null,
+              "service_date": null,
+              "service_documentation": null,
+              "shipping_address": null,
+              "shipping_carrier": null,
+              "shipping_date": null,
+              "shipping_documentation": null,
+              "shipping_tracking_number": null,
+              "uncategorized_file": null,
+              "uncategorized_text": null
+            },
+            "evidence_details": {
+              "due_by": 1790639999,
+              "enhanced_eligibility": {},
+              "has_evidence": false,
+              "past_due": false,
+              "submission_count": 0
+            },
+            "is_charge_refundable": false,
+            "livemode": false,
+            "metadata": {},
+            "payment_intent": "pi_3UHnK3HIBYZYyePr1WZavBkb",
+            "payment_method_details": {
+              "card": {
+                "brand": "visa",
+                "case_type": "chargeback",
+                "network": "visa",
+                "network_reason_code": "10.4"
+              },
+              "type": "card"
+            },
+            "reason": "fraudulent",
+            "status": "needs_response"
+          }
+        ],
+        "has_more": false,
+        "url": "/v1/disputes"
+      }
+    },
+    {
+      "seq": 30,
+      "method": "GET",
+      "path": "/v1/disputes/{dispute}",
+      "path_refs": {
+        "dispute": {
+          "step": "dispute_list",
+          "field": "data[0].id"
+        }
+      },
+      "params": {},
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "du_1UHnK4HIBYZYyePrJddVMLuH",
+        "object": "dispute",
+        "amount": 6000,
+        "balance_transaction": "txn_1UHnK5HIBYZYyePr8lf6Ptns",
+        "balance_transactions": [
+          {
+            "id": "txn_1UHnK5HIBYZYyePr8lf6Ptns",
+            "object": "balance_transaction",
+            "amount": -8391,
+            "available_on": 1789920636,
+            "balance_type": "payments",
+            "created": 1789920636,
+            "currency": "cad",
+            "description": "Chargeback withdrawal for ch_3UHnK3HIBYZYyePr1n5yzKR6",
+            "exchange_rate": null,
+            "fee": 1500,
+            "fee_details": [
+              {
+                "amount": 1500,
+                "application": null,
+                "currency": "cad",
+                "description": "Dispute fee",
+                "type": "stripe_fee"
+              }
+            ],
+            "net": -9891,
+            "reporting_category": "dispute",
+            "source": "du_1UHnK4HIBYZYyePrJddVMLuH",
+            "status": "available",
+            "type": "adjustment"
+          }
+        ],
+        "charge": "ch_3UHnK3HIBYZYyePr1n5yzKR6",
+        "created": 1789920636,
+        "currency": "usd",
+        "enhanced_eligibility_types": [],
+        "evidence": {
+          "access_activity_log": null,
+          "billing_address": null,
+          "cancellation_policy": null,
+          "cancellation_policy_disclosure": null,
+          "cancellation_rebuttal": null,
+          "customer_communication": null,
+          "customer_email_address": "s05@conformance.stripeapi.invalid",
+          "customer_name": "scenario 05",
+          "customer_purchase_ip": null,
+          "customer_signature": null,
+          "duplicate_charge_documentation": null,
+          "duplicate_charge_explanation": null,
+          "duplicate_charge_id": null,
+          "enhanced_evidence": {},
+          "product_description": "scenario 05 disputed",
+          "receipt": null,
+          "refund_policy": null,
+          "refund_policy_disclosure": null,
+          "refund_refusal_explanation": null,
+          "service_date": null,
+          "service_documentation": null,
+          "shipping_address": null,
+          "shipping_carrier": null,
+          "shipping_date": null,
+          "shipping_documentation": null,
+          "shipping_tracking_number": null,
+          "uncategorized_file": null,
+          "uncategorized_text": null
+        },
+        "evidence_details": {
+          "due_by": 1790639999,
+          "enhanced_eligibility": {},
+          "has_evidence": false,
+          "past_due": false,
+          "submission_count": 0
+        },
+        "is_charge_refundable": false,
+        "livemode": false,
+        "metadata": {},
+        "payment_intent": "pi_3UHnK3HIBYZYyePr1WZavBkb",
+        "payment_method_details": {
+          "card": {
+            "brand": "visa",
+            "case_type": "chargeback",
+            "network": "visa",
+            "network_reason_code": "10.4"
+          },
+          "type": "card"
+        },
+        "reason": "fraudulent",
+        "status": "needs_response"
+      }
+    },
+    {
+      "seq": 31,
+      "method": "GET",
+      "path": "/v1/charges/{charge}/dispute",
+      "path_refs": {
+        "charge": {
+          "step": "pi_disputed",
+          "field": "latest_charge"
+        }
+      },
+      "params": {},
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "du_1UHnK4HIBYZYyePrJddVMLuH",
+        "object": "dispute",
+        "amount": 6000,
+        "balance_transaction": "txn_1UHnK5HIBYZYyePr8lf6Ptns",
+        "balance_transactions": [
+          {
+            "id": "txn_1UHnK5HIBYZYyePr8lf6Ptns",
+            "object": "balance_transaction",
+            "amount": -8391,
+            "available_on": 1789920636,
+            "balance_type": "payments",
+            "created": 1789920636,
+            "currency": "cad",
+            "description": "Chargeback withdrawal for ch_3UHnK3HIBYZYyePr1n5yzKR6",
+            "exchange_rate": null,
+            "fee": 1500,
+            "fee_details": [
+              {
+                "amount": 1500,
+                "application": null,
+                "currency": "cad",
+                "description": "Dispute fee",
+                "type": "stripe_fee"
+              }
+            ],
+            "net": -9891,
+            "reporting_category": "dispute",
+            "source": "du_1UHnK4HIBYZYyePrJddVMLuH",
+            "status": "available",
+            "type": "adjustment"
+          }
+        ],
+        "charge": "ch_3UHnK3HIBYZYyePr1n5yzKR6",
+        "created": 1789920636,
+        "currency": "usd",
+        "enhanced_eligibility_types": [],
+        "evidence": {
+          "access_activity_log": null,
+          "billing_address": null,
+          "cancellation_policy": null,
+          "cancellation_policy_disclosure": null,
+          "cancellation_rebuttal": null,
+          "customer_communication": null,
+          "customer_email_address": "s05@conformance.stripeapi.invalid",
+          "customer_name": "scenario 05",
+          "customer_purchase_ip": null,
+          "customer_signature": null,
+          "duplicate_charge_documentation": null,
+          "duplicate_charge_explanation": null,
+          "duplicate_charge_id": null,
+          "enhanced_evidence": {},
+          "product_description": "scenario 05 disputed",
+          "receipt": null,
+          "refund_policy": null,
+          "refund_policy_disclosure": null,
+          "refund_refusal_explanation": null,
+          "service_date": null,
+          "service_documentation": null,
+          "shipping_address": null,
+          "shipping_carrier": null,
+          "shipping_date": null,
+          "shipping_documentation": null,
+          "shipping_tracking_number": null,
+          "uncategorized_file": null,
+          "uncategorized_text": null
+        },
+        "evidence_details": {
+          "due_by": 1790639999,
+          "enhanced_eligibility": {},
+          "has_evidence": false,
+          "past_due": false,
+          "submission_count": 0
+        },
+        "is_charge_refundable": false,
+        "livemode": false,
+        "metadata": {},
+        "payment_intent": "pi_3UHnK3HIBYZYyePr1WZavBkb",
+        "payment_method_details": {
+          "card": {
+            "brand": "visa",
+            "case_type": "chargeback",
+            "network": "visa",
+            "network_reason_code": "10.4"
+          },
+          "type": "card"
+        },
+        "reason": "fraudulent",
+        "status": "needs_response"
+      }
+    },
+    {
+      "seq": 32,
+      "method": "POST",
+      "path": "/v1/refunds",
+      "path_refs": {},
+      "params": {
+        "charge": {
+          "$ref": {
+            "step": "pi_disputed",
+            "field": "latest_charge"
+          }
+        },
+        "amount": 100
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 400,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "error": {
+          "code": "charge_disputed",
+          "doc_url": "https://stripe.com/docs/error-codes/charge-disputed",
+          "message": "Charge ch_3UHnK3HIBYZYyePr1n5yzKR6 has been charged back; cannot issue a refund.",
+          "request_log_url": "<redacted:request_log_url>",
+          "type": "invalid_request_error"
+        }
+      }
+    },
+    {
+      "seq": 33,
+      "method": "POST",
+      "path": "/v1/disputes/{dispute}",
+      "path_refs": {
+        "dispute": {
+          "step": "dispute_list",
+          "field": "data[0].id"
+        }
+      },
+      "params": {
+        "evidence": {
+          "uncategorized_text": "winning_evidence"
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "du_1UHnK4HIBYZYyePrJddVMLuH",
+        "object": "dispute",
+        "amount": 6000,
+        "balance_transaction": "txn_1UHnK5HIBYZYyePr8lf6Ptns",
+        "balance_transactions": [
+          {
+            "id": "txn_1UHnK5HIBYZYyePr8lf6Ptns",
+            "object": "balance_transaction",
+            "amount": -8391,
+            "available_on": 1789920636,
+            "balance_type": "payments",
+            "created": 1789920636,
+            "currency": "cad",
+            "description": "Chargeback withdrawal for ch_3UHnK3HIBYZYyePr1n5yzKR6",
+            "exchange_rate": null,
+            "fee": 1500,
+            "fee_details": [
+              {
+                "amount": 1500,
+                "application": null,
+                "currency": "cad",
+                "description": "Dispute fee",
+                "type": "stripe_fee"
+              }
+            ],
+            "net": -9891,
+            "reporting_category": "dispute",
+            "source": "du_1UHnK4HIBYZYyePrJddVMLuH",
+            "status": "available",
+            "type": "adjustment"
+          }
+        ],
+        "charge": "ch_3UHnK3HIBYZYyePr1n5yzKR6",
+        "created": 1789920636,
+        "currency": "usd",
+        "enhanced_eligibility_types": [],
+        "evidence": {
+          "access_activity_log": null,
+          "billing_address": null,
+          "cancellation_policy": null,
+          "cancellation_policy_disclosure": null,
+          "cancellation_rebuttal": null,
+          "customer_communication": null,
+          "customer_email_address": "s05@conformance.stripeapi.invalid",
+          "customer_name": "scenario 05",
+          "customer_purchase_ip": null,
+          "customer_signature": null,
+          "duplicate_charge_documentation": null,
+          "duplicate_charge_explanation": null,
+          "duplicate_charge_id": null,
+          "enhanced_evidence": {},
+          "product_description": "scenario 05 disputed",
+          "receipt": null,
+          "refund_policy": null,
+          "refund_policy_disclosure": null,
+          "refund_refusal_explanation": null,
+          "service_date": null,
+          "service_documentation": null,
+          "shipping_address": null,
+          "shipping_carrier": null,
+          "shipping_date": null,
+          "shipping_documentation": null,
+          "shipping_tracking_number": null,
+          "uncategorized_file": null,
+          "uncategorized_text": "winning_evidence"
+        },
+        "evidence_details": {
+          "due_by": 1790639999,
+          "enhanced_eligibility": {},
+          "has_evidence": true,
+          "past_due": false,
+          "submission_count": 1
+        },
+        "is_charge_refundable": false,
+        "livemode": false,
+        "metadata": {},
+        "payment_intent": "pi_3UHnK3HIBYZYyePr1WZavBkb",
+        "payment_method_details": {
+          "card": {
+            "brand": "visa",
+            "case_type": "chargeback",
+            "network": "visa",
+            "network_reason_code": "10.4"
+          },
+          "type": "card"
+        },
+        "reason": "fraudulent",
+        "status": "under_review"
+      }
+    },
+    {
+      "seq": 34,
+      "method": "GET",
+      "path": "/v1/disputes/{dispute}",
+      "path_refs": {
+        "dispute": {
+          "step": "dispute_list",
+          "field": "data[0].id"
+        }
+      },
+      "params": {},
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "du_1UHnK4HIBYZYyePrJddVMLuH",
+        "object": "dispute",
+        "amount": 6000,
+        "balance_transaction": "txn_1UHnK5HIBYZYyePr8lf6Ptns",
+        "balance_transactions": [
+          {
+            "id": "txn_1UHnK5HIBYZYyePr8lf6Ptns",
+            "object": "balance_transaction",
+            "amount": -8391,
+            "available_on": 1789920636,
+            "balance_type": "payments",
+            "created": 1789920636,
+            "currency": "cad",
+            "description": "Chargeback withdrawal for ch_3UHnK3HIBYZYyePr1n5yzKR6",
+            "exchange_rate": null,
+            "fee": 1500,
+            "fee_details": [
+              {
+                "amount": 1500,
+                "application": null,
+                "currency": "cad",
+                "description": "Dispute fee",
+                "type": "stripe_fee"
+              }
+            ],
+            "net": -9891,
+            "reporting_category": "dispute",
+            "source": "du_1UHnK4HIBYZYyePrJddVMLuH",
+            "status": "available",
+            "type": "adjustment"
+          },
+          {
+            "id": "txn_1UHnKDHIBYZYyePrNQbYXt1X",
+            "object": "balance_transaction",
+            "amount": 8391,
+            "available_on": 1790467200,
+            "balance_type": "payments",
+            "created": 1789920644,
+            "currency": "cad",
+            "description": "Chargeback reversal for ch_3UHnK3HIBYZYyePr1n5yzKR6",
+            "exchange_rate": null,
+            "fee": 0,
+            "fee_details": [],
+            "net": 8391,
+            "reporting_category": "dispute_reversal",
+            "source": "du_1UHnK4HIBYZYyePrJddVMLuH",
+            "status": "pending",
+            "type": "adjustment"
+          }
+        ],
+        "charge": "ch_3UHnK3HIBYZYyePr1n5yzKR6",
+        "created": 1789920636,
+        "currency": "usd",
+        "enhanced_eligibility_types": [],
+        "evidence": {
+          "access_activity_log": null,
+          "billing_address": null,
+          "cancellation_policy": null,
+          "cancellation_policy_disclosure": null,
+          "cancellation_rebuttal": null,
+          "customer_communication": null,
+          "customer_email_address": "s05@conformance.stripeapi.invalid",
+          "customer_name": "scenario 05",
+          "customer_purchase_ip": null,
+          "customer_signature": null,
+          "duplicate_charge_documentation": null,
+          "duplicate_charge_explanation": null,
+          "duplicate_charge_id": null,
+          "enhanced_evidence": {},
+          "product_description": "scenario 05 disputed",
+          "receipt": null,
+          "refund_policy": null,
+          "refund_policy_disclosure": null,
+          "refund_refusal_explanation": null,
+          "service_date": null,
+          "service_documentation": null,
+          "shipping_address": null,
+          "shipping_carrier": null,
+          "shipping_date": null,
+          "shipping_documentation": null,
+          "shipping_tracking_number": null,
+          "uncategorized_file": null,
+          "uncategorized_text": "winning_evidence"
+        },
+        "evidence_details": {
+          "due_by": 1790639999,
+          "enhanced_eligibility": {},
+          "has_evidence": true,
+          "past_due": false,
+          "submission_count": 1
+        },
+        "is_charge_refundable": true,
+        "livemode": false,
+        "metadata": {},
+        "payment_intent": "pi_3UHnK3HIBYZYyePr1WZavBkb",
+        "payment_method_details": {
+          "card": {
+            "brand": "visa",
+            "case_type": "chargeback",
+            "network": "visa",
+            "network_reason_code": "10.4"
+          },
+          "type": "card"
+        },
+        "reason": "fraudulent",
+        "status": "won"
+      }
+    },
+    {
+      "seq": 35,
+      "method": "POST",
+      "path": "/v1/refunds",
+      "path_refs": {},
+      "params": {
+        "charge": {
+          "$ref": {
+            "step": "pi_disputed",
+            "field": "latest_charge"
+          }
+        },
+        "amount": 100
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "re_3UHnK3HIBYZYyePr19lpXwbD",
+        "object": "refund",
+        "amount": 100,
+        "balance_transaction": "txn_3UHnK3HIBYZYyePr14xAfFGZ",
+        "charge": "ch_3UHnK3HIBYZYyePr1n5yzKR6",
+        "created": 1789920649,
+        "currency": "usd",
+        "customer": "cus_VIO6iGPEkciHvl",
+        "customer_account": null,
+        "destination_details": {
+          "card": {
+            "reference_status": "pending",
+            "reference_type": "acquirer_reference_number",
+            "type": "refund"
+          },
+          "type": "card"
+        },
+        "metadata": {},
+        "payment_intent": "pi_3UHnK3HIBYZYyePr1WZavBkb",
+        "payment_method": "pm_1UHnK2HIBYZYyePry7dPAACq",
+        "reason": null,
+        "receipt_number": null,
+        "source_transfer_reversal": null,
+        "status": "succeeded",
+        "transfer_reversal": null
+      }
+    },
+    {
+      "seq": 36,
+      "method": "POST",
+      "path": "/v1/payment_intents",
+      "path_refs": {},
+      "params": {
+        "amount": 4400,
+        "currency": "usd",
+        "customer": {
+          "$ref": {
+            "step": "customer",
+            "field": "id"
+          }
+        },
+        "payment_method": {
+          "$ref": {
+            "step": "dispute_card",
+            "field": "id"
+          }
+        },
+        "confirm": true,
+        "payment_method_types": [
+          "card"
+        ],
+        "capture_method": "manual",
+        "description": "scenario 05 held dispute"
+      },
+      "idempotency_key": null,
+      "binds_as": "pi_hold_dispute",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "pi_3UHnKIHIBYZYyePr0ghnuXpd",
+        "object": "payment_intent",
+        "allowed_payment_method_types": null,
+        "amount": 4400,
+        "amount_capturable": 4400,
+        "amount_details": {
+          "tip": {}
+        },
+        "amount_received": 0,
+        "application": null,
+        "application_fee_amount": null,
+        "automatic_payment_methods": null,
+        "canceled_at": null,
+        "cancellation_reason": null,
+        "capture_method": "manual",
+        "client_secret": "pi_3UHnKIHIBYZYyePr0ghnuXpd_secret_VPYsxzcJrSJj5f2DlAVxi3ZDY",
+        "confirmation_method": "automatic",
+        "created": 1789920650,
+        "currency": "usd",
+        "customer": "cus_VIO6iGPEkciHvl",
+        "customer_account": null,
+        "description": "scenario 05 held dispute",
+        "excluded_payment_method_types": null,
+        "last_payment_error": null,
+        "latest_charge": "ch_3UHnKIHIBYZYyePr00kxI3YL",
+        "livemode": false,
+        "managed_payments": {
+          "enabled": false
+        },
+        "metadata": {},
+        "next_action": null,
+        "on_behalf_of": null,
+        "payment_method": "pm_1UHnK2HIBYZYyePry7dPAACq",
+        "payment_method_configuration_details": null,
+        "payment_method_options": {
+          "card": {
+            "installments": null,
+            "mandate_options": null,
+            "network": null,
+            "request_three_d_secure": "automatic"
+          }
+        },
+        "payment_method_types": [
+          "card"
+        ],
+        "payment_record": null,
+        "processing": null,
+        "receipt_email": null,
+        "review": null,
+        "setup_future_usage": null,
+        "shared_payment_granted_token": null,
+        "shipping": null,
+        "source": null,
+        "statement_descriptor": null,
+        "statement_descriptor_suffix": null,
+        "status": "requires_capture",
+        "transfer_data": null,
+        "transfer_group": null
+      }
+    },
+    {
+      "seq": 37,
+      "method": "GET",
+      "path": "/v1/disputes",
+      "path_refs": {},
+      "params": {
+        "charge": {
+          "$ref": {
+            "step": "pi_hold_dispute",
+            "field": "latest_charge"
+          }
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": "hold_disputes_empty",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "object": "list",
+        "count": 0,
+        "data": [],
+        "has_more": false,
+        "url": "/v1/disputes"
+      }
+    },
+    {
+      "seq": 38,
+      "method": "POST",
+      "path": "/v1/payment_intents/{intent}/capture",
+      "path_refs": {
+        "intent": {
+          "step": "pi_hold_dispute",
+          "field": "id"
+        }
+      },
+      "params": {},
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "pi_3UHnKIHIBYZYyePr0ghnuXpd",
+        "object": "payment_intent",
+        "allowed_payment_method_types": null,
+        "amount": 4400,
+        "amount_capturable": 0,
+        "amount_details": {
+          "tip": {}
+        },
+        "amount_received": 4400,
+        "application": null,
+        "application_fee_amount": null,
+        "automatic_payment_methods": null,
+        "canceled_at": null,
+        "cancellation_reason": null,
+        "capture_method": "manual",
+        "client_secret": "pi_3UHnKIHIBYZYyePr0ghnuXpd_secret_VPYsxzcJrSJj5f2DlAVxi3ZDY",
+        "confirmation_method": "automatic",
+        "created": 1789920650,
+        "currency": "usd",
+        "customer": "cus_VIO6iGPEkciHvl",
+        "customer_account": null,
+        "description": "scenario 05 held dispute",
+        "excluded_payment_method_types": null,
+        "last_payment_error": null,
+        "latest_charge": "ch_3UHnKIHIBYZYyePr00kxI3YL",
+        "livemode": false,
+        "managed_payments": {
+          "enabled": false
+        },
+        "metadata": {},
+        "next_action": null,
+        "on_behalf_of": null,
+        "payment_method": "pm_1UHnK2HIBYZYyePry7dPAACq",
+        "payment_method_configuration_details": null,
+        "payment_method_options": {
+          "card": {
+            "installments": null,
+            "mandate_options": null,
+            "network": null,
+            "request_three_d_secure": "automatic"
+          }
+        },
+        "payment_method_types": [
+          "card"
+        ],
+        "payment_record": null,
+        "processing": null,
+        "receipt_email": null,
+        "review": null,
+        "setup_future_usage": null,
+        "shared_payment_granted_token": null,
+        "shipping": null,
+        "source": null,
+        "statement_descriptor": null,
+        "statement_descriptor_suffix": null,
+        "status": "succeeded",
+        "transfer_data": null,
+        "transfer_group": null
+      }
+    },
+    {
+      "seq": 39,
+      "method": "GET",
+      "path": "/v1/disputes",
+      "path_refs": {},
+      "params": {
+        "charge": {
+          "$ref": {
+            "step": "pi_hold_dispute",
+            "field": "latest_charge"
+          }
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": "hold_disputes_one",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "object": "list",
+        "count": 1,
+        "data": [
+          {
+            "id": "du_1UHnKLHIBYZYyePrKP5O1uag",
+            "object": "dispute",
+            "amount": 4400,
+            "balance_transaction": "txn_1UHnKLHIBYZYyePrZw5e5ekg",
+            "balance_transactions": [
+              {
+                "id": "txn_1UHnKLHIBYZYyePrZw5e5ekg",
+                "object": "balance_transaction",
+                "amount": -6153,
+                "available_on": 1790467200,
+                "balance_type": "payments",
+                "created": 1789920653,
+                "currency": "cad",
+                "description": "Chargeback withdrawal for ch_3UHnKIHIBYZYyePr00kxI3YL",
+                "exchange_rate": null,
+                "fee": 1500,
+                "fee_details": [
+                  {
+                    "amount": 1500,
+                    "application": null,
+                    "currency": "cad",
+                    "description": "Dispute fee",
+                    "type": "stripe_fee"
+                  }
+                ],
+                "net": -7653,
+                "reporting_category": "dispute",
+                "source": "du_1UHnKLHIBYZYyePrKP5O1uag",
+                "status": "pending",
+                "type": "adjustment"
+              }
+            ],
+            "charge": "ch_3UHnKIHIBYZYyePr00kxI3YL",
+            "created": 1789920653,
+            "currency": "usd",
+            "enhanced_eligibility_types": [],
+            "evidence": {
+              "access_activity_log": null,
+              "billing_address": null,
+              "cancellation_policy": null,
+              "cancellation_policy_disclosure": null,
+              "cancellation_rebuttal": null,
+              "customer_communication": null,
+              "customer_email_address": null,
+              "customer_name": null,
+              "customer_purchase_ip": null,
+              "customer_signature": null,
+              "duplicate_charge_documentation": null,
+              "duplicate_charge_explanation": null,
+              "duplicate_charge_id": null,
+              "enhanced_evidence": {},
+              "product_description": null,
+              "receipt": null,
+              "refund_policy": null,
+              "refund_policy_disclosure": null,
+              "refund_refusal_explanation": null,
+              "service_date": null,
+              "service_documentation": null,
+              "shipping_address": null,
+              "shipping_carrier": null,
+              "shipping_date": null,
+              "shipping_documentation": null,
+              "shipping_tracking_number": null,
+              "uncategorized_file": null,
+              "uncategorized_text": null
+            },
+            "evidence_details": {
+              "due_by": 1790639999,
+              "enhanced_eligibility": {},
+              "has_evidence": false,
+              "past_due": false,
+              "submission_count": 0
+            },
+            "is_charge_refundable": false,
+            "livemode": false,
+            "metadata": {},
+            "payment_intent": "pi_3UHnKIHIBYZYyePr0ghnuXpd",
+            "payment_method_details": {
+              "card": {
+                "brand": "visa",
+                "case_type": "chargeback",
+                "network": "visa",
+                "network_reason_code": "10.4"
+              },
+              "type": "card"
+            },
+            "reason": "fraudulent",
+            "status": "needs_response"
+          }
+        ],
+        "has_more": false,
+        "url": "/v1/disputes"
+      }
+    },
+    {
+      "seq": 40,
+      "method": "GET",
+      "path": "/v1/disputes/{dispute}",
+      "path_refs": {
+        "dispute": {
+          "step": "hold_disputes_one",
+          "field": "data[0].id"
+        }
+      },
+      "params": {},
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "du_1UHnKLHIBYZYyePrKP5O1uag",
+        "object": "dispute",
+        "amount": 4400,
+        "balance_transaction": "txn_1UHnKLHIBYZYyePrZw5e5ekg",
+        "balance_transactions": [
+          {
+            "id": "txn_1UHnKLHIBYZYyePrZw5e5ekg",
+            "object": "balance_transaction",
+            "amount": -6153,
+            "available_on": 1790467200,
+            "balance_type": "payments",
+            "created": 1789920653,
+            "currency": "cad",
+            "description": "Chargeback withdrawal for ch_3UHnKIHIBYZYyePr00kxI3YL",
+            "exchange_rate": null,
+            "fee": 1500,
+            "fee_details": [
+              {
+                "amount": 1500,
+                "application": null,
+                "currency": "cad",
+                "description": "Dispute fee",
+                "type": "stripe_fee"
+              }
+            ],
+            "net": -7653,
+            "reporting_category": "dispute",
+            "source": "du_1UHnKLHIBYZYyePrKP5O1uag",
+            "status": "pending",
+            "type": "adjustment"
+          }
+        ],
+        "charge": "ch_3UHnKIHIBYZYyePr00kxI3YL",
+        "created": 1789920653,
+        "currency": "usd",
+        "enhanced_eligibility_types": [],
+        "evidence": {
+          "access_activity_log": null,
+          "billing_address": null,
+          "cancellation_policy": null,
+          "cancellation_policy_disclosure": null,
+          "cancellation_rebuttal": null,
+          "customer_communication": null,
+          "customer_email_address": null,
+          "customer_name": "scenario 05",
+          "customer_purchase_ip": null,
+          "customer_signature": null,
+          "duplicate_charge_documentation": null,
+          "duplicate_charge_explanation": null,
+          "duplicate_charge_id": null,
+          "enhanced_evidence": {},
+          "product_description": "scenario 05 held dispute",
+          "receipt": null,
+          "refund_policy": null,
+          "refund_policy_disclosure": null,
+          "refund_refusal_explanation": null,
+          "service_date": null,
+          "service_documentation": null,
+          "shipping_address": null,
+          "shipping_carrier": null,
+          "shipping_date": null,
+          "shipping_documentation": null,
+          "shipping_tracking_number": null,
+          "uncategorized_file": null,
+          "uncategorized_text": null
+        },
+        "evidence_details": {
+          "due_by": 1790639999,
+          "enhanced_eligibility": {},
+          "has_evidence": false,
+          "past_due": false,
+          "submission_count": 0
+        },
+        "is_charge_refundable": false,
+        "livemode": false,
+        "metadata": {},
+        "payment_intent": "pi_3UHnKIHIBYZYyePr0ghnuXpd",
+        "payment_method_details": {
+          "card": {
+            "brand": "visa",
+            "case_type": "chargeback",
+            "network": "visa",
+            "network_reason_code": "10.4"
+          },
+          "type": "card"
+        },
+        "reason": "fraudulent",
+        "status": "needs_response"
+      }
+    },
+    {
+      "seq": 41,
+      "method": "POST",
+      "path": "/v1/payment_methods",
+      "path_refs": {},
+      "params": {
+        "type": "card",
+        "card": {
+          "token": "tok_visa_createDisputeInquiry"
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": "inquiry_card",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "pm_1UHnKNHIBYZYyePrLdr6Qbcz",
+        "object": "payment_method",
+        "allow_redisplay": "unspecified",
+        "billing_details": {
+          "address": {
+            "city": null,
+            "country": null,
+            "line1": null,
+            "line2": null,
+            "postal_code": null,
+            "state": null
+          },
+          "email": null,
+          "name": null,
+          "phone": null,
+          "tax_id": null
+        },
+        "card": {
+          "brand": "visa",
+          "checks": {
+            "address_line1_check": null,
+            "address_postal_code_check": null,
+            "cvc_check": "unchecked"
+          },
+          "country": "US",
+          "display_brand": "visa",
+          "exp_month": 9,
+          "exp_year": 2027,
+          "fingerprint": "ivsdHXJ0V8MdX5Ao",
+          "funding": "credit",
+          "generated_from": null,
+          "last4": "1976",
+          "networks": {
+            "available": [
+              "visa"
+            ],
+            "preferred": null
+          },
+          "regulated_status": "unregulated",
+          "three_d_secure_usage": {
+            "supported": true
+          },
+          "wallet": null
+        },
+        "created": 1789920655,
+        "customer": null,
+        "customer_account": null,
+        "livemode": false,
+        "metadata": {},
+        "shared_payment_granted_token": null,
+        "type": "card"
+      }
+    },
+    {
+      "seq": 42,
+      "method": "POST",
+      "path": "/v1/payment_methods/{payment_method}/attach",
+      "path_refs": {
+        "payment_method": {
+          "step": "inquiry_card",
+          "field": "id"
+        }
+      },
+      "params": {
+        "customer": {
+          "$ref": {
+            "step": "customer",
+            "field": "id"
+          }
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "pm_1UHnKNHIBYZYyePrLdr6Qbcz",
+        "object": "payment_method",
+        "allow_redisplay": "unspecified",
+        "billing_details": {
+          "address": {
+            "city": null,
+            "country": null,
+            "line1": null,
+            "line2": null,
+            "postal_code": null,
+            "state": null
+          },
+          "email": null,
+          "name": null,
+          "phone": null,
+          "tax_id": null
+        },
+        "card": {
+          "brand": "visa",
+          "checks": {
+            "address_line1_check": null,
+            "address_postal_code_check": null,
+            "cvc_check": "pass"
+          },
+          "country": "US",
+          "display_brand": "visa",
+          "exp_month": 9,
+          "exp_year": 2027,
+          "fingerprint": "ivsdHXJ0V8MdX5Ao",
+          "funding": "credit",
+          "generated_from": null,
+          "last4": "1976",
+          "networks": {
+            "available": [
+              "visa"
+            ],
+            "preferred": null
+          },
+          "regulated_status": "unregulated",
+          "three_d_secure_usage": {
+            "supported": true
+          },
+          "wallet": null
+        },
+        "created": 1789920655,
+        "customer": "cus_VIO6iGPEkciHvl",
+        "customer_account": null,
+        "livemode": false,
+        "metadata": {},
+        "shared_payment_granted_token": null,
+        "type": "card"
+      }
+    },
+    {
+      "seq": 43,
+      "method": "POST",
+      "path": "/v1/payment_intents",
+      "path_refs": {},
+      "params": {
+        "amount": 1700,
+        "currency": "usd",
+        "customer": {
+          "$ref": {
+            "step": "customer",
+            "field": "id"
+          }
+        },
+        "payment_method": {
+          "$ref": {
+            "step": "inquiry_card",
+            "field": "id"
+          }
+        },
+        "confirm": true,
+        "payment_method_types": [
+          "card"
+        ],
+        "description": "scenario 05 inquiry"
+      },
+      "idempotency_key": null,
+      "binds_as": "pi_inquiry",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "pi_3UHnKNHIBYZYyePr1rltCBcs",
+        "object": "payment_intent",
+        "allowed_payment_method_types": null,
+        "amount": 1700,
+        "amount_capturable": 0,
+        "amount_details": {
+          "tip": {}
+        },
+        "amount_received": 1700,
+        "application": null,
+        "application_fee_amount": null,
+        "automatic_payment_methods": null,
+        "canceled_at": null,
+        "cancellation_reason": null,
+        "capture_method": "automatic_async",
+        "client_secret": "pi_3UHnKNHIBYZYyePr1rltCBcs_secret_WDl1YxxytQ5m8JjVR6kTfRyWv",
+        "confirmation_method": "automatic",
+        "created": 1789920655,
+        "currency": "usd",
+        "customer": "cus_VIO6iGPEkciHvl",
+        "customer_account": null,
+        "description": "scenario 05 inquiry",
+        "excluded_payment_method_types": null,
+        "last_payment_error": null,
+        "latest_charge": "ch_3UHnKNHIBYZYyePr1Ztz81ac",
+        "livemode": false,
+        "managed_payments": {
+          "enabled": false
+        },
+        "metadata": {},
+        "next_action": null,
+        "on_behalf_of": null,
+        "payment_method": "pm_1UHnKNHIBYZYyePrLdr6Qbcz",
+        "payment_method_configuration_details": null,
+        "payment_method_options": {
+          "card": {
+            "installments": null,
+            "mandate_options": null,
+            "network": null,
+            "request_three_d_secure": "automatic"
+          }
+        },
+        "payment_method_types": [
+          "card"
+        ],
+        "payment_record": null,
+        "processing": null,
+        "receipt_email": null,
+        "review": null,
+        "setup_future_usage": null,
+        "shared_payment_granted_token": null,
+        "shipping": null,
+        "source": null,
+        "statement_descriptor": null,
+        "statement_descriptor_suffix": null,
+        "status": "succeeded",
+        "transfer_data": null,
+        "transfer_group": null
+      }
+    },
+    {
+      "seq": 44,
+      "method": "GET",
+      "path": "/v1/disputes",
+      "path_refs": {},
+      "params": {
+        "charge": {
+          "$ref": {
+            "step": "pi_inquiry",
+            "field": "latest_charge"
+          }
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": "inquiry_list",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "object": "list",
+        "count": 1,
+        "data": [
+          {
+            "id": "du_1UHnKPHIBYZYyePrLVej21R5",
+            "object": "dispute",
+            "amount": 1700,
+            "balance_transaction": null,
+            "balance_transactions": [],
+            "charge": "ch_3UHnKNHIBYZYyePr1Ztz81ac",
+            "created": 1789920657,
+            "currency": "usd",
+            "enhanced_eligibility_types": [],
+            "evidence": {
+              "access_activity_log": null,
+              "billing_address": null,
+              "cancellation_policy": null,
+              "cancellation_policy_disclosure": null,
+              "cancellation_rebuttal": null,
+              "customer_communication": null,
+              "customer_email_address": "s05@conformance.stripeapi.invalid",
+              "customer_name": "scenario 05",
+              "customer_purchase_ip": null,
+              "customer_signature": null,
+              "duplicate_charge_documentation": null,
+              "duplicate_charge_explanation": null,
+              "duplicate_charge_id": null,
+              "enhanced_evidence": {},
+              "product_description": null,
+              "receipt": null,
+              "refund_policy": null,
+              "refund_policy_disclosure": null,
+              "refund_refusal_explanation": null,
+              "service_date": null,
+              "service_documentation": null,
+              "shipping_address": null,
+              "shipping_carrier": null,
+              "shipping_date": null,
+              "shipping_documentation": null,
+              "shipping_tracking_number": null,
+              "uncategorized_file": null,
+              "uncategorized_text": null
+            },
+            "evidence_details": {
+              "due_by": 1790639999,
+              "enhanced_eligibility": {},
+              "has_evidence": false,
+              "past_due": false,
+              "submission_count": 0
+            },
+            "is_charge_refundable": true,
+            "livemode": false,
+            "metadata": {},
+            "payment_intent": "pi_3UHnKNHIBYZYyePr1rltCBcs",
+            "payment_method_details": {
+              "card": {
+                "brand": "visa",
+                "case_type": "inquiry",
+                "network": "visa",
+                "network_reason_code": "10"
+              },
+              "type": "card"
+            },
+            "reason": "fraudulent",
+            "status": "warning_needs_response"
+          }
+        ],
+        "has_more": false,
+        "url": "/v1/disputes"
+      }
+    },
+    {
+      "seq": 45,
+      "method": "GET",
+      "path": "/v1/disputes/{dispute}",
+      "path_refs": {
+        "dispute": {
+          "step": "inquiry_list",
+          "field": "data[0].id"
+        }
+      },
+      "params": {},
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "du_1UHnKPHIBYZYyePrLVej21R5",
+        "object": "dispute",
+        "amount": 1700,
+        "balance_transaction": null,
+        "balance_transactions": [],
+        "charge": "ch_3UHnKNHIBYZYyePr1Ztz81ac",
+        "created": 1789920657,
+        "currency": "usd",
+        "enhanced_eligibility_types": [],
+        "evidence": {
+          "access_activity_log": null,
+          "billing_address": null,
+          "cancellation_policy": null,
+          "cancellation_policy_disclosure": null,
+          "cancellation_rebuttal": null,
+          "customer_communication": null,
+          "customer_email_address": "s05@conformance.stripeapi.invalid",
+          "customer_name": "scenario 05",
+          "customer_purchase_ip": null,
+          "customer_signature": null,
+          "duplicate_charge_documentation": null,
+          "duplicate_charge_explanation": null,
+          "duplicate_charge_id": null,
+          "enhanced_evidence": {},
+          "product_description": null,
+          "receipt": null,
+          "refund_policy": null,
+          "refund_policy_disclosure": null,
+          "refund_refusal_explanation": null,
+          "service_date": null,
+          "service_documentation": null,
+          "shipping_address": null,
+          "shipping_carrier": null,
+          "shipping_date": null,
+          "shipping_documentation": null,
+          "shipping_tracking_number": null,
+          "uncategorized_file": null,
+          "uncategorized_text": null
+        },
+        "evidence_details": {
+          "due_by": 1790639999,
+          "enhanced_eligibility": {},
+          "has_evidence": false,
+          "past_due": false,
+          "submission_count": 0
+        },
+        "is_charge_refundable": true,
+        "livemode": false,
+        "metadata": {},
+        "payment_intent": "pi_3UHnKNHIBYZYyePr1rltCBcs",
+        "payment_method_details": {
+          "card": {
+            "brand": "visa",
+            "case_type": "inquiry",
+            "network": "visa",
+            "network_reason_code": "10"
+          },
+          "type": "card"
+        },
+        "reason": "fraudulent",
+        "status": "warning_needs_response"
+      }
+    },
+    {
+      "seq": 46,
+      "method": "POST",
+      "path": "/v1/disputes/{dispute}",
+      "path_refs": {
+        "dispute": {
+          "step": "inquiry_list",
+          "field": "data[0].id"
+        }
+      },
+      "params": {
+        "evidence": {
+          "uncategorized_text": "escalate_inquiry_evidence"
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "du_1UHnKPHIBYZYyePrLVej21R5",
+        "object": "dispute",
+        "amount": 1700,
+        "balance_transaction": null,
+        "balance_transactions": [],
+        "charge": "ch_3UHnKNHIBYZYyePr1Ztz81ac",
+        "created": 1789920657,
+        "currency": "usd",
+        "enhanced_eligibility_types": [],
+        "evidence": {
+          "access_activity_log": null,
+          "billing_address": null,
+          "cancellation_policy": null,
+          "cancellation_policy_disclosure": null,
+          "cancellation_rebuttal": null,
+          "customer_communication": null,
+          "customer_email_address": "s05@conformance.stripeapi.invalid",
+          "customer_name": "scenario 05",
+          "customer_purchase_ip": null,
+          "customer_signature": null,
+          "duplicate_charge_documentation": null,
+          "duplicate_charge_explanation": null,
+          "duplicate_charge_id": null,
+          "enhanced_evidence": {},
+          "product_description": null,
+          "receipt": null,
+          "refund_policy": null,
+          "refund_policy_disclosure": null,
+          "refund_refusal_explanation": null,
+          "service_date": null,
+          "service_documentation": null,
+          "shipping_address": null,
+          "shipping_carrier": null,
+          "shipping_date": null,
+          "shipping_documentation": null,
+          "shipping_tracking_number": null,
+          "uncategorized_file": null,
+          "uncategorized_text": "escalate_inquiry_evidence"
+        },
+        "evidence_details": {
+          "due_by": 1790639999,
+          "enhanced_eligibility": {},
+          "has_evidence": true,
+          "past_due": false,
+          "submission_count": 1
+        },
+        "is_charge_refundable": true,
+        "livemode": false,
+        "metadata": {},
+        "payment_intent": "pi_3UHnKNHIBYZYyePr1rltCBcs",
+        "payment_method_details": {
+          "card": {
+            "brand": "visa",
+            "case_type": "inquiry",
+            "network": "visa",
+            "network_reason_code": "10"
+          },
+          "type": "card"
+        },
+        "reason": "fraudulent",
+        "status": "warning_under_review"
+      }
+    },
+    {
+      "seq": 47,
+      "method": "POST",
+      "path": "/v1/payment_methods",
+      "path_refs": {},
+      "params": {
+        "type": "card",
+        "card": {
+          "token": "tok_visa_createDispute"
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": "close_card",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "pm_1UHnKRHIBYZYyePrT4SS81TJ",
+        "object": "payment_method",
+        "allow_redisplay": "unspecified",
+        "billing_details": {
+          "address": {
+            "city": null,
+            "country": null,
+            "line1": null,
+            "line2": null,
+            "postal_code": null,
+            "state": null
+          },
+          "email": null,
+          "name": null,
+          "phone": null,
+          "tax_id": null
+        },
+        "card": {
+          "brand": "visa",
+          "checks": {
+            "address_line1_check": null,
+            "address_postal_code_check": null,
+            "cvc_check": "unchecked"
+          },
+          "country": "US",
+          "display_brand": "visa",
+          "exp_month": 9,
+          "exp_year": 2027,
+          "fingerprint": "yuAr6iCqkTVBbnf8",
+          "funding": "credit",
+          "generated_from": null,
+          "last4": "0259",
+          "networks": {
+            "available": [
+              "visa"
+            ],
+            "preferred": null
+          },
+          "regulated_status": "unregulated",
+          "three_d_secure_usage": {
+            "supported": true
+          },
+          "wallet": null
+        },
+        "created": 1789920659,
+        "customer": null,
+        "customer_account": null,
+        "livemode": false,
+        "metadata": {},
+        "shared_payment_granted_token": null,
+        "type": "card"
+      }
+    },
+    {
+      "seq": 48,
+      "method": "POST",
+      "path": "/v1/payment_methods/{payment_method}/attach",
+      "path_refs": {
+        "payment_method": {
+          "step": "close_card",
+          "field": "id"
+        }
+      },
+      "params": {
+        "customer": {
+          "$ref": {
+            "step": "customer",
+            "field": "id"
+          }
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "pm_1UHnKRHIBYZYyePrT4SS81TJ",
+        "object": "payment_method",
+        "allow_redisplay": "unspecified",
+        "billing_details": {
+          "address": {
+            "city": null,
+            "country": null,
+            "line1": null,
+            "line2": null,
+            "postal_code": null,
+            "state": null
+          },
+          "email": null,
+          "name": null,
+          "phone": null,
+          "tax_id": null
+        },
+        "card": {
+          "brand": "visa",
+          "checks": {
+            "address_line1_check": null,
+            "address_postal_code_check": null,
+            "cvc_check": "pass"
+          },
+          "country": "US",
+          "display_brand": "visa",
+          "exp_month": 9,
+          "exp_year": 2027,
+          "fingerprint": "yuAr6iCqkTVBbnf8",
+          "funding": "credit",
+          "generated_from": null,
+          "last4": "0259",
+          "networks": {
+            "available": [
+              "visa"
+            ],
+            "preferred": null
+          },
+          "regulated_status": "unregulated",
+          "three_d_secure_usage": {
+            "supported": true
+          },
+          "wallet": null
+        },
+        "created": 1789920659,
+        "customer": "cus_VIO6iGPEkciHvl",
+        "customer_account": null,
+        "livemode": false,
+        "metadata": {},
+        "shared_payment_granted_token": null,
+        "type": "card"
+      }
+    },
+    {
+      "seq": 49,
+      "method": "POST",
+      "path": "/v1/payment_intents",
+      "path_refs": {},
+      "params": {
+        "amount": 2600,
+        "currency": "usd",
+        "customer": {
+          "$ref": {
+            "step": "customer",
+            "field": "id"
+          }
+        },
+        "payment_method": {
+          "$ref": {
+            "step": "close_card",
+            "field": "id"
+          }
+        },
+        "confirm": true,
+        "payment_method_types": [
+          "card"
+        ],
+        "description": "scenario 05 close"
+      },
+      "idempotency_key": null,
+      "binds_as": "pi_close",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "pi_3UHnKSHIBYZYyePr0wW9WqrL",
+        "object": "payment_intent",
+        "allowed_payment_method_types": null,
+        "amount": 2600,
+        "amount_capturable": 0,
+        "amount_details": {
+          "tip": {}
+        },
+        "amount_received": 2600,
+        "application": null,
+        "application_fee_amount": null,
+        "automatic_payment_methods": null,
+        "canceled_at": null,
+        "cancellation_reason": null,
+        "capture_method": "automatic_async",
+        "client_secret": "pi_3UHnKSHIBYZYyePr0wW9WqrL_secret_Na1gcLs1aZFr7rXUGLv2MJ5oZ",
+        "confirmation_method": "automatic",
+        "created": 1789920660,
+        "currency": "usd",
+        "customer": "cus_VIO6iGPEkciHvl",
+        "customer_account": null,
+        "description": "scenario 05 close",
+        "excluded_payment_method_types": null,
+        "last_payment_error": null,
+        "latest_charge": "ch_3UHnKSHIBYZYyePr0K0hT2JT",
+        "livemode": false,
+        "managed_payments": {
+          "enabled": false
+        },
+        "metadata": {},
+        "next_action": null,
+        "on_behalf_of": null,
+        "payment_method": "pm_1UHnKRHIBYZYyePrT4SS81TJ",
+        "payment_method_configuration_details": null,
+        "payment_method_options": {
+          "card": {
+            "installments": null,
+            "mandate_options": null,
+            "network": null,
+            "request_three_d_secure": "automatic"
+          }
+        },
+        "payment_method_types": [
+          "card"
+        ],
+        "payment_record": null,
+        "processing": null,
+        "receipt_email": null,
+        "review": null,
+        "setup_future_usage": null,
+        "shared_payment_granted_token": null,
+        "shipping": null,
+        "source": null,
+        "statement_descriptor": null,
+        "statement_descriptor_suffix": null,
+        "status": "succeeded",
+        "transfer_data": null,
+        "transfer_group": null
+      }
+    },
+    {
+      "seq": 50,
+      "method": "GET",
+      "path": "/v1/disputes",
+      "path_refs": {},
+      "params": {
+        "charge": {
+          "$ref": {
+            "step": "pi_close",
+            "field": "latest_charge"
+          }
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": "close_list",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "object": "list",
+        "count": 1,
+        "data": [
+          {
+            "id": "du_1UHnKUHIBYZYyePrOCHUMyXu",
+            "object": "dispute",
+            "amount": 2600,
+            "balance_transaction": "txn_1UHnKUHIBYZYyePrPa9r8vRg",
+            "balance_transactions": [
+              {
+                "id": "txn_1UHnKUHIBYZYyePrPa9r8vRg",
+                "object": "balance_transaction",
+                "amount": -3636,
+                "available_on": 1789920662,
+                "balance_type": "payments",
+                "created": 1789920662,
+                "currency": "cad",
+                "description": "Chargeback withdrawal for ch_3UHnKSHIBYZYyePr0K0hT2JT",
+                "exchange_rate": null,
+                "fee": 1500,
+                "fee_details": [
+                  {
+                    "amount": 1500,
+                    "application": null,
+                    "currency": "cad",
+                    "description": "Dispute fee",
+                    "type": "stripe_fee"
+                  }
+                ],
+                "net": -5136,
+                "reporting_category": "dispute",
+                "source": "du_1UHnKUHIBYZYyePrOCHUMyXu",
+                "status": "available",
+                "type": "adjustment"
+              }
+            ],
+            "charge": "ch_3UHnKSHIBYZYyePr0K0hT2JT",
+            "created": 1789920662,
+            "currency": "usd",
+            "enhanced_eligibility_types": [],
+            "evidence": {
+              "access_activity_log": null,
+              "billing_address": null,
+              "cancellation_policy": null,
+              "cancellation_policy_disclosure": null,
+              "cancellation_rebuttal": null,
+              "customer_communication": null,
+              "customer_email_address": null,
+              "customer_name": "scenario 05",
+              "customer_purchase_ip": null,
+              "customer_signature": null,
+              "duplicate_charge_documentation": null,
+              "duplicate_charge_explanation": null,
+              "duplicate_charge_id": null,
+              "enhanced_evidence": {},
+              "product_description": "scenario 05 close",
+              "receipt": null,
+              "refund_policy": null,
+              "refund_policy_disclosure": null,
+              "refund_refusal_explanation": null,
+              "service_date": null,
+              "service_documentation": null,
+              "shipping_address": null,
+              "shipping_carrier": null,
+              "shipping_date": null,
+              "shipping_documentation": null,
+              "shipping_tracking_number": null,
+              "uncategorized_file": null,
+              "uncategorized_text": null
+            },
+            "evidence_details": {
+              "due_by": 1790639999,
+              "enhanced_eligibility": {},
+              "has_evidence": false,
+              "past_due": false,
+              "submission_count": 0
+            },
+            "is_charge_refundable": false,
+            "livemode": false,
+            "metadata": {},
+            "payment_intent": "pi_3UHnKSHIBYZYyePr0wW9WqrL",
+            "payment_method_details": {
+              "card": {
+                "brand": "visa",
+                "case_type": "chargeback",
+                "network": "visa",
+                "network_reason_code": "10.4"
+              },
+              "type": "card"
+            },
+            "reason": "fraudulent",
+            "status": "needs_response"
+          }
+        ],
+        "has_more": false,
+        "url": "/v1/disputes"
+      }
+    },
+    {
+      "seq": 51,
+      "method": "POST",
+      "path": "/v1/disputes/{dispute}/close",
+      "path_refs": {
+        "dispute": {
+          "step": "close_list",
+          "field": "data[0].id"
+        }
+      },
+      "params": {},
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "du_1UHnKUHIBYZYyePrOCHUMyXu",
+        "object": "dispute",
+        "amount": 2600,
+        "balance_transaction": "txn_1UHnKUHIBYZYyePrPa9r8vRg",
+        "balance_transactions": [
+          {
+            "id": "txn_1UHnKUHIBYZYyePrPa9r8vRg",
+            "object": "balance_transaction",
+            "amount": -3636,
+            "available_on": 1789920662,
+            "balance_type": "payments",
+            "created": 1789920662,
+            "currency": "cad",
+            "description": "Chargeback withdrawal for ch_3UHnKSHIBYZYyePr0K0hT2JT",
+            "exchange_rate": null,
+            "fee": 1500,
+            "fee_details": [
+              {
+                "amount": 1500,
+                "application": null,
+                "currency": "cad",
+                "description": "Dispute fee",
+                "type": "stripe_fee"
+              }
+            ],
+            "net": -5136,
+            "reporting_category": "dispute",
+            "source": "du_1UHnKUHIBYZYyePrOCHUMyXu",
+            "status": "available",
+            "type": "adjustment"
+          }
+        ],
+        "charge": "ch_3UHnKSHIBYZYyePr0K0hT2JT",
+        "created": 1789920662,
+        "currency": "usd",
+        "enhanced_eligibility_types": [],
+        "evidence": {
+          "access_activity_log": null,
+          "billing_address": null,
+          "cancellation_policy": null,
+          "cancellation_policy_disclosure": null,
+          "cancellation_rebuttal": null,
+          "customer_communication": null,
+          "customer_email_address": "s05@conformance.stripeapi.invalid",
+          "customer_name": "scenario 05",
+          "customer_purchase_ip": null,
+          "customer_signature": null,
+          "duplicate_charge_documentation": null,
+          "duplicate_charge_explanation": null,
+          "duplicate_charge_id": null,
+          "enhanced_evidence": {},
+          "product_description": "scenario 05 close",
+          "receipt": null,
+          "refund_policy": null,
+          "refund_policy_disclosure": null,
+          "refund_refusal_explanation": null,
+          "service_date": null,
+          "service_documentation": null,
+          "shipping_address": null,
+          "shipping_carrier": null,
+          "shipping_date": null,
+          "shipping_documentation": null,
+          "shipping_tracking_number": null,
+          "uncategorized_file": null,
+          "uncategorized_text": null
+        },
+        "evidence_details": {
+          "due_by": 1790639999,
+          "enhanced_eligibility": {},
+          "has_evidence": false,
+          "past_due": false,
+          "submission_count": 0
+        },
+        "is_charge_refundable": false,
+        "livemode": false,
+        "metadata": {},
+        "payment_intent": "pi_3UHnKSHIBYZYyePr0wW9WqrL",
+        "payment_method_details": {
+          "card": {
+            "brand": "visa",
+            "case_type": "chargeback",
+            "network": "visa",
+            "network_reason_code": "10.4"
+          },
+          "type": "card"
+        },
+        "reason": "fraudulent",
+        "status": "lost"
+      }
+    },
+    {
+      "seq": 52,
+      "method": "POST",
+      "path": "/v1/disputes/{dispute}",
+      "path_refs": {
+        "dispute": {
+          "step": "close_list",
+          "field": "data[0].id"
+        }
+      },
+      "params": {
+        "evidence": {
+          "uncategorized_text": "winning_evidence"
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 400,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "error": {
+          "message": "This dispute is already closed",
+          "request_log_url": "<redacted:request_log_url>",
+          "type": "invalid_request_error"
+        }
+      }
+    },
+    {
+      "seq": 53,
+      "method": "POST",
+      "path": "/v1/disputes/{dispute}/close",
+      "path_refs": {
+        "dispute": {
+          "step": "close_list",
+          "field": "data[0].id"
+        }
+      },
+      "params": {},
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 400,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "error": {
+          "message": "This dispute is already closed",
+          "request_log_url": "<redacted:request_log_url>",
+          "type": "invalid_request_error"
+        }
+      }
+    },
+    {
+      "seq": 54,
+      "method": "GET",
+      "path": "/v1/charges/{charge}/dispute",
+      "path_refs": {
+        "charge": {
+          "step": "pi_main",
+          "field": "latest_charge"
+        }
+      },
+      "params": {},
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 404,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "error": {
+          "message": "No dispute for charge: ch_3UHnJtHIBYZYyePr0OHvLnhd",
+          "request_log_url": "<redacted:request_log_url>",
+          "type": "invalid_request_error"
+        }
+      }
+    },
+    {
+      "seq": 55,
+      "method": "GET",
+      "path": "/v1/disputes/du_nope",
+      "path_refs": {},
+      "params": {},
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 404,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "error": {
+          "code": "resource_missing",
+          "doc_url": "https://stripe.com/docs/error-codes/resource-missing",
+          "message": "No such dispute: 'du_nope'",
+          "param": "dispute",
+          "request_log_url": "<redacted:request_log_url>",
+          "type": "invalid_request_error"
+        }
+      }
+    }
+  ]
+}

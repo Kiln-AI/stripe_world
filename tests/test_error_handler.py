@@ -22,8 +22,10 @@ from conftest import BLANK_NOW, a_tool
 from stripeapi.errors import Internal, InvalidInput
 
 # A table no world here has, for the `DbError` an ordinary tool provokes by
-# writing SQL that cannot run.
-MISSING_TABLE = "refunds"
+# writing SQL that cannot run. (This was `refunds` until Phase 9 built it —
+# a resource phase turning a missing table into a real one is exactly when
+# this constant needs renaming.)
+MISSING_TABLE = "ledger_not_a_table"
 
 type Probe = Callable[..., seahaven.World]
 
