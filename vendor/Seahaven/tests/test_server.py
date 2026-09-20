@@ -1116,8 +1116,107 @@ def test_the_world_is_whole_with_the_web_interface_on(
         # built it, and the published state class has to survive the same trip.
         assert _request(url + "/state")[0] == 501
         assert _request(url + "/schema")[1]["state"]["title"] == "SeahavenState"
+        # `_serve_console` decorates whichever app `app()` built, so the mode a
+        # pushed world runs in has to answer the console route too -- and it is
+        # the mode where a browser is most likely to be the thing asking.
+        with urllib.request.urlopen(url + "/console") as console:
+            assert console.status == 200
         env.reset()
         assert env.call("rows", sql="SELECT 1 AS n").result == [{"n": 1}]
+
+
+# --- the web console at /console -------------------------------------------
+
+
+def test_the_console_is_served_from_the_same_origin_as_the_socket(world: World) -> None:
+    """`GET /console` answers the built page, and is not in the published schema.
+
+    Same origin is the whole reason this route exists rather than a separate
+    static host: `/schema` and `/metadata` are plain HTTP and OpenEnv registers
+    no CORS middleware, so a page served from anywhere else can open the socket
+    but cannot read either of them. A build that stopped being copied into the
+    package would answer the 501 below instead, which is a different test.
+
+    The route is kept out of the OpenAPI schema because `openenv push` decides
+    what kind of environment an app is by reading path names.
+    """
+    with serving(world) as url:
+        with urllib.request.urlopen(url + "/console") as response:
+            status = response.status
+            content_type = response.headers.get_content_type()
+            page = response.read()
+        schema = _request(url + "/openapi.json")
+    assert status == 200
+    assert content_type == "text/html"
+    # The built page is one file: the script and the stylesheet are inlined, so
+    # a browser that can reach this route needs nothing else to render it.
+    assert page.lstrip().startswith(b"<!doctype html>")
+    assert b'<div id="root">' in page
+    assert b"<script" in page and b"src=" not in page.split(b"<script")[1].split(b">")[0]
+    assert schema[0] == 200, schema
+    assert "/console" not in schema[1]["paths"]
+
+
+def test_an_install_without_the_built_page_says_the_console_is_not_enabled(
+    world: World, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A source checkout that never ran the build still serves everything else.
+
+    The page is a build artefact copied into the package, so it can be missing.
+    The answer is a 501 saying the console is not enabled here, rather than a
+    stack trace or an empty 200, and the rest of the server is untouched.
+    """
+    monkeypatch.setattr("seahaven.openenv.CONSOLE_FILE", tmp_path / "not-built" / "index.html")
+    with serving(world) as url, SeahavenClient(base_url=url) as env:
+        refused = urllib.request.Request(url + "/console")
+        try:
+            with urllib.request.urlopen(refused) as response:
+                status, page = response.status, response.read()
+        except urllib.error.HTTPError as error:
+            status, page = error.code, error.read()
+        env.reset()
+        rows = env.call("rows", sql="SELECT 1 AS n").result
+    assert status == 501
+    assert b"No web console in this build" in page
+    # A reader of this page is not the person who builds the console, so it
+    # carries no build commands to run.
+    assert b"npm" not in page and b"dist/index.html" not in page
+    assert rows == [{"n": 1}]
+
+
+def test_no_console_leaves_the_route_off_and_the_protocol_alone(world: World) -> None:
+    """`seahaven serve --no-console` is a server that answers the protocol only.
+
+    The route is not registered rather than registered and refusing, because
+    there is nothing to explain: an operator who turned the console off does not
+    need a page saying so.
+    """
+    with serving(world, console=False) as url, SeahavenClient(base_url=url) as env:
+        assert _request(url + "/console")[0] == 404
+        env.reset()
+        assert env.call("rows", sql="SELECT 1 AS n").result == [{"n": 1}]
+
+
+@pytest.mark.parametrize(
+    ("host", "expected"),
+    [
+        ("0.0.0.0", "http://127.0.0.1:8001/console"),
+        ("::", "http://127.0.0.1:8001/console"),
+        ("127.0.0.1", "http://127.0.0.1:8001/console"),
+        ("example.test", "http://example.test:8001/console"),
+        ("::1", "http://[::1]:8001/console"),
+    ],
+)
+def test_the_announced_console_address_is_one_a_browser_can_open(host: str, expected: str) -> None:
+    """What `serve` prints is an address, and a bind is not always one.
+
+    `0.0.0.0` and `::` mean every interface, and neither can be typed into a
+    browser, so the message names loopback instead. A literal IPv6 address is
+    bracketed, because a URL without the brackets is a different URL.
+    """
+    from seahaven.openenv.serve import console_url
+
+    assert console_url(host, 8001) == expected
 
 
 # --- the idle reaper -------------------------------------------------------

@@ -10,7 +10,8 @@ seahaven fixture list [--world module:attr]
 seahaven fixture freeze <id> --run module:function --description <text> [--now <ts>] [--world module:attr]
 seahaven fixture fork <parent> <id> --run module:function --description <text> [--world module:attr]
 seahaven serve [--host HOST] [--port PORT] [--max_concurrent_envs N] [--concurrency N]
-               [--session-timeout SECONDS] [--include-control-tools] [--world module:attr]
+               [--session-timeout SECONDS] [--include-control-tools] [--no-console]
+               [--world module:attr]
 ```
 
 Every command exits `0` on success and `1` on failure, and a failure is one line on stderr with the
@@ -167,6 +168,7 @@ Runs the OpenEnv server for this world: one world, many sessions, one worker pro
 | `--concurrency N` | `min(cpus, 16)` | how many tool calls run at once; `0` for no gate |
 | `--session-timeout SECONDS` | `3600` | seconds of idleness before a session is reaped; `0` disables the reaper |
 | `--include-control-tools` | off | make `controller_run_sql` callable over the wire; it is never listed, and it is deprecated in favour of the state document -- run Python with `-W default::DeprecationWarning` to see the warning |
+| `--no-console` | off | do not serve the web console at `/console`; the address is otherwise printed when the server starts |
 
 ```sh
 seahaven serve

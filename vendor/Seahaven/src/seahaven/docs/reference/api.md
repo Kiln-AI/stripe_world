@@ -534,7 +534,12 @@ raises `apsw.SQLError`, and the two are siblings in APSW's flat hierarchy.
 
 ```py
 def app(
-    world, *, include_control_tools=False, max_concurrent_envs=500, session_timeout=3600.0
+    world,
+    *,
+    include_control_tools=False,
+    max_concurrent_envs=500,
+    session_timeout=3600.0,
+    console=True,
 ) -> FastAPI: ...
 
 

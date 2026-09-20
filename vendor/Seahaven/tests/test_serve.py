@@ -6,7 +6,7 @@ way to prove a session is a session. This one does not: what `serve` adds over
 gets the operator's numbers, and uvicorn is given one worker and an app object
 rather than an import string -- and a server that runs until the process is
 stopped is not the way to read any of them. `uvicorn.run` is replaced, and the
-call it would have made is the assertion.
+arguments `serve` handed it are the assertion.
 
 The one-worker rule is the reason this file exists at all. A second worker
 process answers a session's second frame with an environment that has never seen
@@ -39,10 +39,18 @@ from seahaven.openenv.serve import DEFAULT_HOST, DEFAULT_PORT, serve
 def served(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     """Record what `serve` does instead of letting it serve for ever.
 
-    `uvicorn.run` is replaced outright. `app` is wrapped rather than replaced:
-    the real one is still built from the real arguments -- so a call `app` would
-    refuse still fails here -- and the arguments it was handed are recorded on
-    the way past, which is the claim `serve` is making.
+    `app` is wrapped rather than replaced, so an app `serve` builds wrongly
+    still fails here, and the stand-in for `uvicorn.run` builds a real
+    `uvicorn.Config` from the arguments it was given, so a set of arguments
+    `Config` would refuse fails here too. `Config` takes a superset of
+    `uvicorn.run`'s own keyword parameters, so that is a check on the arguments
+    `Config` accepts, not on everything `uvicorn.run` would refuse.
+
+    The arguments are read as `serve` passed them, never off the built
+    `Config`. `Config.__init__` fills in a default for every one of them, so a
+    `Config` answers `workers == 1` whether or not anything asked for one
+    worker, and the one-worker assertion below would hold with the line that
+    makes it true deleted.
     """
     call: dict[str, Any] = {}
     build = serve_module.app
@@ -54,6 +62,7 @@ def served(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     def run(app: Any, **kwargs: Any) -> None:
         call["app"] = app
         call["kwargs"] = kwargs
+        call["config"] = serve_module.uvicorn.Config(app, **kwargs)
         # The gate's size as it stands when uvicorn would start: the ordering
         # claim. `instances.concurrency()` rather than `_gate._initial_value`,
         # which reached into two libraries' privates to read one number.
@@ -126,6 +135,7 @@ def test_serve_passes_the_module_defaults_when_it_is_told_nothing(
         "include_control_tools": False,
         "max_concurrent_envs": 500,
         "session_timeout": 3600.0,
+        "console": True,
     }
     assert (DEFAULT_MAX_CONCURRENT_ENVS, DEFAULT_SESSION_TIMEOUT) == (500, 3600.0)
 
@@ -134,3 +144,38 @@ def test_serve_can_expose_the_control_tools(world: World, served: dict[str, Any]
     """The flag is the operator's, and `serve` is the only thing that carries it."""
     serve(world, include_control_tools=True)
     assert served["options"]["include_control_tools"] is True
+
+
+def test_serve_announces_the_console_at_an_address_a_browser_can_open(
+    world: World, served: dict[str, Any], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The line an operator reads after `seahaven serve`.
+
+    The default bind is `0.0.0.0`, which is not an address, so the message names
+    loopback. `console_url` owns that translation and is tested against every
+    spelling in `test_server.py`.
+
+    `capsys` and not `caplog`: the line is a `print`, because until `uvicorn.run`
+    configures logging the root logger has no handler and sits at WARNING, and a
+    logging call in `serve` reaches no operator. A rewrite onto a logger fails
+    here.
+    """
+    serve(world)
+    assert (
+        capsys.readouterr().out
+        == "Starting. Web console will be available at http://127.0.0.1:8000/console\n"
+    )
+    serve(world, host="127.0.0.1", port=8001)
+    assert (
+        capsys.readouterr().out
+        == "Starting. Web console will be available at http://127.0.0.1:8001/console\n"
+    )
+
+
+def test_serve_without_a_console_neither_serves_nor_announces_one(
+    world: World, served: dict[str, Any], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--no-console`: the route is not registered and nothing is printed."""
+    serve(world, console=False)
+    assert served["options"]["console"] is False
+    assert capsys.readouterr().out == ""

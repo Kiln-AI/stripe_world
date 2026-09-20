@@ -70,6 +70,7 @@ def test_serve_passes_every_option_through(
             "--session-timeout",
             "60",
             "--include-control-tools",
+            "--no-console",
         ).code
         == 0
     )
@@ -81,6 +82,7 @@ def test_serve_passes_every_option_through(
     assert call["concurrency"] == 3
     assert call["session_timeout"] == 60.0
     assert call["include_control_tools"] is True
+    assert call["console"] is False
 
 
 def test_the_defaults_are_the_frameworks(
@@ -94,6 +96,9 @@ def test_the_defaults_are_the_frameworks(
     assert call["max_concurrent_envs"] == DEFAULT_MAX_CONCURRENT_ENVS
     assert call["session_timeout"] == DEFAULT_SESSION_TIMEOUT
     assert call["include_control_tools"] is False
+    # The console is on unless it is turned off: a served world is meant to be
+    # openable in a browser without a flag.
+    assert call["console"] is True
     # `None` is "leave the gate at min(cpus, 16)", which only `serve` knows.
     assert call["concurrency"] is None
 

@@ -17,6 +17,7 @@ A world is driven either in process through `world.instance(...)`, or over the W
 | Section | What it covers |
 |---|---|
 | [Running the server](#running-the-server) | Installing the extra, the app file, the command and its options |
+| [The web console](#the-web-console) | The page at `/console`, and what it does |
 | [Sessions and instances](#sessions-and-instances) | What a connection holds, and what `reset` does |
 | [Driving a world from Python](#driving-a-world-from-python) | `SeahavenClient`, synchronous and asynchronous |
 | [Calls, results and errors](#calls-results-and-errors) | What comes back from a tool call |
@@ -75,6 +76,7 @@ seahaven serve --host 127.0.0.1 --port 9000
 | `--concurrency` | `min(cpus, 16)` | how many tool calls run at once; `0` for no gate |
 | `--session-timeout` | `3600` | seconds of idleness before a session is reaped; `0` disables the reaper |
 | `--include-control-tools` | off | make the deprecated control tool callable over the wire; [reference/cli.md](reference/cli.md) names it |
+| `--no-console` | off | do not serve the web console at `/console` |
 | `--world module:attr` | the convention | which world to serve |
 
 `--max_concurrent_envs` is spelled with underscores because that is OpenEnv's own option name, and a
@@ -90,6 +92,19 @@ One process serves one world, and `serve` always runs a single worker. A session
 connections and working directory are in-process state, so a second worker would answer a session's
 second frame with an environment that has never seen its first.
 [Running it in production](#running-it-in-production) covers scaling out.
+
+## The web console
+
+A served world also has a web console, at `/console`. `seahaven serve` prints its address as it
+starts:
+
+```
+Starting. Web console will be available at http://127.0.0.1:8000/console
+```
+
+Open that in a browser and you can drive the world by hand: open instances, call tools, and read
+the state document, without writing a client. `seahaven serve --no-console` leaves the console out,
+for a server that should answer the protocol and nothing else.
 
 ## Sessions and instances
 

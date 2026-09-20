@@ -60,3 +60,74 @@ jobs:
       # -- an extra whose licences cannot be read is not cleared, it fails.
       - name: Dependency licences
         run: uv run python scripts/check_licences.py
+
+  # The web console is a separate toolchain in `ui/`, and what ships is the
+  # built file vendored at `src/seahaven/openenv/console/index.html`. Without
+  # this job nothing type-checks the console, nothing runs its browser test, and
+  # nothing notices when someone edits `ui/src` and forgets to re-vendor the
+  # build.
+  console:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      # `npm run build` is `tsc --noEmit && vite build`, so the types are
+      # checked here and a type error fails the job before anything is built.
+      - name: Build
+        run: npm run build
+
+      # The vendored copy is what `seahaven serve` answers `/console` with, and
+      # it is a build artefact: a commit that changes `ui/src` without rebuilding
+      # it ships the old page. The build is reproducible, so the copy and a fresh
+      # build are the same bytes or the copy is stale.
+      - name: The vendored console is the current build
+        run: |
+          cmp dist/index.html ../src/seahaven/openenv/console/index.html || {
+            echo "::error::src/seahaven/openenv/console/index.html is not the current build of ui/."
+            echo "Run: cd ui && npm run build && cp dist/index.html ../src/seahaven/openenv/console/index.html"
+            exit 1
+          }
+
+      # The build inlines its dependencies into the file that ships in the
+      # wheel, so an npm dependency reaches a user the same way a PyPI one does.
+      # `scripts/check_licences.py` is the no-copyleft rule for the Python
+      # closure and cannot see this one.
+      - name: Bundled licences
+        run: npm run licences
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      # Two mock environments, because the console has two modes: a tool
+      # environment and one whose actions are not tools. The test drives the
+      # built file in a real browser and fails on any unexpected console error.
+      - name: Browser test
+        run: |
+          node mock/server.mjs --port 8000 &
+          node mock/server.mjs --port 8001 --plain &
+          # Wait for both to answer rather than sleeping at them. A mock that
+          # dies on startup otherwise surfaces as a locator timeout somewhere
+          # in the middle of the run instead of as "the mock did not start".
+          for port in 8000 8001; do
+            for _ in $(seq 50); do
+              curl -sf "http://127.0.0.1:$port/health" >/dev/null && break
+              sleep 0.2
+            done
+            curl -sf "http://127.0.0.1:$port/health" >/dev/null || {
+              echo "::error::the mock on $port never came up"
+              exit 1
+            }
+          done
+          node e2e/smoke.mjs

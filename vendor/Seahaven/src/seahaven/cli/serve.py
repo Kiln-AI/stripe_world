@@ -53,6 +53,11 @@ def add_parser(subcommands: argparse._SubParsersAction[argparse.ArgumentParser])
         action="store_true",
         help="make the control tool callable over the wire; it is never listed",
     )
+    parser.add_argument(
+        "--no-console",
+        action="store_true",
+        help="do not serve the web console at /console",
+    )
     parser.set_defaults(handler=run)
 
 
@@ -86,6 +91,7 @@ def run(args: argparse.Namespace) -> int:
         # `0` is translated here rather than anywhere further in.
         session_timeout=_session_timeout(args.session_timeout, DEFAULT_SESSION_TIMEOUT),
         include_control_tools=args.include_control_tools,
+        console=not args.no_console,
     )
     return 0
 

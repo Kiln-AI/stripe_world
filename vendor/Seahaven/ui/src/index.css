@@ -1,0 +1,80 @@
+@import "tailwindcss";
+
+/* shadcn-shaped tokens: the same variable names and neutral scale, so dropping
+   in real shadcn/ui components later is a copy, not a re-theme. */
+@theme {
+  --color-bg: oklch(0.985 0.002 250);
+  --color-surface: oklch(1 0 0);
+  --color-raised: oklch(0.975 0.003 250);
+  --color-border: oklch(0.915 0.004 250);
+  --color-fg: oklch(0.23 0.012 260);
+  --color-muted: oklch(0.54 0.012 260);
+  --color-faint: oklch(0.68 0.011 260);
+  --color-accent: oklch(0.55 0.16 255);
+  --color-accent-fg: oklch(0.99 0 0);
+  --color-ok: oklch(0.62 0.13 155);
+  --color-warn: oklch(0.72 0.14 75);
+  --color-danger: oklch(0.58 0.19 25);
+  --radius-card: 0.75rem;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+}
+
+@layer base {
+  :root {
+    color-scheme: light dark;
+  }
+
+  /* Tailwind v4 emits utilities that read these variables, so overriding the
+     variables here re-themes every utility without a second `@theme` block. */
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --color-bg: oklch(0.165 0.008 265);
+      --color-surface: oklch(0.205 0.009 265);
+      --color-raised: oklch(0.243 0.010 265);
+      --color-border: oklch(0.295 0.011 265);
+      --color-fg: oklch(0.955 0.004 265);
+      --color-muted: oklch(0.715 0.012 265);
+      --color-faint: oklch(0.565 0.012 265);
+      --color-accent: oklch(0.68 0.145 255);
+      --color-accent-fg: oklch(0.17 0.02 260);
+      --color-ok: oklch(0.72 0.145 155);
+      --color-warn: oklch(0.78 0.14 75);
+      --color-danger: oklch(0.68 0.17 25);
+    }
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--color-bg);
+    color: var(--color-fg);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 14px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  *:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-border);
+    border-radius: 999px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-faint);
+    background-clip: content-box;
+  }
+}
