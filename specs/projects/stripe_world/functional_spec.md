@@ -424,11 +424,14 @@ per-behavior citations in
   `refunded` / `amount_refunded` bookkeeping.
 - **Disputes** — status machine, evidence submission, and the ledger effects of funds withdrawn and
   returned. Both the dispute withdrawal and its reversal are `balance_transaction.type = adjustment`;
-  the enum has no dispute-specific value, and this is confirmed rather than inferred. There are **two
-  distinct fees**: the "dispute received" fee is never refunded, while a separate "dispute countered"
-  fee — charged only if the merchant contests — is refunded on a win. `dispute.status = prevented`
-  means a dispute stopped before becoming a formal chargeback.
-- **Balance ledger** — a `balance_transaction` for every money movement, the 51-value `type` enum,
+  the enum has no dispute-specific value, and this is confirmed rather than inferred. The settled-won
+  recording (cassette 05, re-read on currency-native rows in cassette 11) pins the fee rule: the flat
+  "dispute received" fee is charged with the withdrawal and **kept whether the merchant wins or
+  loses** — no separate "dispute countered" fee row exists and none is refunded on a win. (An earlier
+  reading of this paragraph described a two-fee model; the recording wins and this is the
+  correction.) `dispute.status = prevented` means a dispute stopped before becoming a formal
+  chargeback.
+- **Balance ledger** — a `balance_transaction` for every money movement, the 50-value `type` enum,
   `net = amount - fee`, `available` versus `pending` with `available_on`, and payouts drawing down
   the available balance.
 - **Credit notes** — the three-channel settlement model (refund, customer balance, out-of-band).

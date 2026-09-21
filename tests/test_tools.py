@@ -80,17 +80,36 @@ def test_the_wired_surface_is_small_and_named() -> None:
     """What is served end to end: the customers phase's thirteen routes (five
     core customers, six payment_methods, two customer-scoped payment-method
     reads), the catalog phase's twenty-two (five products, four prices, five
-    coupons, four promotion_codes, four tax_rates), and the money path's
-    twelve (seven payment_intents, five charges). The rest are routed data
-    awaiting their resource phases, and calling one is an honest `INTERNAL`
-    naming the op (see `test_dispatch.py`)."""
+    coupons, four promotion_codes, four tax_rates), the money path's twelve
+    (seven payment_intents, five charges), the refunds-and-disputes
+    phase's seventeen (five /v1/refunds, five charge-scoped refund routes,
+    four /v1/disputes, three charge-scoped dispute routes), the
+    setup-intents phase's seven, the ledger-and-payouts phase's nine
+    (one balance, two balance_transactions, six payouts), the
+    subscriptions phase's eleven (six subscriptions including `/resume`,
+    five subscription_items), and the invoices phase's twenty (fifteen
+    invoices — `create_preview` and `attach_payment` stay unwired — plus
+    five invoiceitems). The rest are routed data awaiting their resource
+    phases, and calling one is an honest `INTERNAL` naming the op (see
+    `test_dispatch.py`)."""
     wired = [route.op_id for route in _all_routes() if route.params is not None]
     assert wired == [
+        "GetBalance",
+        "GetBalanceTransactions",
+        "GetBalanceTransactionsId",
         "GetCharges",
         "PostCharges",
         "GetChargesCharge",
         "PostChargesCharge",
         "PostChargesChargeCapture",
+        "GetChargesChargeDispute",
+        "PostChargesChargeDispute",
+        "PostChargesChargeDisputeClose",
+        "PostChargesChargeRefund",
+        "GetChargesChargeRefunds",
+        "PostChargesChargeRefunds",
+        "GetChargesChargeRefundsRefund",
+        "PostChargesChargeRefundsRefund",
         "GetCoupons",
         "PostCoupons",
         "GetCouponsCoupon",
@@ -103,6 +122,30 @@ def test_the_wired_surface_is_small_and_named() -> None:
         "DeleteCustomersCustomer",
         "GetCustomersCustomerPaymentMethods",
         "GetCustomersCustomerPaymentMethodsPaymentMethod",
+        "GetDisputes",
+        "GetDisputesDispute",
+        "PostDisputesDispute",
+        "PostDisputesDisputeClose",
+        "GetInvoiceitems",
+        "PostInvoiceitems",
+        "GetInvoiceitemsInvoiceitem",
+        "PostInvoiceitemsInvoiceitem",
+        "DeleteInvoiceitemsInvoiceitem",
+        "GetInvoices",
+        "PostInvoices",
+        "GetInvoicesInvoice",
+        "PostInvoicesInvoice",
+        "DeleteInvoicesInvoice",
+        "PostInvoicesInvoiceAddLines",
+        "PostInvoicesInvoiceFinalize",
+        "GetInvoicesInvoiceLines",
+        "PostInvoicesInvoiceLinesLineItemId",
+        "PostInvoicesInvoiceMarkUncollectible",
+        "PostInvoicesInvoicePay",
+        "PostInvoicesInvoiceRemoveLines",
+        "PostInvoicesInvoiceSend",
+        "PostInvoicesInvoiceUpdateLines",
+        "PostInvoicesInvoiceVoid",
         "GetPaymentIntents",
         "PostPaymentIntents",
         "GetPaymentIntentsIntent",
@@ -116,6 +159,12 @@ def test_the_wired_surface_is_small_and_named() -> None:
         "PostPaymentMethodsPaymentMethod",
         "PostPaymentMethodsPaymentMethodAttach",
         "PostPaymentMethodsPaymentMethodDetach",
+        "GetPayouts",
+        "PostPayouts",
+        "GetPayoutsPayout",
+        "PostPayoutsPayout",
+        "PostPayoutsPayoutCancel",
+        "PostPayoutsPayoutReverse",
         "GetPrices",
         "PostPrices",
         "GetPricesPrice",
@@ -129,6 +178,29 @@ def test_the_wired_surface_is_small_and_named() -> None:
         "PostPromotionCodes",
         "GetPromotionCodesPromotionCode",
         "PostPromotionCodesPromotionCode",
+        "GetRefunds",
+        "PostRefunds",
+        "GetRefundsRefund",
+        "PostRefundsRefund",
+        "PostRefundsRefundCancel",
+        "GetSetupIntents",
+        "PostSetupIntents",
+        "GetSetupIntentsIntent",
+        "PostSetupIntentsIntent",
+        "PostSetupIntentsIntentCancel",
+        "PostSetupIntentsIntentConfirm",
+        "PostSetupIntentsIntentVerifyMicrodeposits",
+        "GetSubscriptionItems",
+        "PostSubscriptionItems",
+        "GetSubscriptionItemsItem",
+        "PostSubscriptionItemsItem",
+        "DeleteSubscriptionItemsItem",
+        "GetSubscriptions",
+        "PostSubscriptions",
+        "GetSubscriptionsSubscriptionExposedId",
+        "PostSubscriptionsSubscriptionExposedId",
+        "DeleteSubscriptionsSubscriptionExposedId",
+        "PostSubscriptionsSubscriptionResume",
         "GetTaxRates",
         "PostTaxRates",
         "GetTaxRatesTaxRate",

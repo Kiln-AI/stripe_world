@@ -270,6 +270,7 @@ def declined(
     code: str,
     message: str,
     decline_code: str | None = None,
+    param: str | None = None,
     charge: str | None = None,
     sub_objects: dict[str, dict] | None = None,
 ) -> dict:
@@ -282,11 +283,12 @@ def declined(
     Returning a dict rather than raising an exception is what carries the
     rule — there is no `raise` form and a lint test holds that line.
 
-    No `param`: the recorded decline envelope at the pinned version carries
-    none (Phase 8 probe), which corrects §2.1's `param: "payment_method"`
-    default — the allow-list entry that carried the default is retired with
-    it. `sub_objects` carries the full PaymentIntent under `error
-    .payment_intent` (§3.5.1), `charge` the failed charge's id.
+    `param` is None on every PaymentIntent decline (recorded, Phase 8 — the
+    correction of §2.1's `param: "payment_method"` default). The one
+    recorded decline that carries one is a SetupIntent's expired card
+    (`param: "exp_month"`, probed Phase 10); `sub_objects` carries the full
+    SetupIntent under `error.setup_intent` the same way the money path
+    carries its PaymentIntent (§3.5.1), `charge` the failed charge's id.
     """
     if decline_code is not None and decline_code not in DECLINE_CODES:
         # The §3.4.4 reason: an unlisted decline code is world code inventing
@@ -299,6 +301,7 @@ def declined(
         message,
         code=code,
         decline_code=decline_code,
+        param=param,
         charge=charge,
         sub_objects=sub_objects,
     ).envelope()

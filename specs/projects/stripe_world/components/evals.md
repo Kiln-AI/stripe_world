@@ -707,22 +707,19 @@ FROM subscriptions WHERE id = ?;
 **Tags:** `disputes`, `balance`. **Fixture:** `small`.
 
 **`setup(inst)`:** a charge disputed via the fraudulent-dispute magic card (`4000000000000259`,
-magic-card-table.md §4), landing `dispute.status = "needs_response"`, with the two-fee bookkeeping
-functional spec §7 describes already in place (a non-refundable "dispute received" fee charged at
-open; the "dispute countered" fee not yet charged, since the merchant hasn't contested yet — or
-charged provisionally, per whichever of `billing_engine.md`'s two documented options is implemented;
-this task assumes contesting charges it if not already present, and either way its win-path result is
-the same). Returns `{"charge_id", "dispute_id", "charge_amount", "dispute_received_fee",
-"dispute_countered_fee"}`.
+magic-card-table.md §4), landing `dispute.status = "needs_response"`, with the fee bookkeeping the
+Phase 11 recording pins in place (the flat "dispute received" fee charged at open and kept whatever
+the outcome; no second fee exists — the two-fee draft of this section was corrected by cassette 05's
+settled-won body). Returns `{"charge_id", "dispute_id", "charge_amount", "dispute_received_fee"}`.
 
 **`statement`:** "We have clear proof this dispute is fraudulent — contest it and get our money
 back."
 
 **Correct outcome:** evidence submitted with `uncategorized_text = "winning_evidence"` (the literal
 magic string, functional spec §8 / magic-card-table.md §4), `dispute.status = "won"`, and the ledger
-made whole for everything **except** the non-refundable received fee — i.e. net balance-transaction
-effect on this dispute equals `charge_amount - dispute_received_fee` (the countered fee, having been
-charged for contesting, is refunded on a win per functional spec §7).
+recovering the disputed amount while the received fee stays gone — net balance-transaction effect on
+this dispute equals `-(charge_amount) - dispute_received_fee + charge_amount`, i.e.
+`-dispute_received_fee`.
 
 **Failure modes:** submitting `"losing_evidence"` or no evidence at all (dispute stays `needs_response`
 or resolves `lost`); assuming *both* fees are non-refundable and treating a smaller recovered amount

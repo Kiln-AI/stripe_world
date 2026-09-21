@@ -170,7 +170,7 @@ def test_the_corrected_3ds_token_spellings_carry_the_tag(instance: seahaven.Inst
 def test_the_magic_tag_lands_on_the_row(instance: seahaven.Instance) -> None:
     hard = create_card(instance, token="tok_visa_chargeDeclined")
     attachable = create_card(instance, number="4000000000000341", exp_month=1, exp_year=2031)
-    dispute = create_card(instance, token="tok_card_createDispute")
+    dispute = create_card(instance, token="tok_visa_createDispute")
     plain = create_card(instance, token="tok_visa")
 
     def tag(pm_id: str) -> str | None:
@@ -186,6 +186,9 @@ def test_the_magic_tag_lands_on_the_row(instance: seahaven.Instance) -> None:
     )
     assert tag(attachable["id"]) == "charge_declined=card_declined,decline_code=generic_decline"
     assert tag(dispute["id"]) == "dispute=fraudulent"
+    # The inquiry variant carries its track beside the reason (Phase 9).
+    inquiry = create_card(instance, token="tok_visa_createDisputeInquiry")
+    assert tag(inquiry["id"]) == "dispute=fraudulent,dispute_track=inquiry"
     assert tag(plain["id"]) is None
 
 

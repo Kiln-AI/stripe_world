@@ -258,16 +258,16 @@ def finalize_invoice(ctx, invoice_id: str, *, auto_advance: bool | None = None) 
     status_transitions.finalized_at and confirmation_secret. Emits invoice.finalized.
     Raises StripeApiError(400, invalid_request_error, 'invoice_not_editable') if not draft."""
 
-def pay_invoice(ctx, invoice_id: str, *, payment_method_id: str | None = None,
-                off_session: bool = True, paid_out_of_band: bool = False,
-                automatic: bool = False) -> dict:
-    """Attempt collection on an open invoice. `automatic=True` marks this as a retry
-    driven by the dunning schedule, which is the ONLY thing that increments attempt_count
-    past 1. Returns the invoice row. A decline is a return value, not an exception:
-    the invoice stays `open` and invoice.payment_failed is emitted."""
+def pay_invoice(ctx, invoice_id: str, *, sub_row: Mapping | None = None,
+                pm_row: Mapping | None = None) -> dict
+    """One collection attempt on an open invoice (open only — Phase 13's /pay
+    route owns the recorded isn't-open 400). Returns the outcome dict:
+    `outcome` ∈ paid | failed | requires_action | no_payment_method. A decline
+    is an outcome, not an exception — the invoice's rows survive with
+    attempt_count advanced (the raise-loses rule)."""
 
 def void_invoice(ctx, invoice_id: str) -> dict
-def mark_uncollectible(ctx, invoice_id: str) -> dict
+def mark_uncollectible_invoice(ctx, invoice_id: str) -> dict
 def delete_draft_invoice(ctx, invoice_id: str) -> dict
 def compute_automatically_finalizes_at(created_iso: str, *, auto_advance: bool,
                                        collection_method: str) -> str | None
@@ -281,9 +281,10 @@ def apply_update(ctx, subscription_id: str, params: dict) -> dict
 def cancel_subscription(ctx, subscription_id: str, *, prorate: bool = False,
                         invoice_now: bool = False,
                         cancellation_details: dict | None = None) -> dict
-def resume_subscription(ctx, subscription_id: str, *, billing_cycle_anchor: str = "now",
-                        proration_behavior: str = "create_prorations",
-                        proration_date: int | None = None) -> dict
+def resume_subscription(ctx, subscription_id: str, *, billing_cycle_anchor: str = "now") -> dict
+    # The proration family on /resume (`proration_behavior`, `proration_date`) is
+    # accepted by the parameter layer and lands with Phase 14's proration span;
+    # the recorded park itself needs neither.
 def advance_cycle(ctx, subscription_id: str) -> dict
     """Roll the items' periods forward and create the subscription_cycle invoice.
     FIXTURE-GENERATOR AND TEST ONLY: it is not routed, because nothing in a frozen-clock
@@ -329,7 +330,6 @@ class LedgerSpec:
     fees: FeeSchedule = FeeSchedule()
     settlement_business_days: int = 2       # T+2
     dispute_received_fee: Money = 1500
-    dispute_countered_fee: Money = 1500
 
 def ledger_spec(ctx) -> LedgerSpec                   # from ctx.state["account"]["ledger"]
 
@@ -338,8 +338,8 @@ def record(ctx, *, type_: str, amount: Money, fee: Money, currency: str,
            available_on_iso: str | None = None,
            fee_details: list[dict] | None = None,
            reporting_category: str | None = None) -> dict:
-    """Mint a bt_ id and write ONE balance_transactions row. `type_` is checked against
-    spec/enums.py's 51-value set; an unknown value is a WorldBug. Stores net = amount - fee
+    """Mint a `txn_` id and write ONE balance_transactions row. `type_` is checked against
+    spec/enums.py's 50-value set; an unknown value is a WorldBug. Stores net = amount - fee
     as a column so the arithmetic is auditable in SQL; a CHECK enforces the identity."""
 
 def available_on(created_iso: str, type_: str, spec: LedgerSpec) -> str        # pure
@@ -362,21 +362,27 @@ nothing here invents one.
 
 | Situation | HTTP | `type` | `code` |
 |---|---|---|---|
-| Finalize / edit an invoice that is not `draft` | 400 | `invalid_request_error` | `invoice_not_editable` |
-| Void or mark-uncollectible an invoice that is not `open` | 400 | `invalid_request_error` | `status_transition_invalid` |
-| Delete an invoice that is not `draft` | 400 | `invalid_request_error` | `invoice_not_editable` |
-| Finalize a subscription invoice with no lines | 400 | `invalid_request_error` | `invoice_no_subscription_line_items` |
-| Finalize a manual invoice with no lines | 400 | `invalid_request_error` | `invoice_no_customer_line_items` |
+| Finalize a non-draft invoice | 400 | `invalid_request_error` | *(none)* — "This invoice is already finalized, you can't re-finalize a non-draft invoice." (recorded, Phase 13, cassette 13) |
+| Delete an invoice that is not `draft` | 400 | `invalid_request_error` | *(none)* — "You can only delete draft invoices." (recorded, Phase 13) |
+| Void or mark-uncollectible an invoice that is not `open` | 400 | `invalid_request_error` | *(none)* — "You can only pass in open invoices. This invoice isn't open." (recorded, Phase 13) |
+| Re-mark an `uncollectible` invoice | 400 | `invalid_request_error` | *(none)* — "This invoice has already been marked uncollectible." (recorded, Phase 13) |
+| Void a `paid` invoice | 400 | `invalid_request_error` | *(none)* — "Invoices with \`paid\` payments cannot be voided." (recorded, Phase 13) |
+| Pay an already-`paid` invoice | 400 | `invalid_request_error` | *(none)* — "Invoice is already paid" (recorded, Phase 13) |
+| Update a field (beyond `metadata`) on a non-draft invoice | 400 | `invalid_request_error` | *(none)* — "Finalized invoices can't be updated in this way", `param: <field>`; `metadata` itself succeeds on any status (recorded, Phase 13) |
+| `add_lines` / line edits on a non-draft invoice | 400 | `invalid_request_error` | `invoice_not_editable` — "Invalid invoice: This invoice is no longer editable" |
+| An invoiceitem whose invoice is finalized or deleted: DELETE | 400 | `invalid_request_error` | *(none)* — "Can't delete an invoice item that is attached to an invoice that is no longer editable" (recorded, Phase 13) |
+| An invoiceitem whose invoice is finalized or deleted: update | 400 | `invalid_request_error` | *(none)* — "This invoice item has been deleted." (recorded, Phase 13) |
 | Pay an invoice whose charge declines | 402 | `card_error` | `card_declined` (+ `decline_code`) |
 | Pay an invoice needing 3DS off-session | 400 | `invalid_request_error` | `invoice_payment_intent_requires_action` |
-| `payment_behavior=error_if_incomplete` and the first invoice fails | 402 | `card_error` | `card_declined` (+ `decline_code`); **no subscription row is written** |
-| `payment_behavior=pending_if_incomplete` on create | 400 | `invalid_request_error` | `parameter_unknown`, `param="payment_behavior"` |
-| Update a `canceled` / `incomplete_expired` subscription | 400 | `invalid_request_error` | `status_transition_invalid` |
-| Update anything but `metadata` / `default_source` on an `incomplete` subscription | 400 | `invalid_request_error` | `status_transition_invalid` |
+| `payment_behavior=pending_if_incomplete` on create | 400 | `invalid_request_error` | *(none)* — message "Setting \`payment_behavior\` to \`pending_if_incomplete\` has no effect when creating a subscription.", `param="payment_behavior"` (recorded, Phase 12; corrects this row's earlier `parameter_unknown`) |
+| `payment_behavior=error_if_incomplete` and the first payment needs action | 402 | `card_error` | `subscription_payment_intent_requires_action` (recorded, Phase 12); **no subscription row is written** |
+| Update a `canceled` / `incomplete_expired` subscription beyond `metadata` / `cancellation_details` | 400 | `invalid_request_error` | `invalid_canceled_subscription_fields` — "A canceled subscription can only update its cancellation_details and metadata." (recorded, Phase 12; corrects this row's earlier `status_transition_invalid`. `metadata` itself succeeds on a canceled row) |
+| Update anything but `metadata` / `default_source` / `default_payment_method` / `description` on an `incomplete` subscription | 400 | `invalid_request_error` | `status_transition_invalid` (code from this table; `metadata` and `description` succeed — recorded, Phase 12 — and `default_payment_method` accepts both a set and the `""` clear — probed live on an incomplete 3DS subscription, Phase 12 CR round 2; the natural rescue-by-reattach move. The refusal's message spelling is unprobed, declared) |
 | Expired coupon applied | 400 | `invalid_request_error` | `coupon_expired` |
 | Payout exceeding the available balance | 400 | `invalid_request_error` | `balance_insufficient` |
 | Refund a charge with an open dispute | 400 | `invalid_request_error` | `charge_disputed` |
-| Refund beyond the remaining amount | 400 | `invalid_request_error` | `charge_already_refunded` |
+| Refund beyond the remaining amount on a partially refunded charge | 400 | `invalid_request_error` | *(none)* — `param: "amount"`, `Refund amount ($40.00) is greater than unrefunded amount on charge ($30.00)` (probed, Phase 9; this table's `charge_already_refunded` was the fully-refunded case only) |
+| Refund a fully refunded charge | 400 | `invalid_request_error` | `charge_already_refunded` |
 
 `WorldBug` (not a Stripe error) is reserved for authoring faults the agent cannot cause: an unknown
 `balance_transaction.type`, an unknown event type, a zero-length billing period, a negative argument
@@ -401,11 +407,11 @@ transaction Seahaven opens for the call.
 
 | Trigger | Guard | → | Side effects | Events |
 |---|---|---|---|---|
-| `create` | `trial_end` in the future, or `trial_period_days > 0` | `trialing` | Items' periods span `[now, trial_end)`; `trial_start`/`trial_end` set; **no invoice**; `billing_cycle_anchor := trial_end` | `customer.subscription.created` |
+| `create` | `trial_end` in the future, or `trial_period_days > 0` | `trialing` | Items' periods span `[now, trial_end)`; `trial_start`/`trial_end` set; a **paid $0 `subscription_create` invoice** whose line is `Free trial for 1 × <product>` over `[start, trial_end)` (recorded, Phase 12 — corrects this row's earlier "no invoice"); `billing_cycle_anchor := trial_end` | `customer.subscription.created`, `invoice.created`, `invoice.finalized`, `invoice.paid` |
 | `create` | no trial, first invoice total ≤ 0 | `active` | `subscription_create` invoice created, finalized, `paid` with `amount_due = 0` | `customer.subscription.created`, `invoice.created`, `invoice.finalized`, `invoice.paid` |
-| `create` | `collection_method = send_invoice` | `active` | Invoice created + finalized, left `open` with `due_date = now + days_until_due`. Activation does **not** depend on payment — `spec3.json` verbatim | `customer.subscription.created`, `invoice.created`, `invoice.finalized`, `invoice.sent` |
+| `create` | `collection_method = send_invoice` | `active` | Invoice created and left **`draft`** with `auto_advance = 1` and `due_date = now + days_until_due` (recorded, Phase 12 — corrects this table's earlier "created + finalized, left open"; the hour window follows). Activation does **not** depend on payment — `spec3.json` verbatim | `customer.subscription.created` |
 | `create` | `charge_automatically`, payment required, charge succeeds | `active` | Invoice created → finalized → `paid`; charge + `balance_transaction` | `customer.subscription.created`, `invoice.created`, `invoice.finalized`, `invoice.payment_succeeded`, `invoice.paid` |
-| `create` | `payment_behavior ∈ {allow_incomplete, default_incomplete}`, charge fails | `incomplete` | Invoice stays `open`; `attempt_count = 1`; `latest_invoice` set. Only `metadata` and `default_source` are updatable from here | `customer.subscription.created`, `invoice.created`, `invoice.finalized`, `invoice.payment_failed` |
+| `create` | `payment_behavior ∈ {allow_incomplete, default_incomplete}`, charge fails or needs action | `incomplete` | Invoice stays `open` (a decline: `attempted = 1, attempt_count = 1`; 3DS: `attempted = 1, attempt_count = 0` — recorded, Phase 12); `latest_invoice` set. `metadata` and `description` are updatable from here (recorded, Phase 12) | `customer.subscription.created`, `invoice.created`, `invoice.finalized`, `invoice.payment_failed` |
 | `create` | `payment_behavior = default_incomplete`, payment required | `incomplete` | Same as above, but the PaymentIntent is created **unconfirmed** and no charge is attempted; `confirmation_secret` is the agent's handle | `customer.subscription.created`, `invoice.created`, `invoice.finalized` |
 | `create` | `payment_behavior = error_if_incomplete`, charge fails | — | **Nothing is written.** 402 `card_error`. The whole call rolls back with Seahaven's per-call transaction | — |
 | `create` | `payment_behavior = pending_if_incomplete` | — | 400. Update-only value | — |
@@ -430,18 +436,19 @@ otherwise-mysterious `paused` status, and it is the reason `paused` is "only rea
 | Trigger | Guard | → | Side effects | Events |
 |---|---|---|---|---|
 | `trial_end` | default payment method present | `active` | `subscription_cycle` invoice for the first paid period, finalized, paid | `customer.subscription.updated`, `invoice.*` |
-| `trial_end` | no PM, `missing_payment_method = create_invoice` (Stripe's default) | `active` → likely `past_due` | Invoice created and finalized; collection is attempted and fails; falls straight into the `past_due` row below | `customer.subscription.updated`, `invoice.payment_failed` |
+| `trial_end` | **`charge_automatically`**, no PM, `missing_payment_method = create_invoice` (Stripe's default) | — | **400** `resource_missing`, the no-attached-payment-source message, nothing written (recorded, Phase 12 — corrects this table's earlier "falls into past_due"; the invoice the behavior names cannot be collected without a method. `send_invoice` never refuses here — probed, Phase 12 CR round 5: 200 `active`, the invoice left **draft** with `auto_advance: true`, `attempted: false`, `attempt_count: 0`, `due_date = now + days_until_due`, and no charge with or without a PM) | — |
 | `trial_end` | no PM, `missing_payment_method = pause` | `paused` | **No invoice is generated at all** while paused — this is what distinguishes it from `pause_collection` | `customer.subscription.paused` |
-| `trial_end` | no PM, `missing_payment_method = cancel` | `canceled` | `canceled_at = now`, `ended_at = now`, `cancellation_details.reason = payment_failed` | `customer.subscription.deleted` |
+| `trial_end` | no PM, `missing_payment_method = cancel` | `canceled` | `canceled_at = now`, `ended_at = now`, `cancellation_details.reason = payment_failed`… **corrected by the Phase 12 recording: the stamp is `cancellation_requested`** | `customer.subscription.deleted` |
 | `trial_will_end` | fixture/test only | unchanged | none | `customer.subscription.trial_will_end` |
-| `update trial_end = "now"` | — | `active` (or `past_due`) | Ends the trial immediately and runs the `trial_end` path above | `customer.subscription.updated` |
+| `update trial_end = "now"` | — | `active` (or `past_due`) | Ends the trial immediately and runs the `trial_end` path above; the update-driven end's first paid invoice bills `billing_reason: subscription_update` with its line spanning the NEW period `[now, now + interval)` (probed in both billing modes, Phase 12 CR round 4's trail — correcting this row's earlier `subscription_cycle`; `advance_cycle`'s natural-boundary walker keeps `subscription_cycle`, unprobed) | `customer.subscription.updated` |
+| `update trial_end = <future>` on `active` | — | `trialing` | The conversion edge (probed, Phase 12 CR round 3/4's trail): `trial_start = now`, the item period rebuilds to `[now, trial_end)`, the anchor moves to the trial end, and one `subscription_update` invoice is minted — a full-price `Unused time on <product> after <date>` proration credit for the abandoned remainder plus the $0 `Free trial` line, paid with no counted attempt, the credit landing as customer balance. Conversions from other statuses are unprobed and refused | `customer.subscription.updated` |
 
 #### Out of `paused`
 
 | Trigger | Guard | → | Side effects | Events |
 |---|---|---|---|---|
-| `resume` (`POST /v1/subscriptions/{id}/resume`) | a default payment method now exists | `active` | `billing_cycle_anchor ∈ {now, unchanged}` (default `now`); with `now`, periods restart at `now` and **no proration is produced**; with `unchanged`, `proration_behavior` applies to the un-invoiced gap | `customer.subscription.resumed`, `customer.subscription.updated` |
-| `resume` | no payment method | — | 400 `status_transition_invalid` | — |
+| `resume` (`POST /v1/subscriptions/{id}/resume`) | any (with or without a payment method — both probed) | `paused` (unchanged) | **The recorded park (Phase 12)**: 200 with the status still `paused`; a SetupIntent is minted (at trial create for a no-PM trial, reused by `/resume`), the resume lands as `pending_update` with `expires_at = now + 23h`, the anchor target is recorded, and a `subscription_cycle` invoice is created open and unattempted. Activation happens when the SetupIntent confirms — this world wires that hook; live's minted seti reads `canceled` within moments (an async artifact, declared) | `customer.subscription.updated` |
+| `resume` | the subscription is not `paused` | — | 400 "You can only resume a subscription if it is \`paused\`." (recorded); on a terminal status, the 404 `No such subscription` (recorded) | — |
 
 `paused` and `pause_collection` are unrelated and must never be conflated:
 
@@ -455,8 +462,17 @@ otherwise-mysterious `paused` status, and it is the reason `paused` is "only rea
 
 `pause_collection.behavior` is applied by `advance_cycle`, not by the status machine: the cycle
 invoice is created as usual and then immediately taken to `draft` (kept), `uncollectible`, or `void`.
-`keep_as_draft` is the case that overlaps behaviorally with `unpaid` (both leave `draft` invoices)
-while leaving `status` untouched.
+`keep_as_draft` is the case that overlaps behaviorally with `unpaid` (both leave `draft`
+invoices) while leaving `status` untouched.
+
+**Itemless subscriptions** (settled, Phase 12 CR round 7): `spec3.json` blesses the
+delete-the-last-item state ("Removing a subscription item from a subscription will not cancel
+the subscription"), and no item means no period. `cancel_at_period_end` sets the flag with a
+null `cancel_at`; a new item spans its own `[now, now + interval)` (the create shape); a trial
+end, conversion or resume bills nothing (no invoice is minted); and the unrouted `advance_cycle`
+refuses the state outright (an authoring fault, not stored state). Live's itemless-update shapes
+are unprobed — the item DELETE is not reachable through the recording surface — so every one of
+these outcomes is an honestly-declared unrecorded ruling.
 
 #### Out of `active`
 
@@ -496,7 +512,7 @@ because there is no new configuration to charge for.
 | Trigger | Guard | → | Side effects | Events |
 |---|---|---|---|---|
 | `invoice_paid` | the **most recent** invoice reaches `paid` | `active` | **Automatic. No `subscriptions.update` call is required or accepted as the trigger.** Implemented as the single hook `on_invoice_paid`, called from `pay_invoice` | `customer.subscription.updated`, `invoice.paid` |
-| `cycle_boundary` | — | `unpaid` | A `subscription_cycle` invoice is created and **left in `draft`**: never finalized, never attempted, `auto_advance = 0`, `automatically_finalizes_at = NULL` | `invoice.created` |
+| `cycle_boundary` | — | `unpaid` | A `subscription_cycle` invoice is created and **left in `draft`**: never finalized, never attempted, `auto_advance = 0`, `automatically_finalizes_at = NULL`. **Unpaid wins over a pause behavior** (settled, Phase 12 CR round 7): `void`/`mark_uncollectible` act on finalized invoices, and an unpaid renewal never becomes one — the draft stands exactly as `keep_as_draft` leaves it, and no `marked_uncollectible_at` stamp exists to write because §2's stamp marks an open → uncollectible transition this cell never performs | `invoice.created` |
 
 The `draft` ruling is a real, live contradiction inside Stripe's own corpus and is resolved here
 deliberately. `spec3.json`'s `subscription.status` prose says invoices are "immediately automatically
@@ -514,8 +530,11 @@ generated *after* it stays `draft`. `on_invoice_paid` therefore keys on "the sub
 #### Terminal states
 
 `canceled` and `incomplete_expired` have no outgoing transitions. Any `subscriptions.update` against
-either is `status_transition_invalid`. A test asserts the transition table has no row whose source is
-one of these two.
+either beyond `metadata` / `cancellation_details` is refused — `invalid_canceled_subscription_fields`
+(recorded, Phase 12, correcting the earlier `status_transition_invalid` spelling), with `metadata`
+updates succeeding — and the terminal paths that read an id (`DELETE`, `/resume`) answer the 404
+`No such subscription` (recorded, Phase 12). A test asserts the transition table has no row whose
+source is one of these two.
 
 ### 2. The invoice status machine
 
@@ -525,18 +544,23 @@ a removed row returned in Stripe's `{id, object, deleted: true}` shape.
 
 | From | Trigger | → | Side effects | Events |
 |---|---|---|---|---|
-| — | `create_invoice` | `draft` | `number = NULL`; lines assembled from pending items but **not frozen**; `automatically_finalizes_at` computed; `attempt_count = 0`; `attempted = 0` | `invoice.created` |
-| `draft` | line/discount/tax change | `draft` | Totals recomputed from scratch. Nothing is incremental | `invoice.updated` |
-| `draft` | `POST /finalize`, or the last step of a paid-on-creation flow | `open` | Assign `number`; **freeze** `lines` JSON and every monetary field; read `customer.balance` → `starting_balance`; apply it → `amount_due`, `ending_balance`; write the `customer_balance_transactions` row; set `status_transitions.finalized_at`; set `confirmation_secret`; **set `automatically_finalizes_at = NULL`**; create the PaymentIntent for `charge_automatically` | `invoice.finalized` (+ `invoice.sent` for `send_invoice`) |
-| `draft` | `DELETE /v1/invoices/{id}` | *(row gone)* | Only from `draft`. Pending invoice items are released back to unbilled | `invoice.deleted` |
-| `open` | `POST /pay` succeeds, or `paid_out_of_band=true` | `paid` | `amount_paid = amount_due`, `amount_remaining = 0`, `status_transitions.paid_at`; charge + `balance_transaction`; **calls `on_invoice_paid`** | `invoice.payment_succeeded`, `invoice.paid`, `invoice_payment.paid` |
+| — | `create_invoice` | `draft` | `number = NULL`; `effective_at = NULL` (stamped at finalization, recorded Phase 13); lines assembled from pending items but **not frozen**; `automatically_finalizes_at` computed; `attempt_count = 0`; `attempted = 0`; `amount_due`/`amount_remaining` mirror the draft's total (recorded, Phase 13) | `invoice.created` |
+| `draft` | line/discount/tax change | `draft` | Totals recomputed from scratch. Nothing is incremental. Each line's `il_` id is preserved across the rebuild, keyed by its source (recorded, Phase 13: an updated line answers the same id) | `invoice.updated` |
+| `draft` | `POST /finalize`, `paid_out_of_band`, `/send`, or the last step of a paid-on-creation flow | `open` | Assign `number`; **freeze** `lines` JSON and every monetary field; read `customer.balance` → `starting_balance`; apply it → `amount_due`, `ending_balance`; write the `customer_balance_transactions` row; set `status_transitions.finalized_at`; set `effective_at`; clear `automatically_finalizes_at` and `next_payment_attempt`; **create no PaymentIntent and attempt nothing** (recorded, Phase 13: plain finalize leaves `attempted` false even with a default card) | `invoice.finalized` (+ `invoice.sent` for `send_invoice`) |
+| `draft` or `open` | a **$0 `amount_due`** at finalization (or at any settle point) | `paid` | Inside the same call: `attempted: true, attempt_count: 0`, `paid_at` stamped (recorded, Phase 13) | `invoice.finalized`, `invoice.paid` |
+| `draft` | `POST /pay` | `paid` | **Finalizes and collects inside the one call** (recorded, Phase 13): number assigned, `finalized_at == paid_at`, then the open-payment path below | `invoice.finalized`, `invoice.payment_succeeded`, `invoice.paid` |
+| `draft` | `DELETE /v1/invoices/{id}` | *(row gone)* | Only from `draft`. The swept invoice items are **NOT released** — they stay attached to the dead invoice id, refuse later deletes, and read as deleted on update (recorded, Phase 13, correcting this row's earlier "released back to unbilled") | `invoice.deleted` |
+| `open` | `POST /pay` succeeds | `paid` | `amount_paid = amount_due`, `amount_remaining = 0`, `status_transitions.paid_at`; `auto_advance` flips false (recorded, Phase 13); charge + `balance_transaction`; **calls `on_invoice_paid`** | `invoice.payment_succeeded`, `invoice.paid` |
+| `open` | `POST /pay` with `paid_out_of_band=true` | `paid` | Settles with **no attempt at all**: `attempted` stays false, the counter untouched (recorded, Phase 13) | `invoice.paid` |
 | `open` | `POST /pay` declines | `open` | `attempted = 1`; `attempt_count` per §5; `next_payment_attempt` set or cleared; `last_finalization_error` untouched (that field is for finalization, not payment) | `invoice.payment_failed` |
 | `open` | payment requires 3DS off-session | `open` | `confirmation_secret` exposed | `invoice.payment_action_required` |
 | `open` | overpayment (`amount_paid > amount_due`) | `paid` | `amount_overpaid` set; excess credited to `customer.balance` via a `customer_balance_transactions` row with `type = invoice_overpaid` | `invoice.overpaid`, `invoice.paid` |
-| `open` | `POST /void` | `void` | `status_transitions.voided_at`; `amount_due` and `amount_remaining` left as they were; dead end | `invoice.voided` |
+| `open` | `POST /void` | `void` | `status_transitions.voided_at`; `amount_due` and `amount_remaining` left as they were (recorded, Phase 13); dead end | `invoice.voided` |
 | `open` | `POST /mark_uncollectible` | `uncollectible` | `status_transitions.marked_uncollectible_at` | `invoice.marked_uncollectible` |
-| `paid` | anything | — | `status_transition_invalid`. A paid invoice is settled only through a credit note | — |
-| `void` / `uncollectible` | anything | — | `status_transition_invalid` | — |
+| `draft` | `POST /send` | `open`/`paid` | Finalizes first (a $0 result settles, recorded Phase 13); the number and URLs land with it | `invoice.finalized` (+ `invoice.sent` for `send_invoice`) |
+| `open` + `send_invoice` | `POST /send` | `open` | Body unchanged (recorded, Phase 13); email delivery is the harness's business | `invoice.sent` |
+| `paid` | anything | — | The recorded refusals above (`Invoice is already paid`, the void and mark spellings). A paid invoice is settled only through a credit note | — |
+| `void` / `uncollectible` | anything | — | The isn't-open refusal; a re-mark answers its own spelling | — |
 
 #### `automatically_finalizes_at` under a frozen clock
 
@@ -546,13 +570,16 @@ This is the field the fidelity claim is most easily faked on, so it is stated bl
 def compute_automatically_finalizes_at(created_iso, *, auto_advance, collection_method):
     if not auto_advance:
         return None                      # spec3.json: state "doesn't automatically advance"
-    return iso_plus(created_iso, hours=1)
+    return created_iso + 3601            # recorded, Phase 13: the CEIL of the un-floored
+                                         # creation instant; next_payment_attempt_at is its
+                                         # FLOOR (created + 3600), one second earlier
 ```
 
 - The field is **populated and honest**: for any `draft` invoice with `auto_advance = 1`, it holds
-  `created + 1 hour`, which is the real window Stripe documents and which `invoice.attempted`'s own
-  description corroborates from inside `spec3.json` ("not attempted until 1 hour after the
-  `invoice.created` webhook").
+  `created + 3601 seconds` and `next_payment_attempt = created + 3600 seconds` (both collection
+  methods get the finalize window; only `charge_automatically` additionally gets the payment
+  attempt — recorded twice, cassette 13 steps 20 and 59). Both are recomputed from `created` —
+  never from the update moment — when `auto_advance` is cleared and re-set on a draft.
 - **Nothing fires on its own.** `ctx.clock` is static for the life of the instance
   (capability map: "no method to change it mid-instance"; `clock.py` registers deterministic
   overrides against one instant and exposes nothing else). There is no scheduler, no background
@@ -588,7 +615,7 @@ What this world emits, and when:
 |---|---|
 | `subscription_create` | `create_subscription` |
 | `subscription_cycle` | `advance_cycle`, at the period boundary with **zero lead time** |
-| `subscription_update` | `apply_update` with `proration_behavior = always_invoice` |
+| `subscription_update` | `apply_update` with `proration_behavior = always_invoice`; the update-driven trial end (`trial_end: "now"`) — probed in both billing modes, Phase 12 CR round 4's trail; the active→trialing conversion invoice — probed, round 3/5's trails |
 | `manual` | `POST /v1/invoices` with no subscription |
 | `automatic_pending_invoice_item_invoice` | `POST /v1/invoices` for a customer with pending `invoiceitems` and `subscription.pending_invoice_item_interval` set |
 | `subscription` | **never.** Legacy, pre-May-2018. A test asserts no row carries it |
@@ -609,23 +636,28 @@ two discount scopes with different timing, and the arithmetic must keep them apa
 
 #### 3.1 Where lines come from
 
-A draft invoice's lines are the concatenation of three sources, in `spec3.json`'s documented
-`invoice.lines` order:
+A draft invoice's lines come from two sources, in this order (recorded, Phase 13 — the spec's
+three-bucket description collapses: a later-added item is simply the newest pending item, so the
+third bucket folds into the first):
 
-1. **Pending invoice items**, including prorations, in **reverse chronological** order. Every row in
-   `invoiceitems` with `invoice IS NULL`, `customer = this customer` and `period` inside the
-   invoice's `[period_start, period_end]`. Proration lines created by `proration_lines` are exactly
-   these.
+1. **Invoice items attached to the invoice**, in **reverse chronological** order. The manual
+   create's `pending_invoice_items_behavior` controls the sweep: absent means **exclude** (the
+   unparameterized API create answers an empty-lines draft even with pending items — recorded,
+   Phase 13; the documented `include` default is a Dashboard concept) and `include` attaches
+   **every** pending `invoiceitems` row for the customer, **regardless of period** — the invoice's
+   own period is zero-width and bounds nothing (correcting this section's earlier period-bounded
+   sweep). Proration lines created by `proration_lines` ride the same bucket once attached.
 2. **Subscription items**, in reverse chronological order — one line per row in
    `subscription_items` for the invoice's subscription, with
    `period = [item.current_period_start, item.current_period_end)` and
    `subtotal = price.unit_amount × quantity`.
-3. **Invoice items added after invoice creation**, in **chronological** order.
 
 Each becomes a `LineInput`; nothing else contributes. The list is assembled fresh on every draft
 mutation and frozen at finalization, when it is written once into `invoices.lines` through
 `_json.py`'s single canonical dump (`sort_keys=True`, tight separators) so bytes are reproducible.
-`line_item` is a nested JSON object on the parent, never a table (functional spec §3.4).
+Each line's `il_` id is **preserved across draft rebuilds**, keyed by its source — a line edit
+answers the id it was given (recorded, Phase 13). `line_item` is a nested JSON object on the
+parent, never a table (functional spec §3.4).
 
 #### 3.2 One line's arithmetic
 
@@ -957,33 +989,47 @@ dunning" eval grades, and none of it needs a clock that moves.
 
 #### What creates a `balance_transaction`
 
-Exactly one row per money movement. `type` is checked against the 51-value enum in `spec/enums.py`,
+Exactly one row per money movement. `type` is checked against the 50-value enum in `spec/enums.py`,
 generated from `spec3.json`; an unknown value is a `WorldBug`.
 
 | Event | `type` | `amount` | `fee` | `available_on` | `source` |
 |---|---|---|---|---|---|
 | Charge captured | `charge` | `+charge.amount` | `stripe_fee(amount)` | `created + T+2` | `ch_…` |
-| Refund | `refund` | `−refund.amount` | `0` | `created` | `re_…` |
-| Refund failed, funds returned | `refund_failure` | `+refund.amount` | `0` | `created` | `re_…` |
-| **Dispute opened** | **`adjustment`** | `−disputed_amount` | `+dispute_received_fee` | `created` | `dp_…` |
-| **Dispute won** | **`adjustment`** | `+disputed_amount` | `−dispute_countered_fee` if the merchant countered, else `0` | `created` | `dp_…` |
+| Refund | `refund` | `−refund.amount` | `0` | `created + T+2` | `re_…` |
+| Refund failed, funds returned | `refund_failure` | `+refund.amount` | `0` | `created + T+2` | `re_…` |
+| **Dispute opened** | **`adjustment`** | `−disputed_amount` | `+dispute_received_fee` | `created + T+2` | `du_…` |
+| **Dispute won** | **`adjustment`** | `+disputed_amount` | `0` | `created + T+2` | `du_…` |
 | Dispute lost | *(none)* | — | — | — | — |
 | Payout created | `payout` | `−payout.amount` | `0` (standard) | `created` | `po_…` |
 | Payout failed | `payout_failure` | `+payout.amount` | `0` | `created` | `po_…` |
 | Payout canceled | `payout_cancel` | `+payout.amount` | `0` | `created` | `po_…` |
 
+(`available_on` corrected throughout against the Phase 11 cassettes' own values — read out of
+`11_ledger_payouts.json`, not reconstructed from the rule: the recorded charge and refund rows
+(both created Sun 2026-09-20 ~22:21Z) carry `status: "pending"` with `available_on` day-floored to
+midnight UTC, while the recorded dispute withdrawal answers `status: "available"` with
+`available_on == created` to the exact second — the recording account holds its withdrawn funds
+immediately available, where an earlier draft of this table settled refunds and dispute rows
+immediately and this world holds everything but the payout family pending under its own declared
+T+2. Payout rows leave the available balance the moment they are written, so theirs is `created`.
+The divergences the recording exposes — this world's shorter delay, and its pending rather than
+available dispute withdrawals — are the `**.available_on` and `_bt_settlement_status` allow-list
+entries, not silent.)
+
 Dispute withdrawal **and** reversal are both `type = adjustment`. This is confirmed verbatim, not
 inferred — `docs.stripe.com/reports/balance-transaction-types` states both halves explicitly under
 the `adjustment` type, with the `source` pointing at the dispute and the `description` carrying the
-distinction. The enum has no dispute-specific value and a mock that invents one is wrong.
+distinction (`Chargeback withdrawal for ch_…` / `Chargeback reversal for ch_…`, both recorded). The
+enum has no dispute-specific value and a mock that invents one is wrong.
 
-Dispute fees follow the documented two-fee structure: the **received** fee is charged when the
-dispute opens and is **never** returned; the **countered** fee is charged only if the merchant
-submits evidence and **is** returned on a win. So a merchant who wins a contested dispute recovers
-the disputed amount and the countered fee, but not the received fee. That is why the reversal row
-carries a *negative* `fee`: `net = amount − fee = disputed_amount + countered_fee`. A `lost` dispute
-writes no second row; the `dispute.balance_transactions` array is documented as holding "zero, one, or
-two" entries and this table is what produces each count.
+Dispute fees, **corrected by the Phase 11 recording** (cassette 05's settled-won body, re-read on
+currency-native rows in cassette 11 — an earlier draft of this section described a two-fee model
+from the docs' pricing pages): the flat **received** fee is charged with the withdrawal and **kept
+whether the merchant wins or loses**. No "countered" fee row exists anywhere in the recorded
+corpus, and the win's reversal row carries `fee: 0, fee_details: []` — the merchant recovers
+exactly the disputed amount. A `lost` dispute writes no second row; the
+`dispute.balance_transactions` array is documented as holding "zero, one, or two" entries and this
+table is what produces each count.
 
 A `prevented` dispute writes **zero** rows. The docs' language for the fully-prevented path is that
 "the dispute is never filed" with no fee, and whether the fee-bearing prevention products create a
@@ -1017,24 +1063,43 @@ net = amount − fee          # spec3.json states this identity verbatim
 Stored as a column with `CHECK (net = amount - fee)`, so an implementation bug becomes a constraint
 violation rather than a silently wrong balance.
 
-`available_on = created + 2 business days` for `charge` rows, computed by a pure
-`add_business_days(iso, n)` (Mon–Fri, no holiday calendar); `= created` for every other type, so a
-refund, dispute adjustment or payout hits the available balance immediately. Real Stripe's
-settlement delay varies by country and account and has no canonical constant; T+2 is a world
-constant, declared. Business days rather than calendar days because a fixture with `available_on`
-landing on a Sunday is visibly wrong to anyone reading it.
+`available_on` is **midnight UTC of the creation day plus `settlement_business_days` (default 2)
+calendar days** — for `charge`, `refund` and `adjustment` rows alike — and `created` itself for the
+payout family (`payout`, `payout_cancel`, `payout_failure`), whose committed funds leave the
+available balance immediately. This is `ledger.available_on`, and what the recordings ground is
+the **shape**, not the constant: cassette 11's charge and refund rows (both created Sun
+2026-09-20 ~22:21Z) settle `pending` onto a midnight-UTC instant day-floored the same way — at
+the recording account's own +7-day delay (Sun → Sun 00:00 UTC), which is account policy, not a
+universal; the dispute withdrawal is the deliberate exception and diverges here, answered below.
+T+2 itself is a declared world constant (real Stripe's delay varies by country and account and
+has no canonical value). An earlier draft of this paragraph settled refunds and dispute rows
+immediately and used a business-day walker; the day-floor and the fresh-row `pending` status are
+what the cassettes actually carry.
 
-`balance_transaction.status` is **not a column**. It is derived at serialization time:
+The dispute rows are the one place this world's ruling knowingly differs from its recording: the
+recorded withdrawals (cassette 11 steps 13/24, cassette 05 likewise) answer `status: "available"`
+with `available_on == created` to the exact second — the recording account holds withdrawn funds
+available immediately — where `ledger.available_on` holds them pending under the same T+2 as
+everything else. Both halves of that difference are declared allow-list entries (the
+`_bt_settlement_status` predicate for the status, `**.available_on` for the instant), not silent.
+
+`balance_transaction.status` **is a stored column**, written once by `ledger.record` from the pure
+comparison
 
 ```python
 def bt_status(available_on_iso, now_iso):
     return "available" if available_on_iso <= now_iso else "pending"
 ```
 
-ISO-8601 in Seahaven's canonical form sorts correctly as text, so this is a string comparison and the
-same comparison works identically in SQL. The field is typed as a bare `string` in `spec3.json` with
-its two values stated only in prose, so it is one of the six fields the conformance validator checks
-against an extracted set rather than against the schema (functional spec §4).
+Storing rather than deriving is safe precisely because the clock is frozen: within one instance a
+row's settlement instant never crosses `now`, so the written value cannot go stale — and the
+`ledger_spec` override seam (a fixture may set `settlement_business_days`) is applied at write
+time, where it belongs. (An earlier draft derived it at serialization time; `ledger.record` and
+the DDL's CHECK settle the question the other way.) ISO-8601 in Seahaven's canonical form sorts
+correctly as text, so the comparison above is a string comparison and the same comparison works
+identically in SQL. The field is typed as a bare `string` in `spec3.json` with its two values
+stated only in prose, so it is one of the six fields the conformance validator checks against an
+extracted set rather than against the schema (functional spec §4).
 
 `/v1/balance` is a computed read over the ledger — no table, no counter, so it cannot drift:
 
@@ -1047,9 +1112,14 @@ WHERE balance_type = 'payments'
 GROUP BY currency;
 ```
 
-serialized into `balance.available[]` / `balance.pending[]` with their `source_types` breakdown.
-`instant_available`, `connect_reserved`, `issuing` and `refund_and_dispute_prefunding` are returned
-as empty arrays; `balance_type` is written `payments` on every row this world creates.
+serialized into `balance.available[]` / `balance.pending[]` with their `source_types` breakdown
+(`{card: amount}` — every money path in scope arrives by card). `instant_available`,
+`connect_reserved`, `issuing` and `refund_and_dispute_prefunding` are **omitted while empty**:
+the spec requires only `available`/`livemode`/`object`/`pending`, and the recorded account's
+all-zero prefunding block (cassette 11) is carried as a scenario-scoped allow-list entry rather
+than reproduced — no prefunding ledger row exists in this world to report. `balance_type` is
+written `payments` on every row this world creates; the SQL filter above is what keeps a future
+prefunding row out of the main buckets when one appears.
 
 #### How payouts draw down
 
@@ -1063,18 +1133,31 @@ There is no separate draw-down bookkeeping, and that is the design:
    already lower by exactly that amount. `payout.balance_transaction` points at it.
 4. Status moves `pending → in_transit → paid`, or `→ failed` / `→ canceled`. A failure or
    cancellation writes a **second, reversing** row (`payout_failure` / `payout_cancel`,
-   `amount = +payout.amount`) referenced by `payout.failure_balance_transaction`. The original row is
+   `amount = +payout.amount`) referenced by `payout.failure_balance_transaction`, and clears the
+   sweep — the rows were never paid out. The original row is
    never mutated — mutating it would make the ledger unauditable and would contradict the existence
-   of the two distinct type values.
-5. `reconciliation_status = completed` once paid, at which point
-   `GET /v1/balance_transactions?payout=po_…` lists the rows swept into it.
+   of the two distinct type values. A `paid` payout is **not** failable: unwinding one is
+   `reverse_payout`'s job (the negative reversing payout with `original_payout` / `reversed_by`
+   cross-links, born paid, emitting `payout.updated` for the original then
+   `payout.created` / `payout.paid` for the reversal — the documented webhook order); `fail_payout`
+   accepts `pending` and `in_transit` only.
+5. `reconciliation_status = completed` **at creation**: the sweep that fills `x_payout` (and so
+   answers `GET /v1/balance_transactions?payout=po_…`) is synchronous here, so there is no window
+   in which `in_progress` would be honest. (An earlier draft deferred completion to `paid`; the
+   synchronous sweep ships instead — `ledger.create_payout` and `test_create_draws_down_and_sweeps`.)
 
 Payout status never advances on its own — no clock, no scheduler. `arrival_date` is populated
-honestly and never arrives; transitions happen when called, or are laid down by the fixture
-generator. Same declared difference as `automatically_finalizes_at`.
+honestly (the settlement window's day floor, a declared ruling: live arrival follows the
+destination's banking schedule, which no frozen clock and no stub destination can model) and never
+arrives; transitions happen when called (`settle_payout`, the fixture/test-only sibling of
+`advance_cycle`), or are laid down by the fixture generator. Same declared difference as
+`automatically_finalizes_at`.
 
-Instant payouts and `instant_available` are not modelled: `method = instant` is rejected with
-`invalid_request_error` / `payouts_not_allowed`, declared.
+`instant_available` is not modelled, and `method = instant` is **accepted**: it draws the ordinary
+available balance like a standard payout, declared in `allowed_differences.py`'s structural
+section — the bucket it should draw from never fills in this world, so the substitution is
+unobservable through the tools. (An earlier draft rejected it with `payouts_not_allowed`; the
+accepting ruling is what `payouts.py`'s create parameter and the structural entry ship.)
 
 ### 7. Time: what this component can and cannot do
 
@@ -1187,7 +1270,7 @@ SELECT c.id FROM customers c
 WHERE c.balance <> (SELECT COALESCE(SUM(amount), 0)
                     FROM customer_balance_transactions t WHERE t.customer_id = c.id);
 
--- I15 Every ledger type this world wrote is in the spec's 51-value enum.
+-- I15 Every ledger type this world wrote is in the spec's 50-value enum.
 SELECT DISTINCT type FROM balance_transactions
 WHERE type NOT IN ( /* generated from spec/enums.py */ );
 ```
@@ -1205,7 +1288,7 @@ balance discrepancy", "over-refunding", "a mid-cycle plan change whose proration
 | `ctx.clock` | `now()` / `iso()`. The only source of time in the component — nothing reads a wall clock |
 | `ctx.ids` via `_ids.py::stripe_id` | `in_`, `il_`, `ii_`, `sub_`, `si_`, `txn_`, `cbtxn_`, `po_`, `evt_` prefixes. **Never `ctx.ids.uuid()`** — a test greps `billing/` for it (architecture §4.4) |
 | `ctx.state["account"]` | `RetryPolicy`, `FeeSchedule`, `LedgerSpec`, settlement delay, dispute fees. Written by `startup.py` |
-| `_time.py` | ISO ↔ unix seconds, `iso_plus`, `add_business_days`. Conversion lives here and nowhere else |
+| `_time.py` | ISO ↔ unix seconds (`to_unix` / `from_unix`) and nothing else; the ledger's day-floored settlement arithmetic lives in `ledger.available_on`. Conversion lives here and nowhere else |
 | `_json.py` | The single canonical dump for `invoices.lines` and every JSON column |
 | `spec/enums.py` | The `balance_transaction.type`, `billing_reason`, status and `decline_code` closed sets |
 | `spec/event_types.py` | Validation set for `emit_event` |
@@ -1283,7 +1366,7 @@ Customer balance: `test_credit_applied_reduces_amount_due`,
 `test_past_due_finalize_time_does_not_self_fire` — **the honest-clock test**: a draft whose
 `automatically_finalizes_at` is before `now`, asserted still `draft` after unrelated calls, then
 `open` only after `/finalize`.
-`test_finalize_non_draft_is_invoice_not_editable`, `test_void_from_paid_is_status_transition_invalid`,
+`test_finalize_non_draft_is_invoice_not_editable`, `test_the_wrong_state_refusals`,
 `test_delete_only_from_draft`, `test_mark_uncollectible_only_from_open`,
 `test_pay_failure_leaves_invoice_open`, `test_billing_reason_never_legacy_subscription`,
 `test_upcoming_billing_reason_never_stored`,
@@ -1328,19 +1411,24 @@ asserts `attempt_count` is unchanged, pinning the frozen-clock statement as a te
 comment.
 `test_retry_policy_is_not_a_subscription_field` — asserts no such column and no such API parameter.
 
-### Ledger — `tests/billing/test_ledger.py`
+### Ledger — `tests/test_ledger.py` and `tests/test_payouts.py`
 
-`test_net_equals_amount_minus_fee`, `test_fee_details_sum_to_fee`,
-`test_fee_rounds_half_up`, `test_available_on_is_t_plus_two_business_days`,
-`test_available_on_skips_weekend`, `test_refund_available_immediately`,
-`test_status_derived_not_stored`, `test_balance_splits_available_and_pending`,
-`test_payout_draws_down_available_immediately`,
-`test_payout_exceeding_available_is_balance_insufficient_and_writes_nothing`,
-`test_payout_failure_writes_reversing_row_not_a_mutation`,
-`test_dispute_withdrawal_is_adjustment`, `test_dispute_reversal_is_adjustment`,
-`test_dispute_received_fee_never_returned`, `test_dispute_countered_fee_returned_on_win`,
-`test_lost_dispute_writes_one_row_only`, `test_prevented_dispute_writes_no_rows`,
-`test_unknown_balance_transaction_type_is_world_bug`.
+The shipped names, aligned to the rulings above (a stale earlier list named
+business-day/derivation tests none of which matched the shipped behavior):
+`test_net_is_amount_minus_fee_everywhere`, `test_the_default_fee_schedule_is_290_plus_30`,
+`test_the_charge_bt` (day-floored T+2 `status: pending` on a fresh row),
+`test_the_refund_bt`, `test_the_chargeback_withdrawal_and_the_win_reversal`,
+`test_the_inquiry_writes_nothing_until_escalated`, `test_a_lost_dispute_keeps_its_withdrawal_only`,
+`test_the_balance_on_an_empty_ledger` (optional buckets omitted while empty),
+`test_the_balance_split_and_the_draw_down`, `test_the_balance_equals_the_ledger_sums`,
+`test_every_captured_charge_has_exactly_one_row`, `test_every_source_resolves_in_exactly_one_table`;
+on the payout side, `test_create_draws_down_and_sweeps`,
+`test_create_refuses_beyond_the_available_balance`,
+`test_cancel_returns_the_funds_and_unsweeps`,
+`test_fail_payout_is_the_fixture_surface` (the reversal row, not a mutation, and `pending`/`
+in_transit` only), `test_settle_then_reverse` (the negative reversing payout, cross-links, and the
+documented event order), `test_the_recorded_create_refusals`, and
+`test_an_unknown_balance_transaction_type_is_a_world_bug`.
 
 ### Invariants — `tests/invariants/test_billing_invariants.py`
 

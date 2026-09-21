@@ -34,7 +34,7 @@ from stripeapi.dispatch.resource import (
     register,
 )
 from stripeapi.dispatch.response import ApiResponse
-from stripeapi.resources import _lookup, charges, events, payment_methods
+from stripeapi.resources import _lookup, charges, disputes, events, payment_methods
 from stripeapi.resources.customers import _canonical_shipping
 from stripeapi.serialize.fields import FieldMap, presence_sets, serializer_for
 from stripeapi.spec import spec_document
@@ -653,6 +653,15 @@ def _confirm(
         )
     body = serialize(ctx, _re_read(ctx, pi_row["id"]))
     events.emit_event(ctx, type="charge.succeeded", obj=charges.serialize(ctx, charge))
+    if not manual:
+        # A dispute-tagged method opens its dispute here — after the charge's
+        # own event, before the intent's (the recorded order, Phase 9): the
+        # dispute is created by the payment itself, not by a later call.
+        # Manual capture is gated out (probed, Phase 9 CR round): an
+        # authorized-but-uncaptured hold creates NO dispute — the issuer
+        # disputes captured funds — and the capture transition below creates
+        # it instead, in the same recorded order.
+        disputes.maybe_create_dispute(ctx, charge, pm_row)
     if manual:
         events.emit_event(ctx, type="payment_intent.amount_capturable_updated", obj=body)
     else:
@@ -819,6 +828,16 @@ def capture(ctx: seahaven.Ctx, req: Request) -> dict[str, Any]:
         amount_to_capture,
         charge_id,
     )
+    # The hold's ledger row lands here — the captured funds are the only
+    # funds that ever move (the recorded manual-capture charge carries its
+    # txn in the capture's own response, cassette 04 step 19).
+    charges.record_capture_ledger(
+        ctx,
+        charge_id,
+        amount_captured=amount_to_capture,
+        currency=row["currency"],
+        description=row["description"],
+    )
     # `metadata` is a declared parameter of the capture operation (pinned
     # spec) and merges like every update's (the engine's own two-line
     # pattern, dispatch/resource.py) — CR round 1 caught it being accepted
@@ -837,6 +856,19 @@ def capture(ctx: seahaven.Ctx, req: Request) -> dict[str, Any]:
     charge_row = _lookup.require_row(ctx, "charges", "charge", charge_id, param="charge")
     body = serialize(ctx, _re_read(ctx, row["id"]))
     events.emit_event(ctx, type="charge.captured", obj=charges.serialize(ctx, charge_row))
+    if charge_row["payment_method"] is not None:
+        pm_row = ctx.db.one(
+            "SELECT * FROM payment_methods WHERE id = ?", charge_row["payment_method"]
+        )
+        if pm_row is not None:
+            # The manual-capture twin of the confirm path's dispute creation
+            # (probed, Phase 9 CR round): the hold created nothing, the
+            # capture pulls the funds the issuer disputes — same recorded
+            # event order, `charge.captured` then the dispute pair. The
+            # disputed amount is the captured amount: a partial capture is
+            # the only funds the customer could dispute (unrecorded edge,
+            # the captured-funds rule it follows).
+            disputes.maybe_create_dispute(ctx, charge_row, pm_row)
     events.emit_event(ctx, type="payment_intent.succeeded", obj=body)
     return body
 

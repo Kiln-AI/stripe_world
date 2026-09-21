@@ -18,6 +18,7 @@ dependencies = ["seahaven~=0.0"]
 # own dependency tree is large, and a world used in process never needs it.
 [project.optional-dependencies]
 serve = ["seahaven[serve]"]
+mcp = ["seahaven[mcp]"]
 
 [dependency-groups]
 # `stripe` is the conformance recorder's transport and nothing else: the test
@@ -39,6 +40,7 @@ dev = ["pytest>=8", "ruff>=0.14", "ty>=0.0.1a21", "stripe>=13"]
 seahaven = { git = "https://github.com/Kiln-AI/Seahaven.git", rev = "48dad1f01df5ff15bb6c5a152d1b49251235eda8" }
 
 [tool.uv]
+conflicts = [[{ extra = "serve" }, { extra = "mcp" }]]
 # SEAHAVEN_FINDINGS.md Entry 1: the framework's pydantic>=2.13.5 floor crashes
 # `import seahaven` on the 3.14.0rc builds some environments resolve to, and
 # 2.12.3 is the version every suite here has been green on. An override rather

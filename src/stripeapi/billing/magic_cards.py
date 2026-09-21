@@ -62,6 +62,10 @@ class CardBehavior:
     attach_declines: bool = False
     cvc_check: str = "unchecked"
     dispute: str | None = None
+    #: `chargeback` (the default) or `inquiry`: which dispute track the card
+    #: opens — probed at the pinned version (Phase 9): the inquiry card lands
+    #: `warning_needs_response` with `is_charge_refundable: true`.
+    dispute_track: str = "chargeback"
     refund_async: str | None = None
     three_d_secure: str | None = None
 
@@ -130,12 +134,18 @@ _3DS = {
     "4000003800000446": None,  # already set up for off-session use
 }
 
+#: Dispute cards (§4 of the table), number -> (reason, track). The track and
+#: the reason both shape the dispute's wire facts (probed, Phase 9): a
+#: chargeback lands `needs_response` with `is_charge_refundable: false`,
+#: an inquiry lands `warning_needs_response` refundable. The early-fraud-
+#: warning and multiple-dispute cards are unprobed beyond their existence
+#: and default to the plain chargeback track here — a declared simplification.
 _DISPUTES = {
-    "4000000000000259": "fraudulent",
-    "4000000000002685": "product_not_received",
-    "4000000000001976": "fraudulent",  # inquiry
-    "4000000000005423": "fraudulent",  # early fraud warning
-    "4000004040000079": "fraudulent",  # multiple disputes
+    "4000000000000259": ("fraudulent", "chargeback"),
+    "4000000000002685": ("product_not_received", "chargeback"),
+    "4000000000001976": ("fraudulent", "inquiry"),
+    "4000000000005423": ("fraudulent", "chargeback"),
+    "4000004040000079": ("fraudulent", "chargeback"),
 }
 
 _REFUNDS = {
@@ -175,9 +185,16 @@ _TOKENS = {
     # `tok_threeDSecureRequired` (…3063) are.
     "tok_threeDSecure2Required": "4000000000003220",
     "tok_threeDSecureRequired": "4000000000003063",
-    "tok_card_createDispute": "4000000000000259",
-    "tok_card_createDisputeProductNotReceived": "4000000000002685",
-    "tok_card_createDisputeInquiry": "4000000000001976",
+    # The dispute tokens' real spellings, probed 2026-09-20 at the pinned
+    # version (Phase 9): `tok_card_createDispute` (this table's first
+    # transcription) is not a token the live API knows ("There is a part of
+    # the token that is not valid: 'card'."), while `tok_visa_createDispute`
+    # and the short `tok_createDispute` are — the same correction class as
+    # the 3DS spellings Phase 8 made.
+    "tok_visa_createDispute": "4000000000000259",
+    "tok_createDispute": "4000000000000259",
+    "tok_visa_createDisputeProductNotReceived": "4000000000002685",
+    "tok_visa_createDisputeInquiry": "4000000000001976",
     "pm_card_visa": "4242424242424242",
     "pm_card_visa_debit": "4000056655665556",
     "pm_card_mastercard": "5555555555554444",
@@ -285,6 +302,7 @@ def card_for(number: str, *, cvc_provided: bool = False, token: str | None = Non
     decline: tuple[str, str | None] | None = None
     attach_declines = False
     dispute = None
+    dispute_track = "chargeback"
     refund_async = None
     three_d = None
     cvc_check = "pass" if cvc_provided else "unchecked"
@@ -309,7 +327,7 @@ def card_for(number: str, *, cvc_provided: bool = False, token: str | None = Non
     if number in _3DS:
         three_d = _3DS[number]
     if number in _DISPUTES:
-        dispute = _DISPUTES[number]
+        dispute, dispute_track = _DISPUTES[number]
     if number in _REFUNDS:
         refund_async = _REFUNDS[number]
     if token in _CVC_FAIL_TOKENS and cvc_provided:
@@ -325,6 +343,7 @@ def card_for(number: str, *, cvc_provided: bool = False, token: str | None = Non
         attach_declines=attach_declines,
         cvc_check=cvc_check,
         dispute=dispute,
+        dispute_track=dispute_track,
         refund_async=refund_async,
         three_d_secure=three_d,
     )

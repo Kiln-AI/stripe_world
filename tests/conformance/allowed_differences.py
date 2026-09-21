@@ -170,6 +170,36 @@ def _both_prefixed_ids(*prefixes: str) -> Callable[[Any, Any], bool]:
     return check
 
 
+def _ledger_reference(recorded: Any, replayed: Any) -> bool:
+    """A ledger-reference field (`balance_transaction`, the bt a charge,
+    refund or payout carries). Three shapes pass, in this order of intent:
+
+    1. Both sides freshly minted `txn_` ids — the ordinary id rule.
+    2. Recorded null, replayed id — the async settlement window: live Stripe
+       mints the charge's ledger row moments after the capture (recorded:
+       null on the confirm-time body, populated seconds later, cassette 04
+       steps 10 vs 49); this world's ledger is synchronous, so the row
+       exists inside the call that earned it.
+    3. Recorded id-or-null, replayed **absent** — the dispute's singular
+       `balance_transaction`, which the pinned spec does not declare on
+       `dispute` at all, so this world omits the key (the spec-is-authority
+       ruling every other live-only field follows). The diff walker hands
+       key-absence to the predicate as a `None` replayed value, which is
+       indistinguishable here from a recorded null.
+
+    Arm 3's `None` overlap means the predicate cannot by itself tell a
+    deliberately omitted field from a charge whose ledger write regressed to
+    a null; that regression risk is pinned by the unit suites
+    (`test_the_charge_bt`, `test_the_refund_bt`) and the ledger invariants
+    instead — the compensation is stated here because this file is reviewed
+    as a design document."""
+    if isinstance(recorded, str) and isinstance(replayed, str):
+        return recorded.startswith("txn_") and replayed.startswith("txn_")
+    if replayed is None:
+        return recorded is None or (isinstance(recorded, str) and recorded.startswith("txn_"))
+    return recorded is None and isinstance(replayed, str) and replayed.startswith("txn_")
+
+
 #: A minted promotion-code `code`: eight uppercase alphanumerics per side
 #: (recorded `BFDACGQS`; ours draws the same shape from the seeded stream).
 _MINTED_CODE = re.compile(r"^[A-Z0-9]{8}$")
@@ -216,8 +246,9 @@ def _idempotency_mismatch_modulo_key(recorded: Any, replayed: Any) -> bool:
     )
 
 
-#: A client secret embeds its intent's minted id plus a random suffix.
-_CLIENT_SECRET = re.compile(r"^pi_[A-Za-z0-9]+_secret_[A-Za-z0-9]+$")
+#: A client secret embeds its intent's minted id plus a random suffix —
+#: PaymentIntent and SetupIntent alike.
+_CLIENT_SECRET = re.compile(r"^(?:pi|seti)_[A-Za-z0-9]+_secret_[A-Za-z0-9]+$")
 
 
 def _both_client_secrets(recorded: Any, replayed: Any) -> bool:
@@ -231,7 +262,12 @@ def _both_client_secrets(recorded: Any, replayed: Any) -> bool:
 def _recorded_placeholder_or_same(recorded: Any, replayed: Any) -> bool:
     """The recorded value was normalized to a redaction placeholder (or the
     two sides agree); the replayed value is this world's own derivation."""
-    return recorded in ("<redacted:receipt_url>", replayed)
+    return recorded in (
+        "<redacted:receipt_url>",
+        "<redacted:invoice_pdf>",
+        "<redacted:hosted_invoice_url>",
+        replayed,
+    )
 
 
 #: The confirm-missing-method message names the customer id — the same
@@ -352,6 +388,165 @@ def _both_pm_ids(recorded: Any, replayed: Any) -> bool:
         and isinstance(replayed, str)
         and recorded.startswith("pm_")
         and replayed.startswith("pm_")
+    )
+
+
+#: The refunds-and-disputes messages whose whole variable content is an
+#: object id (all probed verbatim, Phase 9): the fully-refunded refusal, the
+#: charged-back refusal, the no-dispute scoped read, and the uncaptured-hold
+#: refund refusal.
+_CHARGE_ALREADY_REFUNDED = re.compile(r"^Charge ch_[A-Za-z0-9]+ has already been refunded\.$")
+_CHARGE_CHARGED_BACK = re.compile(
+    r"^Charge ch_[A-Za-z0-9]+ has been charged back; cannot issue a refund\.$"
+)
+_NO_DISPUTE_FOR_CHARGE = re.compile(r"^No dispute for charge: ch_[A-Za-z0-9]+$")
+_UNCAPTURED_REFUND_REFUSED = re.compile(
+    r"^This uncaptured Charge was created by a PaymentIntent \(pi_[A-Za-z0-9]+\)\. "
+    r"You must cancel the PaymentIntent to reverse the authorization instead of "
+    r"refunding the Charge directly\. For more information, see "
+    r"https://stripe\.com/docs/payments/place-a-hold-on-a-payment-method$"
+)
+
+
+def _message_modulo_id(pattern: re.Pattern[str]) -> Callable[[Any, Any], bool]:
+    def check(recorded: Any, replayed: Any) -> bool:
+        return (
+            isinstance(recorded, str)
+            and isinstance(replayed, str)
+            and bool(pattern.fullmatch(recorded))
+            and bool(pattern.fullmatch(replayed))
+        )
+
+    return check
+
+
+#: The setup-intent ownership refusals name both ids they turn on (all
+#: recorded verbatim, Phase 10, at create, update and confirm): the
+#: wrong-customer spelling and the customerless one.
+_SETI_DOES_NOT_BELONG = re.compile(
+    r"^The PaymentMethod pm_[A-Za-z0-9]+ does not belong to the Customer you "
+    r"supplied cus_[A-Za-z0-9]+\. Please use this PaymentMethod with the "
+    r"Customer that it belongs to instead\.$"
+)
+_SETI_SUPPLIED_BELONGS = re.compile(
+    r"^The payment method supplied \(pm_[A-Za-z0-9]+\) belongs to the "
+    r"Customer cus_[A-Za-z0-9]+\. Please include the Customer in the `customer` "
+    r"parameter on the SetupIntent\.$"
+)
+
+
+def _seti_ownership_modulo_ids(recorded: Any, replayed: Any) -> bool:
+    return (
+        isinstance(recorded, str)
+        and isinstance(replayed, str)
+        and (
+            bool(
+                _SETI_DOES_NOT_BELONG.fullmatch(recorded)
+                and _SETI_DOES_NOT_BELONG.fullmatch(replayed)
+            )
+            or bool(
+                _SETI_SUPPLIED_BELONGS.fullmatch(recorded)
+                and _SETI_SUPPLIED_BELONGS.fullmatch(replayed)
+            )
+        )
+    )
+
+
+#: A ledger-source reference: both sides freshly minted ids of the same
+#: prefix family (`ch_`, `re_`, `du_`, `po_`) — the `**.id` rule on the
+#: polymorphic `balance_transaction.source` (Phase 11).
+_LEDGER_SOURCE_PREFIXES = ("ch_", "re_", "du_", "po_")
+
+
+def _both_ledger_sources(recorded: Any, replayed: Any) -> bool:
+    return (
+        isinstance(recorded, str)
+        and isinstance(replayed, str)
+        and any(recorded.startswith(p) and replayed.startswith(p) for p in _LEDGER_SOURCE_PREFIXES)
+    )
+
+
+#: The dispute ledger rows' descriptions name the charge they belong to — the
+#: id-only rule in its third message-shaped disguise (recorded, cassette 05
+#: and 11): `Chargeback withdrawal for ch_…` / `Chargeback reversal for ch_…`.
+_DISPUTE_BT_DESCRIPTION = re.compile(r"^Chargeback (?:withdrawal|reversal) for ch_[A-Za-z0-9]+$")
+
+
+def _dispute_bt_description_modulo_id(recorded: Any, replayed: Any) -> bool:
+    return (
+        isinstance(recorded, str)
+        and isinstance(replayed, str)
+        and bool(
+            _DISPUTE_BT_DESCRIPTION.fullmatch(recorded)
+            and _DISPUTE_BT_DESCRIPTION.fullmatch(replayed)
+        )
+    )
+
+
+#: The settlement-status pair a balance transaction's own `status` may differ
+#: by: the recorded account marks dispute withdrawals available immediately,
+#: this world's T+2 rule holds them pending under a frozen clock (Phase 11).
+#: No other object's `status` can record `available`, so the predicate cannot
+#: mask a charge, refund, payout or dispute status regression.
+def _bt_settlement_status(recorded: Any, replayed: Any) -> bool:
+    return recorded == "available" and replayed == "pending"
+
+
+#: The duplicate-price refusal: its only variable content is the price id
+#: (probed, Phase 12); form-only comparison.
+_DUP_PRICE = re.compile(
+    r"^Cannot create a Subscription with multiple Subscription Items with the "
+    r"same Price: price_[A-Za-z0-9]+$"
+)
+
+
+def _dup_price_modulo_id(recorded: Any, replayed: Any) -> bool:
+    if not isinstance(recorded, str) or not isinstance(replayed, str):
+        return False
+    return bool(_DUP_PRICE.fullmatch(recorded) and _DUP_PRICE.fullmatch(replayed))
+
+
+#: An invoice number: `<8-char prefix>-<4-digit sequence>` per side (the
+#: prefix is the customer's own minted `invoice_prefix`, Phase 13).
+_INVOICE_NUMBER = re.compile(r"^[A-Z0-9]{8}-\d{4}$")
+
+
+def _invoice_number_pair(recorded: Any, replayed: Any) -> bool:
+    return (
+        isinstance(recorded, str)
+        and isinstance(replayed, str)
+        and bool(_INVOICE_NUMBER.fullmatch(recorded))
+        and bool(_INVOICE_NUMBER.fullmatch(replayed))
+    )
+
+
+#: The Invoice Item 404: `No such Invoice Item: 'ii_…'(livemode=false)` —
+#: the id-only rule in Stripe's own odd spelling (recorded, cassette 13).
+_NO_SUCH_INVOICE_ITEM = re.compile(r"^No such Invoice Item: 'ii_[A-Za-z0-9]+'\(livemode=false\)$")
+
+
+def _no_such_invoice_item_modulo_id(recorded: Any, replayed: Any) -> bool:
+    if not isinstance(recorded, str) or not isinstance(replayed, str):
+        return False
+    return bool(
+        _NO_SUCH_INVOICE_ITEM.fullmatch(recorded) and _NO_SUCH_INVOICE_ITEM.fullmatch(replayed)
+    )
+
+
+#: The dispute settle collapse (Phase 9): live test mode resolves the magic
+#: evidence strings asynchronously, answering `under_review`-shaped statuses
+#: and flipping seconds later; this world's frozen clock settles inside the
+#: submitting call, so the submit response is exactly one hop ahead.
+_SETTLE_COLLAPSED = re.compile(r"^(?:under_review|warning_under_review)$")
+_SETTLE_LANDED = re.compile(r"^(?:won|lost|needs_response)$")
+
+
+def _settle_status(recorded: Any, replayed: Any) -> bool:
+    return (
+        isinstance(recorded, str)
+        and isinstance(replayed, str)
+        and bool(_SETTLE_COLLAPSED.fullmatch(recorded))
+        and bool(_SETTLE_LANDED.fullmatch(replayed))
     )
 
 
@@ -764,14 +959,14 @@ ALLOWED_DIFFERENCES: list[AllowedDifference] = [
     ),
     AllowedDifference(
         "**.balance_transaction",
-        "The balance ledger lands in Phase 11; until then this world's "
-        "charges carry no ledger reference where the live API mints one at "
-        "capture (recorded: null until capture even live, under the "
-        "default `automatic_async` settlement).",
-        predicate=lambda recorded, replayed: (
-            replayed is None
-            and (recorded is None or (isinstance(recorded, str) and recorded.startswith("txn_")))
-        ),
+        "The ledger reference a charge, refund or payout carries: freshly "
+        "minted `txn_` ids both sides; null recorded against a replayed id "
+        "(the async settlement window — live Stripe mints the charge's row "
+        "moments after capture; this world's ledger is synchronous, Phase 11); "
+        "or the dispute's spec-undeclared singular field, absent here. See "
+        "`_ledger_reference` for the shapes and the compensation for the "
+        "null overlap.",
+        predicate=_ledger_reference,
     ),
     AllowedDifference(
         "**.receipt_url",
@@ -844,6 +1039,354 @@ ALLOWED_DIFFERENCES: list[AllowedDifference] = [
         "cut's derived one is present.",
         predicate=_transfer_group_doc_url,
     ),
+    # --- the refunds-and-disputes block (Phase 9) ---
+    AllowedDifference(
+        "**.charge",
+        "The id rule on the charge reference refund and dispute bodies carry, "
+        "predicated to `ch_`-shaped string pairs.",
+        predicate=_both_prefixed_ids("ch_"),
+    ),
+    AllowedDifference(
+        "**.dispute",
+        "The disputed charge's `dispute` names its freshly minted `du_` "
+        "dispute (probed, Phase 9: live dispute ids are `du_…` at the pinned "
+        "version). The field is undeclared on charge in the pinned spec, so "
+        "this world omits it and the spec's property set is the authority — "
+        "the same ruling as every other live-only field.",
+        predicate=lambda recorded, replayed: (
+            isinstance(recorded, str) and recorded.startswith("du_") and replayed is None
+        ),
+    ),
+    AllowedDifference(
+        "**.refunds.total_count",
+        "The charge's inline refunds envelope (under `expand[]=refunds`) "
+        "carries a `total_count` the pinned spec's inline schema does not "
+        "declare; omitted here per the spec-is-authority ruling.",
+        predicate=lambda recorded, replayed: isinstance(recorded, int) and replayed is None,
+    ),
+    AllowedDifference(
+        "body.count",
+        "The live disputes list carries a fifth envelope key, `count`, "
+        "undeclared by the pinned spec's list schema; omitted here like every "
+        "other undeclared live field.",
+        predicate=lambda recorded, replayed: isinstance(recorded, int) and replayed is None,
+    ),
+    AllowedDifference(
+        "**.destination_details.card.reference",
+        "The acquirer reference number is network randomness that appears "
+        "once the refund settles at the network (seconds later live); this "
+        "world's refund never leaves `pending`, so the field stays absent.",
+        predicate=lambda recorded, replayed: replayed is None,
+    ),
+    AllowedDifference(
+        "**.destination_details.card.reference_status",
+        "The acquirer reference flips `pending` → `available` on network "
+        "settlement timing a frozen clock cannot model; `pending` is emitted "
+        "here and either member of the pair is the form.",
+        predicate=lambda recorded, replayed: (
+            recorded in ("available", "pending") and replayed in ("available", "pending")
+        ),
+    ),
+    AllowedDifference(
+        "**.due_by",
+        "The evidence deadline is computed from the creation instant "
+        "(end of the UTC day eight days out, the recorded model), so it "
+        "differs for the same clock reason as `created`.",
+        predicate=lambda recorded, replayed: (
+            isinstance(recorded, int) and isinstance(replayed, int)
+        ),
+    ),
+    AllowedDifference(
+        "**.evidence.customer_name",
+        "Stripe enriches dispute evidence from the customer record "
+        "(`customer_name`, and its description when unnamed — observed, not "
+        "documented); this world stores submitted evidence verbatim, so the "
+        "auto-filled value has no counterpart here.",
+        predicate=lambda recorded, replayed: (
+            (recorded is None or isinstance(recorded, str)) and replayed is None
+        ),
+    ),
+    AllowedDifference(
+        "**.evidence.customer_email_address",
+        "The email half of Stripe's customer-record evidence enrichment; not "
+        "modeled, like `customer_name` beside it.",
+        predicate=lambda recorded, replayed: (
+            (recorded is None or isinstance(recorded, str)) and replayed is None
+        ),
+    ),
+    AllowedDifference(
+        "**.evidence.product_description",
+        "Stripe also enriches evidence from the charge's own description "
+        "(observed, Phase 9); not modeled.",
+        predicate=lambda recorded, replayed: (
+            (recorded is None or isinstance(recorded, str)) and replayed is None
+        ),
+    ),
+    AllowedDifference(
+        "**.balance_transactions",
+        "A dispute's derived ledger rows (Phase 11): the recording account "
+        "settles in CAD, so the recorded withdrawal/reversal amounts are "
+        "FX-converted from the USD charges and name the recording run's "
+        "charge ids; this world derives the same rows natively in the "
+        "charge's own currency — same types, same reporting categories, "
+        "different money and ids. Predicated to lists of bt objects so a "
+        "shape regression still fails.",
+        predicate=lambda recorded, replayed: (
+            isinstance(recorded, list)
+            and isinstance(replayed, list)
+            and all(
+                isinstance(item, dict) and item.get("object") == "balance_transaction"
+                for item in recorded
+            )
+            and all(
+                isinstance(item, dict) and item.get("object") == "balance_transaction"
+                for item in replayed
+            )
+        ),
+    ),
+    AllowedDifference(
+        "**.error.message",
+        "The fully-refunded refusal names the charge id — the id-only rule "
+        "(probed verbatim, Phase 9).",
+        predicate=_message_modulo_id(_CHARGE_ALREADY_REFUNDED),
+    ),
+    AllowedDifference(
+        "**.error.message",
+        "The charged-back refusal names the charge id — the id-only rule "
+        "(probed verbatim, Phase 9).",
+        predicate=_message_modulo_id(_CHARGE_CHARGED_BACK),
+    ),
+    AllowedDifference(
+        "**.error.message",
+        "The charge-scoped dispute read of an undisputed charge names the "
+        "charge id — the id-only rule (probed verbatim, Phase 9).",
+        predicate=_message_modulo_id(_NO_DISPUTE_FOR_CHARGE),
+    ),
+    AllowedDifference(
+        "**.error.message",
+        "The uncaptured-hold refund refusal names the PaymentIntent id — the "
+        "id-only rule (probed verbatim, Phase 9).",
+        predicate=_message_modulo_id(_UNCAPTURED_REFUND_REFUSED),
+    ),
+    # The dispute settle collapse, scoped to the scenario that records it so
+    # no other status comparison can hide behind it.
+    AllowedDifference(
+        "body.status",
+        "Live test mode resolves the magic evidence strings asynchronously: "
+        "the submit response carries `under_review` (inquiries "
+        "`warning_under_review`) and the won/lost/escalated state lands "
+        "seconds later. A frozen clock cannot wait out issuer review, so "
+        "this world settles inside the call — the submit response is exactly "
+        "one hop ahead, and every later read matches. Scoped to the scenario "
+        "recording it; the general declaration is in STRUCTURAL_DIFFERENCES.",
+        scenario="05_refunds_disputes",
+        predicate=_settle_status,
+    ),
+    AllowedDifference(
+        "body.is_charge_refundable",
+        "The refund gate the settle collapse moves: the winning submit "
+        "flips `is_charge_refundable` open synchronously here and the "
+        "inquiry escalation closes it, both asynchronously live. Scoped "
+        "with the `body.status` entry beside it.",
+        scenario="05_refunds_disputes",
+        predicate=lambda recorded, replayed: (
+            (recorded is False and replayed is True) or (recorded is True and replayed is False)
+        ),
+    ),
+    # --- the setup-intents block (Phase 10) ---
+    AllowedDifference(
+        "**.latest_attempt",
+        "The setup attempt stub is a freshly minted `setatt_…` id on every "
+        "confirm attempt (recorded, cassette 10) — the id rule on the field, "
+        "predicated to setatt_-shaped pairs.",
+        predicate=_both_prefixed_ids("setatt_"),
+    ),
+    AllowedDifference(
+        "**.error.network_advice_code",
+        "The expired-card setup decline carries the issuer's network advice "
+        "code beside its network decline code; network chatter is omitted "
+        "here like the money path's declines.",
+        predicate=lambda recorded, replayed: replayed is None,
+    ),
+    AllowedDifference(
+        "**.last_setup_error.advice_code",
+        "`last_setup_error`'s network chatter (recorded `try_again_later` / "
+        "`confirm_card_data`), omitted here — the same ruling as the money "
+        "path's `last_payment_error`.",
+        predicate=lambda recorded, replayed: replayed is None,
+    ),
+    AllowedDifference(
+        "**.last_setup_error.network_advice_code",
+        "`last_setup_error`'s network chatter, omitted here.",
+        predicate=lambda recorded, replayed: replayed is None,
+    ),
+    AllowedDifference(
+        "**.last_setup_error.network_decline_code",
+        "`last_setup_error`'s issuer decline code, omitted here.",
+        predicate=lambda recorded, replayed: replayed is None,
+    ),
+    AllowedDifference(
+        "**.error.message",
+        "The setup-intent ownership refusals name the PaymentMethod and the "
+        "Customer — the id-only rule, both recorded spellings (probed "
+        "verbatim at create, update and confirm, Phase 10).",
+        predicate=_seti_ownership_modulo_ids,
+    ),
+    # The recording account's Dashboard fills an unpinned SetupIntent's
+    # payment_method_types with five rails beside card (recorded: card,
+    # bancontact, klarna, link, pix, satispay) — a wider fill than the
+    # PaymentIntent's one-extra-rail shape the global entry admits, so the
+    # bare-create divergence is scoped here.
+    AllowedDifference(
+        "**.payment_method_types",
+        "The Dashboard configuration fills an unpinned SetupIntent's types "
+        "with five rails beside this world's `['card']` default (recorded, "
+        "cassette 10's one unpinned create); a pinned list still compares "
+        "byte-exact, which is why every other step pins one.",
+        scenario="10_setup_intents",
+        predicate=lambda recorded, replayed: (
+            recorded == ["card", "bancontact", "klarna", "link", "pix", "satispay"]
+            and replayed == ["card"]
+        ),
+    ),
+    # --- the ledger-and-payouts block (Phase 11) ---
+    AllowedDifference(
+        "**.available_on",
+        "The settlement instant is derived from the creation clock plus the "
+        "account's settlement schedule (`settlement_business_days`, a "
+        "LedgerSpec constant — no API-discoverable value exists, the research "
+        "lane's gap 3), so it differs for the same clock reason as `created`.",
+        predicate=lambda recorded, replayed: (
+            isinstance(recorded, int) and isinstance(replayed, int)
+        ),
+    ),
+    AllowedDifference(
+        "**.arrival_date",
+        "A payout's expected arrival follows the destination's banking "
+        "schedule, which a frozen clock and a stub destination cannot model; "
+        "this world pins the settlement window. Same int-pair shape as "
+        "`available_on`.",
+        predicate=lambda recorded, replayed: (
+            isinstance(recorded, int) and isinstance(replayed, int)
+        ),
+    ),
+    AllowedDifference(
+        "**.source",
+        "The id rule on the polymorphic `balance_transaction.source` (charge, "
+        "refund, dispute and payout ids), predicated to same-prefix pairs so "
+        "the recorded nulls the money path carries keep comparing through the "
+        "entry above.",
+        predicate=_both_ledger_sources,
+    ),
+    AllowedDifference(
+        "**.fee",
+        "The processing fee is account pricing, not spec behavior (the "
+        "research lane's gap 1): the recorded account's schedule differs from "
+        "this world's declared `FeeSchedule` constant, on the percent part "
+        "only. Predicated to int pairs; `fee_details` below carries the same "
+        "difference in its line items.",
+        predicate=lambda recorded, replayed: (
+            isinstance(recorded, int) and isinstance(replayed, int)
+        ),
+    ),
+    AllowedDifference(
+        "**.net",
+        "`net = amount - fee`, so the fee difference lands here by arithmetic "
+        "— the identity itself is enforced by the schema's CHECK and the "
+        "ledger invariants, not compared against the recording.",
+        predicate=lambda recorded, replayed: (
+            isinstance(recorded, int) and isinstance(replayed, int)
+        ),
+    ),
+    AllowedDifference(
+        "**.fee_details[*].amount",
+        "The fee breakdown's line-item amounts — the pricing difference "
+        "`**.fee` carries, one level down.",
+        predicate=lambda recorded, replayed: (
+            isinstance(recorded, int) and isinstance(replayed, int)
+        ),
+    ),
+    AllowedDifference(
+        "**.description",
+        "The dispute ledger rows' descriptions name the charge they belong "
+        "to — the id-only rule (recorded, cassettes 05 and 11). Predicated to "
+        "the two Chargeback forms so every other description stays "
+        "byte-exact.",
+        predicate=_dispute_bt_description_modulo_id,
+    ),
+    AllowedDifference(
+        "body.status",
+        "A balance transaction's settlement status: the recording account "
+        "marks dispute withdrawals available immediately, this world's T+2 "
+        "rule holds them pending under a frozen clock (Phase 11). No other "
+        "object's `status` can record `available`, so the predicate cannot "
+        "mask a status regression elsewhere.",
+        predicate=_bt_settlement_status,
+    ),
+    AllowedDifference(
+        "body.data[*].status",
+        "The list-bodies form of the settlement-status entry above.",
+        predicate=_bt_settlement_status,
+    ),
+    # The dispute settle collapse, met again on this slice's winning-evidence
+    # submit (the scenario-05 entries above carry the general declaration).
+    AllowedDifference(
+        "body.status",
+        "The settle collapse on the ledger slice's winning-evidence submit "
+        "(scenario 05's entries carry the declaration): live answers "
+        "`under_review` and resolves seconds later; the frozen clock settles "
+        "inside the call.",
+        scenario="11_ledger_payouts",
+        predicate=_settle_status,
+    ),
+    AllowedDifference(
+        "body.is_charge_refundable",
+        "The refund gate the settle collapse moves, on this slice's submit — "
+        "scenario 05's entry, scoped here the same way.",
+        scenario="11_ledger_payouts",
+        predicate=lambda recorded, replayed: (
+            (recorded is False and replayed is True) or (recorded is True and replayed is False)
+        ),
+    ),
+    AllowedDifference(
+        "body.source.status",
+        "The settle collapse seen through `expand[]=source` off a dispute's "
+        "withdrawal row: the inflated dispute body is one hop ahead the same "
+        "way its own body is.",
+        predicate=_settle_status,
+    ),
+    AllowedDifference(
+        "body.source.is_charge_refundable",
+        "The refund gate through the same expansion.",
+        predicate=lambda recorded, replayed: (
+            (recorded is False and replayed is True) or (recorded is True and replayed is False)
+        ),
+    ),
+    # The computed balance on the recording account is the account's whole
+    # pre-existing ledger — a CAD settlement account with a dispute history —
+    # where the replay's balance derives from the scenario's own objects
+    # alone. Whole-key entries, scoped to the one scenario that reads it.
+    AllowedDifference(
+        "body.available",
+        "The recording account's available balance is pre-existing account "
+        "state (its own CAD ledger), not scenario state; the replay's is "
+        "computed from the scenario's rows. Scoped to the scenario that "
+        "reads /v1/balance.",
+        scenario="11_ledger_payouts",
+    ),
+    AllowedDifference(
+        "body.pending",
+        "The pending half of the same computed-balance difference.",
+        scenario="11_ledger_payouts",
+    ),
+    AllowedDifference(
+        "body.refund_and_dispute_prefunding",
+        "The recorded account reports an all-zero prefunding block in its "
+        "settlement currency; this world has no prefunding ledger rows to "
+        "report and omits the key — spec-legal (only available/livemode/"
+        "object/pending are required), the spec-is-authority ruling.",
+        scenario="11_ledger_payouts",
+    ),
     # Scenario 3 exists to record what a malformed Stripe-Version answers.
     # The world deliberately serves one fixed version with no header channel
     # and no negotiation (functional spec §6.5), so the whole response —
@@ -862,6 +1405,322 @@ ALLOWED_DIFFERENCES: list[AllowedDifference] = [
         "replayed body is the normal pinned-version response for the same "
         "request.",
         scenario="03_malformed_stripe_version",
+    ),
+    # --- the subscriptions slice's reference pairs and periods (Phase 12) ---
+    AllowedDifference(
+        "**.latest_invoice",
+        "The first invoice's freshly minted `in_` id — the `**.id` rule on "
+        "the field a subscription's invoice reference lands on, predicated "
+        "to id-shaped pairs (and null pairs) so a real divergence fails.",
+        predicate=_both_prefixed_ids("in_"),
+    ),
+    AllowedDifference(
+        "**.subscription",
+        "A subscription_item's parent reference carries the minted `sub_` "
+        "id — the `**.id` rule, predicated.",
+        predicate=_both_prefixed_ids("sub_"),
+    ),
+    AllowedDifference(
+        "**.pending_setup_intent",
+        "The resume flow's SetupIntent id is minted per instance — the "
+        "`**.id` rule on the pause/resume machinery's reference.",
+        predicate=_both_prefixed_ids("seti_"),
+    ),
+    AllowedDifference(
+        "**.default_payment_method",
+        "A subscription's explicit default-method reference — minted `pm_` "
+        "ids both sides, predicated so a non-id divergence still fails.",
+        predicate=_both_prefixed_ids("pm_"),
+    ),
+    AllowedDifference(
+        "**.start_date",
+        "The subscription's start is the creation clock — the `**.created` "
+        "reasoning on the one timestamp field the suffix rule cannot catch "
+        "(`start_date` carries no `_at`).",
+        predicate=lambda recorded, replayed: (
+            isinstance(recorded, int) and isinstance(replayed, int)
+        ),
+    ),
+    AllowedDifference(
+        "**.billing_cycle_anchor",
+        "The anchor is the creation clock (or a caller timestamp, which "
+        "then compares equal); predicated to integer pairs so only the "
+        "clock-derived case is admitted.",
+        predicate=lambda recorded, replayed: (
+            isinstance(recorded, int) and isinstance(replayed, int)
+        ),
+    ),
+    AllowedDifference(
+        "**.current_period_start",
+        "An item's period opens at the subscription's clock-derived anchor "
+        "— the `**.created` reasoning on the period pair this version "
+        "carries per item (there is no subscription-level period).",
+        predicate=lambda recorded, replayed: (
+            isinstance(recorded, int) and isinstance(replayed, int)
+        ),
+    ),
+    AllowedDifference(
+        "**.current_period_end",
+        "An item's period closes one calendar interval past its start "
+        "(clock-derived) — the same reasoning as its start.",
+        predicate=lambda recorded, replayed: (
+            isinstance(recorded, int) and isinstance(replayed, int)
+        ),
+    ),
+    AllowedDifference(
+        "**.trial_start",
+        "A trial's start is the creation clock — `**.created` again, on "
+        "the field name the suffix rule cannot catch.",
+        predicate=lambda recorded, replayed: (
+            isinstance(recorded, int) and isinstance(replayed, int)
+        ),
+    ),
+    AllowedDifference(
+        "**.trial_end",
+        "A caller-supplied trial end compares equal; the `trial_end: "
+        '"now"` path derives the instant from the clock, which is the '
+        "only pair this entry admits.",
+        predicate=lambda recorded, replayed: (
+            isinstance(recorded, int) and isinstance(replayed, int)
+        ),
+    ),
+    # The live-only legacy echoes the pinned spec does not declare
+    # (recorded, Phase 12); the spec is the authority for shape.
+    AllowedDifference(
+        "**.plan",
+        "The live subscription and item bodies carry a legacy `plan` "
+        "object the pinned spec no longer declares; omitted here like "
+        "every other undeclared live field.",
+        predicate=lambda recorded, replayed: isinstance(recorded, dict) and replayed is None,
+    ),
+    AllowedDifference(
+        "body.quantity",
+        "The live subscription body's legacy top-level `quantity` echo "
+        "(item 0's quantity, probed present even on a two-item "
+        "subscription); undeclared at the pinned version and omitted. "
+        "Path-scoped so an item's own `quantity` still compares byte-exact.",
+        predicate=lambda recorded, replayed: isinstance(recorded, int) and replayed is None,
+    ),
+    AllowedDifference(
+        "body.data[*].quantity",
+        "The list-bodies form of the legacy subscription `quantity` echo.",
+        predicate=lambda recorded, replayed: isinstance(recorded, int) and replayed is None,
+    ),
+    AllowedDifference(
+        "**.current_trial",
+        "The live item body's `current_trial` echo; undeclared at the pinned version, omitted.",
+        predicate=lambda recorded, replayed: replayed is None,
+    ),
+    AllowedDifference(
+        "**.items.total_count",
+        "The live `items` envelope carries `total_count`, which the pinned "
+        "spec's nested list schema does not declare — the `charge.refunds` "
+        "ruling (Phase 9), omitted and allow-listed.",
+        predicate=lambda recorded, replayed: replayed is None,
+    ),
+    AllowedDifference(
+        "**.trial_settings.end_behavior.billing_cycle_anchor",
+        "The live trial_settings echo carries `billing_cycle_anchor: "
+        '"now"`, undeclared at the pinned version; omitted.',
+        predicate=lambda recorded, replayed: recorded == "now" and replayed is None,
+    ),
+    AllowedDifference(
+        "**.pending_update.cancel_at_period_end",
+        "The live pending_update echo carries `cancel_at_period_end` "
+        "(null), undeclared at the pinned version; this world's parked "
+        "update follows the schema's property set.",
+        predicate=lambda recorded, replayed: recorded is None and replayed is None,
+    ),
+    AllowedDifference(
+        "**.billing_mode.type",
+        "The recording account's dashboard default is flexible billing "
+        "mode; this world's constant is `classic` until the flexible-mode "
+        "phase (conformance scenario 1's business). Predicated to exactly "
+        "that pair.",
+        predicate=lambda recorded, replayed: recorded == "flexible" and replayed == "classic",
+    ),
+    AllowedDifference(
+        "**.billing_mode.flexible",
+        "The flexible-mode configuration object, present on the recording "
+        "account's bodies and null on this world's classic ones.",
+        predicate=lambda recorded, replayed: isinstance(recorded, dict) and replayed is None,
+    ),
+    AllowedDifference(
+        "**.pending_update.billing_cycle_anchor",
+        "The parked resume's anchor target: cassette 12's resume body parks "
+        "null where this world parks the instant the confirming SetupIntent "
+        "applies (`now` -> the resume moment, `unchanged` -> the stored "
+        "anchor). Predicated to that recorded-null/replayed-integer pair so "
+        "any other divergence on the field still fails.",
+        predicate=lambda recorded, replayed: recorded is None and isinstance(replayed, int),
+    ),
+    AllowedDifference(
+        "**.error.message",
+        "The duplicate-price refusal names the price id — the `**.id` rule "
+        "where the id is the message's whole variable content, narrowed to "
+        "the recorded form.",
+        predicate=_dup_price_modulo_id,
+    ),
+    # --- the invoices slice (Phase 13) ---
+    AllowedDifference(
+        "**.invoice",
+        "The id rule on the invoice reference a line, an invoiceitem or a "
+        "payment carries, predicated to `in_`-shaped string pairs.",
+        predicate=_both_prefixed_ids("in_"),
+    ),
+    AllowedDifference(
+        "**.invoice_item",
+        "The id rule on the invoiceitem reference a line's "
+        "`parent.invoice_item_details` names, predicated to `ii_`-shaped "
+        "pairs.",
+        predicate=_both_prefixed_ids("ii_"),
+    ),
+    AllowedDifference(
+        "**.pricing.price_details.price",
+        "An `amount`+`currency` invoice item mints a one-off price per "
+        "instance (the recorded mechanism, cassette 13) — the `**.id` rule "
+        "on the minted price a `pricing` block names, predicated to "
+        "`price_`-shaped pairs.",
+        predicate=_both_prefixed_ids("price_"),
+    ),
+    AllowedDifference(
+        "**.number",
+        "An invoice's number is `<customer prefix>-<sequence>`, and both "
+        "halves are per-instance mints (the prefix from `ctx.ids`, data_model "
+        "§3.13) — the `**.id` rule on the compound. Predicated to the "
+        "`AAAAAAAA-0000` shape on both sides so a real numbering regression "
+        "still fails.",
+        predicate=_invoice_number_pair,
+    ),
+    AllowedDifference(
+        "**.hosted_invoice_url",
+        "The hosted-invoice page URL embeds the recording account id and a "
+        "signed payload (normalized to a placeholder at record time); this "
+        "world derives a deterministic id-shaped URL the way credit_note.pdf "
+        "and receipt_url do.",
+        predicate=_recorded_placeholder_or_same,
+    ),
+    AllowedDifference(
+        "**.invoice_pdf",
+        "The invoice PDF URL — the same account-signed shape as "
+        "hosted_invoice_url, derived id-shaped here.",
+        predicate=_recorded_placeholder_or_same,
+    ),
+    AllowedDifference(
+        "**.period_start",
+        "A draft's zero-width period opens at the creation clock — the "
+        "`**.created` reasoning on the period pair, which carries no `_at` "
+        "suffix for the blanket rule to catch.",
+        predicate=lambda recorded, replayed: (
+            isinstance(recorded, int) and isinstance(replayed, int)
+        ),
+    ),
+    AllowedDifference(
+        "**.period_end",
+        "The period pair's closing half — the same clock reasoning.",
+        predicate=lambda recorded, replayed: (
+            isinstance(recorded, int) and isinstance(replayed, int)
+        ),
+    ),
+    AllowedDifference(
+        "**.period.start",
+        "A line's period opens at its source's clock (the invoice item's "
+        "`date`, the subscription item's period) — the `**.created` "
+        "reasoning inside the frozen `lines` JSON, where the field is a "
+        "nested key rather than a column.",
+        predicate=lambda recorded, replayed: (
+            isinstance(recorded, int) and isinstance(replayed, int)
+        ),
+    ),
+    AllowedDifference(
+        "**.period.end",
+        "A line's period closes at its source's clock — the same reasoning as its opening half.",
+        predicate=lambda recorded, replayed: (
+            isinstance(recorded, int) and isinstance(replayed, int)
+        ),
+    ),
+    AllowedDifference(
+        "**.date",
+        "`invoiceitem` has no `created`; `date` is the creation clock — "
+        "`**.created` under the field name the suffix rule cannot catch.",
+        predicate=lambda recorded, replayed: (
+            isinstance(recorded, int) and isinstance(replayed, int)
+        ),
+    ),
+    AllowedDifference(
+        "**.due_date",
+        "A send_invoice draft's due date is `created + days_until_due` — the "
+        "clock reasoning again (a caller-supplied absolute `due_date` compares "
+        "equal; only the derived pairs reach this entry's predicate).",
+        predicate=lambda recorded, replayed: (
+            isinstance(recorded, int) and isinstance(replayed, int)
+        ),
+    ),
+    AllowedDifference(
+        "**.next_payment_attempt",
+        "The scheduled first attempt on an auto-advancing draft is "
+        "`created + 3600s` (recorded, cassette 13) — the clock reasoning on "
+        "the one scheduled field the `*_at` suffix rule cannot catch.",
+        predicate=lambda recorded, replayed: (
+            isinstance(recorded, int) and isinstance(replayed, int)
+        ),
+    ),
+    AllowedDifference(
+        "**.account_country",
+        "The account-echo country is recording-account state ('CA'); this "
+        "world's static account defaults to 'US' until an account object "
+        "exists (Phase 21) — the same ruling as `**.billing_mode.type`.",
+        predicate=lambda recorded, replayed: (
+            isinstance(recorded, str) and isinstance(replayed, str)
+        ),
+    ),
+    AllowedDifference(
+        "**.account_name",
+        "The account-echo name is the recording account's own ('Seahaven "
+        "Sandbox'); this world's static account has none to source one from "
+        "and answers null.",
+        predicate=lambda recorded, replayed: (
+            (recorded is None or isinstance(recorded, str)) and replayed is None
+        ),
+    ),
+    AllowedDifference(
+        "**.rendering",
+        "The recording account's Dashboard fills `rendering` with its PDF "
+        "default on every manual invoice (recorded; null on its subscription "
+        "invoices); no dashboard exists here and the spec-legal null is "
+        "emitted — the `**.billing_mode.flexible` ruling.",
+        predicate=lambda recorded, replayed: (
+            (isinstance(recorded, dict) or recorded is None) and replayed is None
+        ),
+    ),
+    AllowedDifference(
+        "**.lines.total_count",
+        "The live `lines` envelope carries `total_count`, which the pinned "
+        "spec's nested list schema does not declare — the `items.total_count` "
+        "ruling (Phase 12), omitted here and allow-listed.",
+        predicate=lambda recorded, replayed: isinstance(recorded, int) and replayed is None,
+    ),
+    AllowedDifference(
+        "**.invoicing_rules",
+        "The live invoiceitem body carries `invoicing_rules: []`, a field the "
+        "pinned spec does not declare; omitted here like every other "
+        "undeclared live echo.",
+        predicate=lambda recorded, replayed: recorded == [] and replayed is None,
+    ),
+    AllowedDifference(
+        "**.amount_paid_off_stripe",
+        "The spec marks this field required and the live API omits it from "
+        "every recorded body (cassette 13); the spec's property set is the "
+        "authority for shape here, so this world emits the required 0 and the "
+        "pair is declared — the inverse of the usual live-only-echo entry.",
+        predicate=lambda recorded, replayed: recorded is None and replayed == 0,
+    ),
+    AllowedDifference(
+        "**.error.message",
+        "The Invoice Item 404 names the id it could not find inside Stripe's "
+        "own odd `(livemode=false)` spelling — the `**.id` rule where the id "
+        "is the message's whole variable content (recorded, cassette 13).",
+        predicate=_no_such_invoice_item_modulo_id,
     ),
 ]
 
@@ -970,6 +1829,220 @@ STRUCTURAL_DIFFERENCES: list[str] = [
     "Stripe's docs/support pointers, which this world has no dashboard to "
     "source — the suffix is the predicated `**.error.message` entry above, "
     "not a silent pass.",
+    "Dispute settlement is collapsed into the submitting call: live test "
+    "mode answers `winning_evidence` with `under_review` and resolves the "
+    "win asynchronously (~5 s, with `charge.dispute.funds_reinstated` then "
+    "`charge.dispute.closed`), and `losing_evidence` / "
+    "`escalate_inquiry_evidence` likewise. A frozen clock cannot wait out "
+    "issuer review, and `won`/`lost` must be reachable — the refund gate, "
+    "`is_charge_refundable` and the dispute eval all need them — so the "
+    "magic strings settle synchronously and the submit response differs by "
+    "exactly one status hop (scenario 05's scoped entries). `/close` is "
+    "synchronous even live and needs no entry.",
+    "Refund settlement events are not modeled: the live API emits a "
+    "`refund.updated` + `charge.refund.updated` pair per refund when the "
+    "acquirer reference becomes available (network timing), and flips "
+    "`destination_details.card.reference_status` pending → available with "
+    "it. This world's refunds never leave `pending`, so neither the events "
+    "nor the flip exist here; the recorded bodies' available-state fields "
+    "are predicated entries above.",
+    "The async refund cards never transition: charging `4000000000007726` "
+    "begins refunds `pending` (modeled — that is the documented initial "
+    "state) which live settles to `succeeded`, and `4000000000005126` "
+    "begins `succeeded` which live flips to `failed` with "
+    "`refund.failed`. A frozen clock fires neither transition, and the "
+    "bookkeeping counts settled refunds only (invariant I7), so a pending "
+    "refund here is a permanently open state an agent may cancel inside "
+    "the test-mode 30-minute window — which never closes either.",
+    "Dispute evidence enrichment is not modeled: Stripe fills "
+    "`evidence.customer_name`, `customer_email_address` and "
+    "`product_description` from the customer record and the charge "
+    "description without them being submitted (observed at the pinned "
+    "version, timing varying by dispute track). This world stores "
+    "submitted evidence verbatim; the predicated entries above carry the "
+    "recorded bodies' enriched values.",
+    "The payout success path is unrecordable on this account: the sandbox "
+    "has no external account in any currency (every create answers `Sorry, "
+    "you don't have any external accounts in that currency (cad).`), the "
+    "recording key cannot add one (`POST /v1/accounts/{id}/external_accounts` "
+    "→ 403 `more_permissions_required`), and top-ups are unsupported for its "
+    "country (probed, Phase 11). The payout create/cancel/reverse success "
+    "bodies, the draw-down and the wrong-state refusals are therefore "
+    "spec-derived and unit-tested (`tests/test_payouts.py`), not "
+    "cassette-pinned; cassette 11 carries every account-independent refusal "
+    "the endpoint answers.",
+    "The dispute fee rule the recordings pin, correcting functional spec §7: "
+    "the settled-won dispute carries exactly two rows — the withdrawal "
+    "(-amount, fee 1500, kept) and the reversal (+amount, fee 0) — with no "
+    "separate countered-fee row and no fee refund on the win (cassette 05, "
+    "re-read on cad-native rows in cassette 11). The spec's two-fee sentence "
+    "is corrected in the same phase per the implementation plan's recipe.",
+    "The plain-`currency` parameter refusal is transcribed from the live "
+    "payout endpoint (Phase 11 probe) — the same maintenance choice as the "
+    "map-parameter list above, and a different list: the payout spelling "
+    "carries no `eurc`/`usdt`/`open_usd` and no trailing period. Its "
+    "freshness is a declared property, not a replay-checked one.",
+    "Instant payouts draw `instant_available`, a bucket no money path in "
+    "this world fills; `method: instant` is accepted and draws the ordinary "
+    "available balance instead. The `instant_available` bucket itself is "
+    "omitted from /v1/balance while empty (spec-optional), so the "
+    "substituted draw is unobservable through the tools.",
+    "The resume flow's SetupIntent lifecycle: live mints it (at trial "
+    "create without a payment method, reused by /resume) and it reads "
+    "`canceled` moments later, refusing its own confirm — an async expiry "
+    "a frozen clock cannot reproduce and no tool could survive. This "
+    "world's seti is a real requires-confirmation row: confirming it pays "
+    "the cycle invoice and applies the parked update (`paused` -> `active`, "
+    "the documented mechanism), which is the unit-tested path the recording "
+    "cannot carry (`tests/billing/test_subscription_machine.py`).",
+    "The recorded pause collapses each item's period to the pause instant "
+    "(`[trial_start, pause_moment)`); under a frozen clock that instant "
+    "equals the trial start and the schema's "
+    "`current_period_start < current_period_end` CHECK forbids a "
+    "zero-length period, so the items keep their `[start, trial_end)` "
+    "periods. The honest frozen-clock analog, declared here (Phase 12).",
+    "The decline-card subscription creation is **not recorded**, and this "
+    "round's probe closed the last apparent route to it: every decline-table "
+    "token except `4000000000000341` refuses attach (probed, Phase 6), "
+    "`…0341` has no token spelling (probed, Phase 12), and the raw PAN is "
+    "refused by the recording account itself (402, 'Sending credit card "
+    "numbers directly to the Stripe API is generally unsafe…' — Phase 6's "
+    "declaration; re-confirmed against a subscription flow, Phase 12 CR "
+    "round). No step on this account can reach a subscription whose first "
+    "charge declines; recording one needs a host whose account enables raw "
+    "card data. The `incomplete`-by-decline branch (open invoice, "
+    "attempt_count advanced, `invoice.payment_failed`, sub `incomplete`) is "
+    "spec-derived and unit-tested; cassette 12 carries the 3DS flavor, "
+    "which the `tok_threeDSecure2Required` token reaches.",
+    "A future `billing_cycle_anchor` on create is refused here until the "
+    "proration phase: the stub-period first invoice bills a flexible-mode "
+    "fraction (116 recorded for a $30/10-day stub — the recording "
+    "account's own mode) whose arithmetic conformance scenario 1 exists to "
+    "settle. `billing_cycle_anchor` on update is the same cut (`now` "
+    "truncates and prorates).",
+    "Subscription invoice events are deferred to the invoices phase: an "
+    "event's data.object is the verbatim serialized object "
+    "(cross_cutting §3.4.3), and the invoice serializer is Phase 13's. The "
+    "invoice rows themselves are written now (creation, trial, resume, "
+    "advance_cycle); only their `invoice.*` emissions wait.",
+    "Item-level proration is the proration phase's span: item "
+    "create/update/delete and `proration_behavior` are accepted and "
+    "validated, and no proration lines are generated until Phase 14 lands "
+    "`proration_lines` (implementation plan Phase 14: 'the behavior "
+    "spanning Phases 12 and 13').",
+    "The recorded pending_update's `billing_cycle_anchor` disagrees "
+    "between recordings (null in cassette 12's resume body, a timestamp in "
+    "the ad-hoc probe); this world parks the anchor the confirming "
+    "SetupIntent will apply — `now` resolves to the resume instant, "
+    "`unchanged` to the stored anchor — where the cassette parks null. The "
+    "predicated `**.pending_update.billing_cycle_anchor` entry carries the "
+    "pair the replay diff sees.",
+    "`/v1/invoices/create_preview` and `/v1/invoices/{id}/attach_payment` "
+    "stay unwired (Phase 13's declared scope cuts): the preview surface is a "
+    "never-stored sub-API of its own (and `billing_reason: upcoming` is "
+    "never stored, as ever), and attach_payment was not recorded this "
+    "round. Dispatching either is an honest WorldBug naming the op_id, the "
+    "same mid-build honesty every unwired route answers with.",
+    "The invoiceitem create surface is narrowed to `amount`+`currency` "
+    "(plus description/discountable/period/quantity/tax_rates/metadata/ "
+    "invoice): `price_data`, `pricing`, `discounts`, `tax_code`, "
+    "`tax_behavior`, `unit_amount_decimal`, `quantity_decimal`, "
+    "`subscription` and `customer_account` are cut at the parameter layer "
+    "(cassette 13 records the amount+currency mechanism, whose one-off "
+    "price mint is reproduced). The invoice create/update surface likewise "
+    "cuts the Connect/shipping/rendering/custom-fields/`from_invoice`/"
+    "`automatically_finalizes_at`-parameter family, and `/pay` cuts "
+    "`mandate`/`off_session`/`source`/`payment_method` — this world's pay "
+    "resolves the recorded default-method chain (subscription default, "
+    "then the customer's `invoice_settings`).",
+    "`invoice_payment.paid` is not emitted: the `invoice_payment` object is "
+    "out of scope (no payments sub-resource exists here), and the pair "
+    "`invoice.payment_succeeded` + `invoice.paid` carries the payment the "
+    "machine table names. `invoiceitem.updated` is not emitted either — "
+    "it is absent from the closed 266-entry event set, so Stripe's own "
+    "catalog emits none.",
+    "The wrong-state invoice refusals are the recorded no-`code` spellings "
+    "(cassette 13), correcting billing_engine's table: re-finalize answers "
+    "\"This invoice is already finalized, you can't re-finalize a non-draft "
+    'invoice.", delete non-draft "You can only delete draft invoices.", '
+    'void/mark-uncollectible "You can only pass in open invoices. This '
+    'invoice isn\'t open." (and re-mark "This invoice has already been '
+    'marked uncollectible."), void-paid "Invoices with `paid` payments '
+    'cannot be voided.", re-pay "Invoice is already paid", and the '
+    "field-update-on-finalized family \"Finalized invoices can't be updated "
+    'in this way" — `invoice_not_editable` survives only on the line '
+    "endpoints' refusal, and `status_transition_invalid` nowhere. "
+    "`metadata` updates succeed on any status (recorded on paid).",
+    "Deleting a draft invoice does NOT release its swept invoice items "
+    "back to pending (recorded, cassette 13 steps 23-24 and 62-63 — "
+    "correcting billing_engine §2): they stay attached to the dead "
+    "invoice id, refuse later deletes (\"Can't delete an invoice item that "
+    'is attached to an invoice that is no longer editable"), read as '
+    'deleted on update ("This invoice item has been deleted."), and '
+    "`pending=true` no longer lists them. The `invoiceitems.invoice` FK "
+    "was therefore dropped to a bare column — the recorded state outlives "
+    "its parent row.",
+    "The draft window's exact offsets are recorded facts, not the "
+    "documented 'about an hour': `automatically_finalizes_at = created + "
+    "3601s` (the ceil of the un-floored creation instant) and "
+    "`next_payment_attempt = created + 3600s` (its floor) — one second "
+    "apart on the wire (cassette 13, recorded twice). Recomputed from "
+    "`created`, never from the update moment, when `auto_advance` is "
+    "cleared and re-set on a draft.",
+    "An unparameterized manual create excludes pending invoice items "
+    "(recorded, cassette 13 step 11 — the API's `include` default is a "
+    "dashboard concept); `include` sweeps the customer's pending items "
+    "matching the invoice's currency, regardless of period — the invoice's "
+    "own zero-width period bounds nothing (correcting billing_engine "
+    "§3.1.1's period-bounded sweep), and one currency per invoice is "
+    "Stripe's own invariant, so mismatched items stay pending for a later "
+    "invoice of their own (the currency bound is unprobed and declared; "
+    "the unparameterized currency follows the newest pending item). The "
+    "swept order is newest-first, and a later `add_lines` line is simply "
+    "the newest pending item — the spec's three-bucket line order collapses "
+    "to two (invoice items newest-first, then subscription items "
+    "newest-first).",
+    "Line `quantity` is a multiplier, not a no-op (CR round's ruling): a "
+    "line bills its row's unit amount x quantity, so a quantity-only edit "
+    "on `update_lines`/`lines/{id}` recomputes the line and an "
+    "invoiceitem create's quantity multiplies through the sweep. On "
+    "`add_lines` quantity can never multiply — beside `amount` it is the "
+    "recorded XOR refusal and alone it has no unit amount (live pairs it "
+    "with `price_data`, which this surface cuts), so the binder's "
+    "missing-parameter refusal answers a quantity-only add. The one-off "
+    "price/product mint behind an `amount`+`currency` item emits the "
+    "catalog's own `product.created`/`price.created` pair (the rows are "
+    "ordinary catalog rows, product-first per cassette 07); an amount "
+    "edit's re-mint writes only the price against the SAME product "
+    "(recorded, cassette 13 step 33) and emits `price.created` alone.",
+    "Every draft-mutating path rebuilds the lines and emits "
+    "`invoice.updated` on change — `add_lines`, `update_lines`, "
+    "`remove_lines`, the single-line `lines/{id}` update, and an "
+    "invoiceitem create with `invoice=`. The family's invoice-level "
+    "emission is consistent-with-siblings-unprobed: the cassette pins the "
+    "bodies, not the events, and `invoice.updated` fires only when the "
+    "serialized body actually changed (a no-op edit answers 200 and "
+    "writes no event row).",
+    "`/pay` on a draft finalizes and collects inside the one call "
+    "(recorded, cassette 13 step 25), and `paid_out_of_band: true` settles "
+    "without an attempt at all — `attempted` stays false (step 61). A $0 "
+    "finalization settles to `paid` with `attempted: true, attempt_count: "
+    "0` inside the finalizing call (steps 36/43/49/57); a nonzero plain "
+    "finalize attempts nothing (`attempted` stays false, step 45) — "
+    "collection is the auto-advance machinery's business, which a frozen "
+    "clock never runs. Paying flips `auto_advance` false (step 62); "
+    "finalizing preserves it (step 60).",
+    "The invoice body's account echoes and PDF artifacts: `rendering` is "
+    "null here (the recording account's dashboard default object is "
+    "account state), `account_country`/`account_name` come from the "
+    "instance's static account config ('US'/null by default — Phase 21 "
+    "may make them configurable), `webhooks_delivered_at` mirrors "
+    "`created`, `hosted_invoice_url`/`invoice_pdf` are deterministic "
+    "id-shaped URLs from finalization on, and `payments`/`threshold_reason`/"
+    "`confirmation_secret` are omitted (none is ever non-empty here). "
+    "`parent.subscription_details.metadata` is the subscription's own "
+    "metadata, not a separately stored finalization snapshot (no second "
+    "copy exists; `{}` when the subscription carries none).",
 ]
 
 # --- Matching --------------------------------------------------------------------

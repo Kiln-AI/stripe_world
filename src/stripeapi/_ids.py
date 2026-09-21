@@ -41,7 +41,9 @@ STRIPE_ID_PREFIXES: dict[str, str] = {
     "payment_intent": "pi_",
     "charge": "ch_",
     "refund": "re_",
-    "dispute": "dp_",
+    # Probed 2026-09-20 at the pinned version: live disputes mint `du_…`
+    # (Phase 9 cassette 05), not stripe-mock's older `dp_` fixtures.
+    "dispute": "du_",
     "setup_intent": "seti_",
     "balance_transaction": "txn_",
     "payout": "po_",

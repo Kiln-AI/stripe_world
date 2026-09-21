@@ -614,6 +614,12 @@ places to get it wrong. An alias whose path carries an extra id — `{customer}`
 aliases, `{charge}` on the refund aliases — also asserts the child belongs to that parent and answers
 `resource_missing` naming the child if it does not.
 
+**One recorded correction (Phase 9):** `POST /v1/charges/{charge}/refund` answers with the
+**charge**, not the refund — probed at the pinned version, while its plural sibling
+`…/refunds` answers with the refund. "Same function" therefore means *same core*: the
+singular alias wraps the shared refund-create core and returns the serialized charge, which is
+why it carries its own two-line handler instead of `PostRefunds`'s verbatim.
+
 Functional spec §3.2 lists what is not routed and does *not* name the
 `/v1/customers/{customer}/subscriptions*` family, so they are in; the research document's
 recommendation to cut them was not adopted, and cutting them now would break the 148.

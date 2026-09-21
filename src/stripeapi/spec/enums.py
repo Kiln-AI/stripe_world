@@ -6,9 +6,11 @@ MIT licence; see THIRD_PARTY_LICENSES.md.
 DOC_ONLY_ENUMS: the six fields whose closed value set exists only in
 the spec's description prose (no machine-readable `enum`),
 hand-transcribed from resource-inventory.md's citations. The schema's
-CHECK constraints read this; `setup_intent.usage` is deliberately
-absent there — an open string with a documented default, not a closed
-set (components/discovery.md §5).
+CHECK constraints read this; `setup_intent.usage` is not one of the
+six — its closed set is this project's declaration — but its DDL
+CHECK ships all the same (data_model.md §12's seven-row table), and
+Phase 10's recording adds that the parameter itself is dead at the
+pinned version: accepted and ignored, `off_session` every time.
 
 ENUM_OVERRIDES: the schema-conformance validator's superset — those
 six plus every further closure field whose description genuinely

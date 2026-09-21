@@ -82,6 +82,12 @@ class ListFilter:
     # A `kind="json"` filter's accepted subfields, as body-shaped `Param`s:
     # `prices?recurring[interval]=month` is one of these.
     sub_shape: tuple[Param, ...] = ()
+    # Values with one of these prefixes answer an empty page rather than a
+    # match. The one live quirk that needs it (probed, Phase 11):
+    # `GET /v1/balance_transactions?source=<dispute>` answers `[]` even
+    # though the withdrawal row's own `source` field names the dispute — the
+    # filter never matches dispute ids, whatever the field carries.
+    never_prefixes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,6 +161,8 @@ class ResourceSpec:
     # "customer" is both). None means the discriminator.
     error_name: str | None = None
     list_filters: tuple[ListFilter, ...] = ()
+    # The one oldest-first list (probed, Phase 12): `subscription_items`.
+    list_ascending: bool = False
     creatable: ParamSpec | None = None
     updatable: ParamSpec | None = None
     delete: DeleteSpec | None = None
@@ -218,15 +226,20 @@ def page(
     limit: int,
     starting_after: str | None,
     ending_before: str | None,
+    ascending: bool = False,
 ) -> ListPage:
     """One page, cut by at most one cursor. Raises for a bad cursor; never writes.
 
     Ordering is `x_seq DESC` — a total order under a frozen clock, where
-    `created` alone is not (`components/data_model.md` §3.11). `has_more` means
+    `created` alone is not (`components/data_model.md` §3.11) — except for
+    the one resource the live API lists oldest-first (probed, Phase 12:
+    `GET /v1/subscription_items` and the subscription's `items` envelope
+    both carry creation order), which passes `ascending=True` and gets the
+    same cursor semantics with the scan flipped. `has_more` means
     "at least one more object in the direction of travel": older objects for a
     default or `starting_after` page, newer ones for `ending_before`, whose
-    ascending scan is reversed in Python so `data` is newest-first whichever
-    cursor produced it.
+    opposite-direction scan is reversed in Python so `data` is in the page's
+    own order whichever cursor produced it.
     """
     clauses = list(where)
     binds: list[Any] = list(params)
@@ -251,19 +264,25 @@ def page(
             pre_execution=True,
         )
     if after_seq is not None:
-        clauses.append("x_seq < ?")
+        clauses.append(f"x_seq {'>' if ascending else '<'} ?")
         binds.append(after_seq)
     if before_seq is not None:
-        clauses.append("x_seq > ?")
+        clauses.append(f"x_seq {'<' if ascending else '>'} ?")
         binds.append(before_seq)
     where_sql = f" WHERE {' AND '.join(clauses)}" if clauses else ""
-    direction = "ASC" if before_seq is not None else "DESC"
+    # The scan direction: the list's own order for a default or
+    # `starting_after` page, the opposite for `ending_before`, whose page is
+    # then reversed back into the list's order in Python.
+    scan_asc = ascending
+    if before_seq is not None:
+        scan_asc = not ascending
+    direction = "ASC" if scan_asc else "DESC"
     rows = ctx.db.rows(
         f"SELECT * FROM {table}{where_sql} ORDER BY x_seq {direction} LIMIT ?", *binds, limit + 1
     )
     has_more = len(rows) > limit
     chosen = rows[:limit]
-    if ending_before is not None:
+    if scan_asc != ascending:
         chosen = list(reversed(chosen))
     return ListPage(rows=chosen, has_more=has_more)
 
@@ -446,6 +465,11 @@ def list_(ctx: seahaven.Ctx, req: Request) -> dict[str, Any]:
         value = req.params[flt.name]
         if flt.references is not None:
             _require_filter_reference(ctx, flt, value)
+        if flt.never_prefixes and isinstance(value, str) and value.startswith(flt.never_prefixes):
+            # The `never_prefixes` quirk: the filter refuses to match these
+            # values at all, so the page is empty rather than filtered.
+            where.append("1 = 0")
+            continue
         if flt.kind == "range":
             for op, bound in value.items():
                 where.append(f"{flt.column} {_RANGE_SQL[op]} ?")
@@ -484,6 +508,7 @@ def list_(ctx: seahaven.Ctx, req: Request) -> dict[str, Any]:
         limit=req.page.limit,
         starting_after=req.page.starting_after,
         ending_before=req.page.ending_before,
+        ascending=spec.list_ascending,
     )
     return one_page.envelope(req.path, lambda row: spec.serializer(ctx, row))
 

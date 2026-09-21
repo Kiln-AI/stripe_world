@@ -60,7 +60,9 @@ def test_the_succeeded_charge_body(instance: seahaven.Instance) -> None:
     assert ch["calculated_statement_descriptor"] == "Stripe"
     assert ch["fraud_details"] == {}
     assert ch["metadata"] == {}
-    assert ch["balance_transaction"] is None  # the ledger is Phase 11's
+    # the capture's ledger row, written synchronously (Phase 11)
+    assert isinstance(ch["balance_transaction"], str)
+    assert ch["balance_transaction"].startswith("txn_")
     assert ch["receipt_url"] == f"https://pay.stripe.com/receipts/payment/{ch['id']}"
     # absent-by-recording: refunds is expand-only at this version
     assert "refunds" not in ch

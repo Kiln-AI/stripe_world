@@ -300,7 +300,7 @@ in shape and simpler to assert.
 | `payment_intent` | `pi_` | |
 | `charge` | `ch_` | |
 | `refund` | `re_` | |
-| `dispute` | `dp_` | |
+| `dispute` | `du_` | Probed 2026-09-20 at the pinned version (Phase 9): live disputes mint `du_…`, correcting the stripe-mock `dp_` this table first carried. |
 | `setup_intent` | `seti_` | |
 | `balance_transaction` | `txn_` | |
 | `payout` | `po_` | |
@@ -1028,7 +1028,11 @@ CREATE TABLE invoiceitems (
     discountable     INTEGER NOT NULL DEFAULT 1 CHECK (discountable IN (0, 1)),
     discounts        TEXT CHECK (discounts IS NULL OR (json_valid(discounts) AND json_type(discounts) = 'array')),
     frozen_fields    TEXT CHECK (frozen_fields IS NULL OR (json_valid(frozen_fields) AND json_type(frozen_fields) = 'array')),
-    invoice          TEXT REFERENCES invoices (id),
+    -- Bare, deliberately (recorded, Phase 13): deleting a draft invoice does NOT
+    -- release its swept items — they stay attached to the dead id, refuse later
+    -- deletes, and read as deleted on update. A REFERENCES clause would refuse
+    -- exactly that; the parent lookup is the writer's job.
+    invoice          TEXT,
     metadata         TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata) AND json_type(metadata) = 'object'),
     net_amount       INTEGER,
     parent           TEXT CHECK (parent IS NULL OR (json_valid(parent) AND json_type(parent) = 'object')),
@@ -1441,6 +1445,12 @@ The six the brief names, with the exact description each set is read from:
 | `refund.status` | `string`, nullable | `pending, requires_action, succeeded, failed, canceled` | "This can be …" |
 | `balance_transaction.status` | `string`, REQ | `available, pending` | "which are either `available` or `pending`" |
 | `setup_intent.usage` | `string`, REQ | `on_session, off_session` | "Use `on_session` if … Use `off_session` if …", default `off_session` |
+
+**Recording correction (Phase 10, 2026-09-20):** the `usage` *parameter* is dead at the pinned
+version — live test mode accepts `on_session`, and even invalid strings, with 200 and answers
+`off_session` on every body, create and update alike (cassette 10). The emitted value is therefore
+always `off_session`; the column keeps its `CHECK` (the closed set still governs what may be
+stored) and the parameter is accepted-and-ignored.
 
 Each of the seven rows above becomes a `CHECK (col IN (…))` in the DDL, written out above. **Note
 that is seven fields, not six** — the brief and functional spec §4 count `payout.status`/`method`/
