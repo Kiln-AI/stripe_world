@@ -9,6 +9,7 @@ research/repos/
 
 .env.agent
 .env
+.mcp.json
 
 # The world checkout's own ignores (from `seahaven new`).
 .venv/
