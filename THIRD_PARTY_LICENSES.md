@@ -1,8 +1,8 @@
 # Third-party licenses
 
-## Stripe OpenAPI specification (`src/stripeapi/spec/spec3.min.json`)
+## Stripe OpenAPI specification (`src/seahaven_stripe_world/spec/spec3.min.json`)
 
-`src/stripeapi/spec/` contains a pruned, transformed subset of Stripe's OpenAPI
+`src/seahaven_stripe_world/spec/` contains a pruned, transformed subset of Stripe's OpenAPI
 specification, generated from <https://github.com/stripe/openapi> at API
 version `2026-08-26.dahlia` (provenance: `research/MANIFEST.md`). Stripe's
 field names, enum values, descriptions and object shapes are functional API

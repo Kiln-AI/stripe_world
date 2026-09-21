@@ -375,7 +375,7 @@ def raising(ctx) -> dict:
 
 **Why it is a finding rather than our bug to fix.** The alternatives in world code are all worse: catching inside the tool (commits the partial writes the raise was supposed to discard — the exact hazard the boundary design exists to avoid), or demoting the log level from world code (world code cannot; the handler is `invoke`'s). What is wanted is small and framework-shaped: either a documented "expected exception" marker a middleware-handled class can carry (`invoke` skips or demotes the log for it), or the log moved to the chain's outer boundary so a middleware that converts an exception into a result also converts the log line. Until then this is a declared ops note for anyone running long rollouts against this world: ERROR-level entries with Stripe envelopes in the transcript are noise by construction, and the filter is "did the call return or raise."
 
-**Where the code points at it.** `src/stripeapi/middleware/stripe_envelope.py`'s `except StripeApiError` branch carries a comment referencing this entry.
+**Where the code points at it.** `src/seahaven_stripe_world/middleware/stripe_envelope.py`'s `except StripeApiError` branch carries a comment referencing this entry.
 
 ---
 
@@ -440,5 +440,15 @@ to copy the real product's instructions; it should say *name and instructions* �
 server's `serverInfo.name` and copy that too, for the same reason and in the same breath. A world
 that emulates a product and sets only one of the two ships a handshake that half-announces itself.
 
-**Where the code points at it.** `src/seahaven_stripe_world/world.py` carries the comment on
-`name=`, and `AGENTS.md` records why the world's name has not moved yet.
+**Resolved in Seahaven (2026-09-21), at `8bfd3cb`.** `World(mcp_server_name=...)` exists, defaults
+to `world.name` so nothing changes for a world that does not set it, and is validated separately
+from `name` — deliberately not held to `names.why_not_a_name`, because a real product's server name
+is free to carry capitals, spaces and `&`, and only blank and over-long are refused. The authoring
+docs took the other half: the section now opens on both arguments and says *"A world that emulates
+a real product has **both** of these to copy"*, with `World(name=...)` described beside it as a
+different name for a different reader.
+
+This world took it immediately: `World(name="seahaven_stripe_world", mcp_server_name="stripe-mcp")`.
+That is the whole point of the split — the card, the sidecars and the import path disclose what this
+is, and the handshake says what Stripe's own server says. The fixture `empty` was refrozen so its
+sidecar stops naming the old world; its bytes are unchanged.

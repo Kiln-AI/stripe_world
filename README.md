@@ -31,9 +31,10 @@ with seahaven_stripe_world.world.instance("empty") as instance:
 
 Serve it over OpenEnv with `uv run seahaven serve`, list its fixtures with
 `uv run seahaven fixture list`, and run its tests with `uv run pytest`. No `--world` anywhere: the
-distribution (`seahaven-stripe-world`) normalises to the package (`seahaven_stripe_world`), which is
-what the CLI's and the pytest plugin's project-name convention expects. The world's own name is
-`stripeapi`: three names, two audiences, explained in AGENTS.md.
+distribution (`seahaven-stripe-world`) normalises to the package and world name
+(`seahaven_stripe_world`), which is what the CLI's and the pytest plugin's project-name convention
+expects. Those names disclose what this is; the name the agent reads on the MCP handshake is
+Stripe's own (`mcp_server_name="stripe-mcp"`). AGENTS.md has the rule.
 
 ## Conventions
 

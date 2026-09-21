@@ -5,8 +5,20 @@ import seahaven_stripe_world
 
 def test_importing_the_package_builds_the_world() -> None:
     """The tooling finds a world by importing its package and reading `world`."""
-    assert seahaven_stripe_world.world.name == "stripeapi"
+    assert seahaven_stripe_world.world.name == "seahaven_stripe_world"
     assert seahaven_stripe_world.world.pinned_state_format == "seahaven.state/1"
+
+
+def test_the_two_names_face_opposite_audiences() -> None:
+    """The world's name discloses; the MCP server's name is Stripe's own.
+
+    Asserted rather than left to the comments in `world.py`, because the split is
+    the whole of this world's naming rule and a well-meaning edit that collapses
+    the two names back into one would otherwise pass: `mcp_server_name` defaults
+    to `name`, so deleting the argument is silent.
+    """
+    assert seahaven_stripe_world.world.name == "seahaven_stripe_world"
+    assert seahaven_stripe_world.world.mcp_server_name == "stripe-mcp"
 
 
 def test_the_chain_is_error_handler_then_stripe_envelope_then_idempotency() -> None:

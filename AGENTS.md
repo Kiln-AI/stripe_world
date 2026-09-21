@@ -50,18 +50,19 @@ and every workaround in the code carries a comment linking to its entry there.
   return it, never raise it. Seahaven errors (`errors.py`) are authoring mistakes: an unusable
   `method`, a malformed parameter object. Raise loses the writes, return keeps them.
 - **JSON TEXT columns** are written only through `_json.dumps`, so fixture bytes are reproducible.
-- **Three names, two audiences.** The distribution `seahaven-stripe-world` and the package
-  `seahaven_stripe_world` are what humans, PyPI, an OpenEnv hub and a coding agent see: they say
-  *synthetic Seahaven world* and never impersonate Stripe. What the **tool-calling agent** sees is
-  neither of them — it is the tool names (`stripe_api_*`), the id prefixes, the field names and the
-  error envelopes, and that surface is deliberately faithful to Stripe. The world's own name,
-  `stripeapi` in `world.py`, currently straddles both: it is the OpenEnv card's name *and*, at the
-  pinned Seahaven, the MCP `serverInfo.name` (`mcp/server.py`, `Server(name=resolved.name)`). It
-  moves to `seahaven-stripe-world` once the framework gains `mcp_server_name`, which will carry
-  `stripe-mcp` for the agent; until then, changing it alone would leak the disclosure name into the
-  agent's handshake. `stripeapi` also survives in one frozen place: `@conformance.stripeapi.invalid`,
-  the reserved email domain recorded into the conformance cassettes. Never rewrite it — it would
-  mean re-recording every cassette against live Stripe.
+- **Names are split by audience, and the split is load-bearing.** Everything a person, a hub or a
+  coding agent reads says *synthetic Seahaven world* and never impersonates Stripe: the
+  distribution `seahaven-stripe-world`, the package and world name `seahaven_stripe_world` (one
+  name, two spellings — the normalisation the CLI's own discovery does), the OpenEnv card, the
+  `world:` field in every fixture sidecar. Everything the **tool-calling agent** reads is Stripe's,
+  verbatim: `World(mcp_server_name="stripe-mcp")` on the MCP handshake, the `stripe_api_*` tool
+  names, the id prefixes, the field names, the error envelopes. Adding a name means deciding which
+  side of that line it falls on first. The world name is spelled with underscores because an added
+  world's default alias is its name, and an alias is lowercase letters, digits and single
+  underscores — `seahaven-stripe-world` would be legal as a world name and illegal as the alias.
+  One last `stripeapi` survives, frozen: `@conformance.stripeapi.invalid`, the reserved email
+  domain recorded into the conformance cassettes. Never rewrite it — it would mean re-recording
+  every cassette against live Stripe.
 - **This repo is the world checkout**: `pyproject.toml` and `src/seahaven_stripe_world/` at the root, beside
   `specs/` and `research/`. The framework is not vendored here: the bare `seahaven` requirement
   resolves through `[tool.uv.sources]` to `github.com/Kiln-AI/Seahaven` at a pinned full commit
