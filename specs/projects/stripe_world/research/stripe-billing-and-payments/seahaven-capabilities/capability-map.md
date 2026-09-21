@@ -1,5 +1,11 @@
 # Seahaven capability map
 
+> **Path note (added later).** This document was written while Seahaven was vendored in this
+> repository at `vendor/Seahaven/`. It is now a git dependency pinned to a full commit SHA in
+> `[tool.uv.sources]`, and the directory is gone. Read every `vendor/Seahaven/…` path below
+> against `github.com/Kiln-AI/Seahaven` with that prefix dropped; the findings themselves are
+> unchanged, recorded against the commit that was vendored at the time.
+
 An architect-facing map of what the vendored framework (`vendor/Seahaven`, package version
 `0.0.1`, found at `vendor/Seahaven/pyproject.toml:9-10`) actually provides. Every claim below is
 either a verbatim quote from the bundled docs (`vendor/Seahaven/src/seahaven/docs/`), a reading of

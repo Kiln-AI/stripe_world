@@ -1,4 +1,0 @@
-CREATE TABLE stalls (
-    id TEXT PRIMARY KEY,
-    trader TEXT NOT NULL
-) STRICT;

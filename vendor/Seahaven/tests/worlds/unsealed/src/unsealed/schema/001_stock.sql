@@ -1,4 +1,0 @@
-CREATE TABLE stock (
-    id TEXT PRIMARY KEY,
-    quantity INTEGER NOT NULL
-) STRICT;

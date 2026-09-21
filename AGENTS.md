@@ -49,9 +49,14 @@ and every workaround in the code carries a comment linking to its entry there.
   `method`, a malformed parameter object. Raise loses the writes, return keeps them.
 - **JSON TEXT columns** are written only through `_json.dumps`, so fixture bytes are reproducible.
 - **This repo is the world checkout**: `pyproject.toml` and `src/stripeapi/` at the root, beside
-  `specs/`, `research/` and `vendor/Seahaven` (the framework, installed editable — see
-  `[tool.uv.sources]`). `pydantic` is pinned to 2.12.3 per `SEAHAVEN_FINDINGS.md` Entry 1; do not
-  remove the pin without reading that entry.
+  `specs/` and `research/`. The framework is not vendored here: the bare `seahaven` requirement
+  resolves through `[tool.uv.sources]` to `github.com/Kiln-AI/Seahaven` at a pinned full commit
+  SHA, so `uv sync` installs the same core every time and moving it is one reviewable edit to that
+  `rev` plus a `uv lock`. Never a branch or tag there — a moving ref changes the core underneath a
+  green suite with nothing in history to say when. The repository is private, so a checkout without
+  HTTPS read access to it cannot sync (the failure surfaces inside `uv sync` as a git auth error).
+  `pydantic` is pinned to 2.12.3 per `SEAHAVEN_FINDINGS.md` Entry 1; do not remove the pin without
+  reading that entry.
 
 ## Stripe MCP Usage
 

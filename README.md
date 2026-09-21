@@ -42,5 +42,8 @@ Every `seahaven` subcommand needs `--world stripeapi:world`, because the distrib
 - **Ids** are Stripe-shaped (`cus_…`, `pi_…`, `ch_…`), minted by `_ids.stripe_id` from
   `ctx.ids.random`, so a seed replays a run exactly.
 - **Money** is integer minor units; rates are TEXT decimal literals. No floats in the money path.
-- **The framework** is the vendored `vendor/Seahaven`, installed editable; `pydantic` is pinned to
-  2.12.3 per `SEAHAVEN_FINDINGS.md` Entry 1.
+- **The framework** is `seahaven`, taken from its own (private) repository at a pinned commit —
+  `[tool.uv.sources]` in `pyproject.toml` holds the full SHA, and `uv.lock` records the resolution.
+  A checkout that cannot read `github.com/Kiln-AI/Seahaven` over HTTPS cannot sync. `pydantic` is
+  pinned to 2.12.3 per `SEAHAVEN_FINDINGS.md` Entry 1. The framework's docs ship inside the
+  installed package: `uv run seahaven docs` prints the directory.

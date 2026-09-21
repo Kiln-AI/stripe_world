@@ -1,5 +1,11 @@
 # Research Plan: Stripe Billing & Payments Core (for a Seahaven world)
 
+> **Path note (added later).** This document was written while Seahaven was vendored in this
+> repository at `vendor/Seahaven/`. It is now a git dependency pinned to a full commit SHA in
+> `[tool.uv.sources]`, and the directory is gone. Read every `vendor/Seahaven/…` path below
+> against `github.com/Kiln-AI/Seahaven` with that prefix dropped; the findings themselves are
+> unchanged, recorded against the commit that was vendored at the time.
+
 ## Goal
 
 Ground the functional spec and architecture for the Seahaven Stripe world in primary sources rather

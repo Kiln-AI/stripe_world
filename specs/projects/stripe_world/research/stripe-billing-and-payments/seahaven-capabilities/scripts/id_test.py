@@ -1,5 +1,3 @@
-import sys
-sys.path.insert(0, "/home/user/stripe_world/vendor/Seahaven/src")
 import seahaven
 
 SCHEMA = "CREATE TABLE t (id TEXT PRIMARY KEY) STRICT;"

@@ -582,7 +582,8 @@ fixture's own fork cost (11–29 ms, per architecture.md §9) even before amorti
   source `event_types.py` is a verbatim transcription of.
 - `research/MANIFEST.md` — the committed sha256 the tier-1 drift test checks `spec3.min.json`'s
   provenance claim against.
-- Seahaven's world-import mechanics (`vendor/Seahaven/src/seahaven/docs/authoring.md`) — module-level
+- Seahaven's world-import mechanics (`authoring.md` in the installed framework's docs, which
+  `uv run seahaven docs` locates) — module-level
   code in a `tools/`-imported module runs once at world import; this component relies on exactly that
   behavior for "loaded once, shared across every instance."
 

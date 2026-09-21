@@ -1,4 +1,0 @@
-CREATE TABLE notes (
-    id TEXT PRIMARY KEY,
-    body TEXT NOT NULL
-) STRICT;

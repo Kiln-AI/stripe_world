@@ -1,5 +1,11 @@
 # Seven pressure points: verdicts
 
+> **Path note (added later).** This document was written while Seahaven was vendored in this
+> repository at `vendor/Seahaven/`. It is now a git dependency pinned to a full commit SHA in
+> `[tool.uv.sources]`, and the directory is gone. Read every `vendor/Seahaven/…` path below
+> against `github.com/Kiln-AI/Seahaven` with that prefix dropped; the findings themselves are
+> unchanged, recorded against the commit that was vendored at the time.
+
 Each pressure point states what the framework does today (with citations), whether it suffices for
 a faithful Stripe Billing & Payments world, and the options if not. Where I could run something
 instead of inferring it, I did — every measurement below was produced in this research session, not
@@ -361,9 +367,10 @@ doesn't matter much, but untested here.
 [`scripts/fork_bench.py`](./scripts/fork_bench.py) (the id-generation determinism test from the
 previous section is at [`scripts/id_test.py`](./scripts/id_test.py)). Run with:
 ```sh
-cd vendor/Seahaven && uv run --no-sync python \
-    ../../specs/projects/stripe_world/research/stripe-billing-and-payments/seahaven-capabilities/scripts/fork_bench.py
+uv run python \
+    specs/projects/stripe_world/research/stripe-billing-and-payments/seahaven-capabilities/scripts/fork_bench.py
 ```
-against a `pydantic==2.12.3`-pinned environment per the note at the top of this document. (Adjust
-the relative path if run from elsewhere — the script only needs `vendor/Seahaven/src` importable,
-which it adds to `sys.path` itself.)
+from the repository root, against a `pydantic==2.12.3`-pinned environment per the note at the top of
+this document. (When this was first run the framework was vendored at `vendor/Seahaven/` and the
+script put that `src` on `sys.path` itself; `seahaven` is an ordinary installed dependency now, so
+the world's own environment is enough.)

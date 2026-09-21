@@ -3,11 +3,9 @@ measure how long it takes to fork (create a fresh instance from) that fixture,
 repeated many times. Answers project_overview.md's "large fixture must still
 fork in milliseconds" constraint for a Stripe-shaped customers table.
 """
-import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, "/home/user/stripe_world/vendor/Seahaven/src")
 import seahaven
 
 N_CUSTOMERS = 20000
