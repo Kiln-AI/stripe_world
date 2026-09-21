@@ -1,5 +1,11 @@
 # Seahaven capabilities
 
+> **Path note (added later).** This document was written while Seahaven was vendored in this
+> repository at `vendor/Seahaven/`. It is now a git dependency pinned to a full commit SHA in
+> `[tool.uv.sources]`, and the directory is gone. Read every `vendor/Seahaven/…` path below
+> against `github.com/Kiln-AI/Seahaven` with that prefix dropped; the findings themselves are
+> unchanged, recorded against the commit that was vendored at the time.
+
 ## Bottom Line
 
 The vendored framework (`vendor/Seahaven`, package `0.0.1`) is real, working, and well-documented —

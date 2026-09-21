@@ -999,7 +999,7 @@ def _invoke(ctx, req):
 #### 3.8.2 Why the savepoint is explicit
 
 Seahaven wraps a tool call in a transaction and commits it when the tool function returns normally
-(`vendor/Seahaven/src/seahaven/call.py`, `invoke`). We return normally on a Stripe error — that is
+(`src/seahaven/call.py` in the framework's repository, `invoke`). We return normally on a Stripe error — that is
 the whole design, errors are return values — so **the call's own transaction cannot be what rolls a
 failed call back.** It would commit.
 

@@ -1,5 +1,11 @@
 # Seed entries for SEAHAVEN_FINDINGS.md
 
+> **Path note (added later).** This document was written while Seahaven was vendored in this
+> repository at `vendor/Seahaven/`. It is now a git dependency pinned to a full commit SHA in
+> `[tool.uv.sources]`, and the directory is gone. Read every `vendor/Seahaven/…` path below
+> against `github.com/Kiln-AI/Seahaven` with that prefix dropped; the findings themselves are
+> unchanged, recorded against the commit that was vendored at the time.
+
 Per `project_overview.md` §7, these are the first entries in the project's `SEAHAVEN_FINDINGS.md`,
 generated while doing the reading and probing this subtopic required — logged as they happened, not
 reconstructed afterward. Each follows the required shape: what I was trying to do, what I expected,

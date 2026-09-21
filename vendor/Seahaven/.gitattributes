@@ -1,5 +1,0 @@
-# The console is a build artefact: one 292 KB file, most of it on a single
-# line. `git diff` on it is unreadable and a merge conflict in it cannot be
-# resolved by hand -- the only correct resolution is to rebuild it from `ui/`.
-# Git says "binary files differ" and refuses to write conflict markers instead.
-src/seahaven/openenv/console/index.html -diff -merge

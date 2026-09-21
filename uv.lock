@@ -1757,7 +1757,7 @@ wheels = [
 [[package]]
 name = "seahaven"
 version = "0.0.1"
-source = { editable = "vendor/Seahaven" }
+source = { git = "https://github.com/Kiln-AI/Seahaven.git?rev=48dad1f01df5ff15bb6c5a152d1b49251235eda8#48dad1f01df5ff15bb6c5a152d1b49251235eda8" }
 dependencies = [
     { name = "apsw" },
     { name = "pydantic" },
@@ -1767,26 +1767,6 @@ dependencies = [
 [package.optional-dependencies]
 serve = [
     { name = "openenv" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "apsw", specifier = ">=3.53.4" },
-    { name = "openenv", marker = "extra == 'serve'", specifier = ">=0.5.0,<0.6" },
-    { name = "pydantic", specifier = ">=2.13.5,<3" },
-    { name = "pyyaml", specifier = ">=6.0.3" },
-]
-provides-extras = ["serve"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "jsonschema", specifier = ">=4" },
-    { name = "packaging", specifier = ">=24" },
-    { name = "projecttracker", editable = "vendor/Seahaven/worlds/projecttracker" },
-    { name = "pytest", specifier = ">=8" },
-    { name = "ruff", specifier = ">=0.14" },
-    { name = "seahaven-xmlrpc", editable = "vendor/Seahaven/extensions/seahaven-xmlrpc" },
-    { name = "ty", specifier = ">=0.0.1a21" },
 ]
 
 [[package]]
@@ -1812,8 +1792,8 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "seahaven", editable = "vendor/Seahaven" },
-    { name = "seahaven", extras = ["serve"], marker = "extra == 'serve'", editable = "vendor/Seahaven" },
+    { name = "seahaven", git = "https://github.com/Kiln-AI/Seahaven.git?rev=48dad1f01df5ff15bb6c5a152d1b49251235eda8" },
+    { name = "seahaven", extras = ["serve"], marker = "extra == 'serve'", git = "https://github.com/Kiln-AI/Seahaven.git?rev=48dad1f01df5ff15bb6c5a152d1b49251235eda8" },
 ]
 provides-extras = ["serve"]
 

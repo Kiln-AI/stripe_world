@@ -19,6 +19,11 @@ Each entry gives: what we were trying to do, what we expected, what happened, a 
 where one exists, and a category (Bug, Missing capability, Design concern, Ergonomics, Docs gap,
 Error message, Performance, Good).
 
+Framework paths below (`src/seahaven/…`, `pyproject.toml`) are paths inside Seahaven's own
+repository, `github.com/Kiln-AI/Seahaven`, which this world depends on at the commit pinned in
+`[tool.uv.sources]`. The framework used to be vendored at `vendor/Seahaven/`; entries written then
+have been repointed, and the line numbers they cite are the ones the entry was written against.
+
 At the end of the project this log is distilled into a prioritized recommendations document. Entries
 worth acting on before this world ships are filed as issues on the Seahaven repo as we go.
 
@@ -38,7 +43,7 @@ long-form reproduction detail and the probe scripts live in
 (the workaround is documented, but only in a benchmark results file, not in the setup path a new
 author actually follows).
 
-**What I was trying to do**: Set up the vendored framework to run its own test suite and CLI, per
+**What I was trying to do**: Set up the framework to run its own test suite and CLI, per
 `project_overview.md` §3's instruction to build this project "the Seahaven way" and per
 `authoring.md`'s own scaffolding instructions (`seahaven new`, then `uv sync` / install from
 checkout).
@@ -47,7 +52,7 @@ checkout).
 against the framework's own `pyproject.toml`, using whatever the lock file specifies, would produce
 a working `import seahaven`.
 
-**What happened**: `vendor/Seahaven/pyproject.toml:15` requires `requires-python = ">=3.14"`. This
+**What happened**: Seahaven's `pyproject.toml:15` requires `requires-python = ">=3.14"`. This
 sandbox had no Python 3.14 at all; `uv python install 3.14` resolved to `cpython-3.14.0rc2` (a
 release candidate, not a final release — there was no way to obtain a final 3.14 in this
 environment). With that interpreter and the lock file's `pydantic==2.13.5`, `uv sync --extra serve`
@@ -79,7 +84,7 @@ not hold in this environment.
 
 **Minimal repro**:
 ```sh
-cd vendor/Seahaven
+git clone https://github.com/Kiln-AI/Seahaven.git && cd Seahaven
 uv python install 3.14   # resolves to 3.14.0rc2 in an environment with no final 3.14 available
 uv sync --extra serve     # succeeds, installs pydantic==2.13.5 per the lock
 uv run --no-sync seahaven --help   # crashes at import with the AssertionError above
@@ -182,7 +187,7 @@ there), *unless and until* the framework grows a way to mutate `ctx.clock` mid-i
 does not have today.
 
 **Minimal repro**: N/A — confirmed absence, not a crash.
-`grep -rn "advance\|test_clock\|set_now\|travel" vendor/Seahaven/src/seahaven/*.py` returns nothing
+`grep -rn "advance\|test_clock\|set_now\|travel" src/seahaven/*.py` in a Seahaven checkout returns nothing
 relevant.
 
 **Why this belongs on the Seahaven repo as an issue** (per `project_overview.md` §7's instruction to
@@ -262,7 +267,7 @@ depends on.
 **What we expected.** That a middleware writing a row and the tool call it wraps would commit or roll
 back together, since `authoring.md` describes one call as one transaction.
 
-**What happened.** Reading `vendor/Seahaven/src/seahaven/call.py` during component design: the
+**What happened.** Reading `src/seahaven/call.py` during component design: the
 per-call transaction is opened *inside* `invoke`, so it sits **beneath** the middleware chain rather
 than around it. A middleware that writes is therefore not atomic with the call it wraps. For
 idempotency that means the stored-response row and the state change it describes can diverge — the
@@ -324,7 +329,7 @@ writes) before giving up — or name `--world` in the `ModuleNotFoundError` mess
 
 **What we expected.** An exception a middleware catches and converts into a normal return is not a failure the framework needs to report; at most it is debug-level information about a handled condition.
 
-**What happened.** `vendor/Seahaven/src/seahaven/call.py:162-173` (`invoke`) logs `_log.error("tool %r failed on instance %s", …, exc_info=True)` for **every** exception that is not a `ToolError` — before the middleware chain gets a chance to see it, and with no way for a world to mark an exception class as "expected, handled further out." So in this world every ordinary 400/404 — every typo'd parameter, every retrieve of a missing id, every bad `expand[]` path — writes a full Python traceback at ERROR level to the log, interleaved with real failures, for the whole length of an eval rollout. The failure mode `components/dispatcher.md` §3.8 attributes only to a *leaked* Stripe error ("would fill the log with tracebacks for ordinary card declines") in fact applies to every caught-and-rendered one too, because the log line fires at raise time, not at escape time.
+**What happened.** `src/seahaven/call.py:162-173` (`invoke`) logs `_log.error("tool %r failed on instance %s", …, exc_info=True)` for **every** exception that is not a `ToolError` — before the middleware chain gets a chance to see it, and with no way for a world to mark an exception class as "expected, handled further out." So in this world every ordinary 400/404 — every typo'd parameter, every retrieve of a missing id, every bad `expand[]` path — writes a full Python traceback at ERROR level to the log, interleaved with real failures, for the whole length of an eval rollout. The failure mode `components/dispatcher.md` §3.8 attributes only to a *leaked* Stripe error ("would fill the log with tracebacks for ordinary card declines") in fact applies to every caught-and-rendered one too, because the log line fires at raise time, not at escape time.
 
 **Minimal reproduction.** Any world whose middleware catches an exception subclass raised by its tools and returns a value:
 
@@ -370,6 +375,6 @@ def raising(ctx) -> dict:
 
 **Why it is a finding rather than our preference.** "What did this call return?" is the first question a conformance harness, a snapshot test, or a debug rendering asks, and the framework's own plugin documentation points at `inst.call_log()` as the record of what a test did. A `result` field — even opt-in, even truncated, even excluded from `to_dict` the way the workaround's records are — would make that question answerable without wrapping a framework class from test code.
 
-**Minimal reproduction.** N/A — an absence: `grep -n "result" vendor/Seahaven/src/seahaven/changes.py` over the `CallRecord` block finds nothing.
+**Minimal reproduction.** N/A — an absence: `grep -n "result" src/seahaven/changes.py` over the `CallRecord` block finds nothing.
 
 **Where the code points at it.** `tests/schema_conformance/capture.py`'s module docstring and `tests/conftest.py`'s `_schema_conformance` fixture carry comments referencing this entry.

@@ -25,11 +25,19 @@ serve = ["seahaven[serve]"]
 # (components/conformance.md Dependencies, enforced by a static test).
 dev = ["pytest>=8", "ruff>=0.14", "ty>=0.0.1a21", "stripe>=13"]
 
-# Seahaven is unpublished; while that is true this checkout depends on the
-# framework vendored beside it rather than on the placeholder PyPI release
-# (`authoring.md`, "Before you run the `uv sync` that `seahaven new` prints").
+# Seahaven is unpublished; while that is true the bare `seahaven` requirement
+# above resolves to the framework's own repository rather than to the
+# placeholder PyPI release (`authoring.md`, "Before you run the `uv sync` that
+# `seahaven new` prints"). Pinned to a full commit SHA, never a branch or tag: a
+# moving ref would swap the core out between one `uv sync` and the next with
+# nothing in history to say when. Move the core by editing this `rev` and
+# re-running `uv lock`, in a commit of its own. The repository is private: a
+# checkout that cannot already read it over HTTPS has to give git a credential
+# before the sync, or `uv sync` fails as a git auth error that reads like a bad
+# lock. There is no workflow in this repo yet; whatever runs these checks
+# unattended needs that step.
 [tool.uv.sources]
-seahaven = { path = "vendor/Seahaven", editable = true }
+seahaven = { git = "https://github.com/Kiln-AI/Seahaven.git", rev = "48dad1f01df5ff15bb6c5a152d1b49251235eda8" }
 
 [tool.uv]
 # SEAHAVEN_FINDINGS.md Entry 1: the framework's pydantic>=2.13.5 floor crashes
@@ -49,9 +57,8 @@ module-name = "stripeapi"
 line-length = 100
 src = ["src", "tests", "fixtures_src", "tools_dev"]
 # The committed specs and research are point-in-time documents whose Python
-# fragments are prose, not code; `vendor/` has its own configuration; a frozen
-# fixture is a binary artifact.
-extend-exclude = ["specs", "research", "vendor", "fixtures"]
+# fragments are prose, not code; a frozen fixture is a binary artifact.
+extend-exclude = ["specs", "research", "fixtures"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]

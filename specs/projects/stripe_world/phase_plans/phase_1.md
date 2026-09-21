@@ -4,6 +4,11 @@ status: complete
 
 # Phase 1: Skeleton
 
+> **Superseded in part (noted later).** Steps 1 and 2 below set the framework up as a vendored,
+> editable checkout at `vendor/Seahaven/`. That directory has since been removed: `seahaven` is
+> now a git dependency pinned to a full commit SHA in `[tool.uv.sources]`, and nothing excludes
+> `vendor/` any more. The rest of the phase stands as built.
+
 ## Overview
 
 Scaffold the Seahaven world this project lives in, with the shared modules every later
