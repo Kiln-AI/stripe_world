@@ -1,0 +1,806 @@
+"""The invoice path subscriptions drive: line construction from items,
+totals arithmetic, and the draft → open → paid machine's internal steps
+(`components/billing_engine.md` §2 and §3, Phase 12's subset).
+
+Phase 12's invoices are born only from subscription flows (creation, the
+trial-end cycle, resume, `advance_cycle`); `/v1/invoices` itself is Phase
+13's, so nothing here serializes an invoice — this module writes and moves
+ROWS, and the `lines` JSON it freezes is the recorded `line_item` shape
+Phase 13's serializer will emit verbatim.
+
+Scope, deliberately: lines come from subscription items only (pending
+`invoiceitems` and item-scope discounts are Phase 13's
+`compute_totals` completion), invoice-scope coupon discounts and default
+tax rates ARE here — both recorded on subscription creation (Phase 12
+probes, 2026-09-21: a 10%-off once-coupon takes 3000 → 2700, a 5% exclusive
+GST on the post-discount base adds 135, total 2835), and the customer
+balance settlement is §3.5 verbatim including its
+`customer_balance_transactions` row.
+
+This module emits **no `invoice.*` events**: an event's `data.object` is
+the verbatim serialized object (`components/cross_cutting.md` §3.4.3), and
+the invoice serializer is Phase 13's. The `invoice.created`/`finalized`/
+`paid`/`payment_failed` emissions the billing engine names join when that
+serializer exists — a declared gap, not an omission. The charge events an
+invoice payment writes (`charge.succeeded`/`charge.failed`) DO fire here;
+their serializer shipped in Phase 8.
+
+Every amount is an `int` of minor units or a `fractions.Fraction` on the way
+to one; no float exists in this module's money path.
+"""
+
+import calendar
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from datetime import datetime
+from fractions import Fraction
+from typing import Any
+
+import seahaven
+
+from stripeapi import _ids, _json, _seq, _time
+from stripeapi.billing._money import apportion, round_half_up
+from stripeapi.resources import _lookup, charges, events, payment_intents
+from stripeapi.stripe_errors import declined as declined_body
+
+__all__ = [
+    "INVOICE_PAYMENT_SETTINGS",
+    "DiscountSpec",
+    "TaxRateSpec",
+    "add_interval",
+    "build_item_lines",
+    "compute_automatically_finalizes_at",
+    "compute_totals",
+    "create_invoice",
+    "describe_amount",
+    "finalize_invoice",
+    "iso_plus_hours",
+    "mark_uncollectible_invoice",
+    "pay_invoice",
+    "settle_customer_balance",
+    "void_invoice",
+]
+
+#: The recorded `invoice.payment_settings` constant (Phase 12 probe: the
+#: paid `subscription_create` invoice carries exactly this).
+INVOICE_PAYMENT_SETTINGS: dict[str, object] = {
+    "default_mandate": None,
+    "payment_method_options": None,
+    "payment_method_types": None,
+}
+
+#: The recorded `taxability_reason` on every line/total tax entry (the
+#: billing engine design quoted `standard_rated` from the schema's
+#: description; the recording says `not_available`, and the recording wins).
+_TAXABILITY_REASON = "not_available"
+
+_ZERO_DECIMAL_CURRENCIES = frozenset(
+    (
+        "bif",
+        "clp",
+        "djf",
+        "gnf",
+        "jpy",
+        "kmf",
+        "krw",
+        "mga",
+        "pyg",
+        "rwf",
+        "ugx",
+        "vnd",
+        "vuv",
+        "xaf",
+        "xof",
+        "xpf",
+    )
+)
+
+_SYMBOLS = {
+    "aud": "$",
+    "cad": "$",
+    "gbp": "£",
+    "hkd": "$",
+    "jpy": "¥",
+    "mxn": "$",
+    "nzd": "$",
+    "sgd": "$",
+    "usd": "$",
+    "eur": "€",
+}
+
+_PLURAL = {"day": "days", "week": "weeks", "month": "months", "year": "years"}
+
+
+def _load_dict(text: str | None) -> dict[str, Any]:
+    loaded: object = _json.loads(text)
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def _load_list(text: str | None) -> list[Any]:
+    loaded: object = _json.loads(text)
+    return loaded if isinstance(loaded, list) else []
+
+
+def add_interval(iso: str, *, interval: str, interval_count: int = 1) -> str:
+    """One billing period forward: calendar-true for months and years (the
+    day is clamped to the target month's length — Stripe billing cycles are
+    calendar-anchored), second-exact for days and weeks."""
+    moment = datetime.strptime(iso, "%Y-%m-%dT%H:%M:%S.%fZ")
+    if interval in ("month", "year"):
+        months = interval_count * (12 if interval == "year" else 1)
+        total = moment.month - 1 + months
+        year = moment.year + total // 12
+        month = total % 12 + 1
+        day = min(moment.day, calendar.monthrange(year, month)[1])
+        return (
+            moment.replace(year=year, month=month, day=day).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
+            + "Z"
+        )
+    seconds = interval_count * {"day": 86_400, "week": 604_800}[interval]
+    return _time.from_unix(_time.to_unix(iso) + seconds)
+
+
+def iso_plus_hours(iso: str, *, hours: int) -> str:
+    return _time.from_unix(_time.to_unix(iso) + hours * 3_600)
+
+
+def describe_amount(amount: int, currency: str) -> str:
+    """`2000, "cad"` -> `$20.00` — the recorded line-description spelling
+    (the account's own symbol for its currency; zero-decimal currencies
+    print without the fraction)."""
+    symbol = _SYMBOLS.get(currency, currency.upper() + " ")
+    if currency in _ZERO_DECIMAL_CURRENCIES:
+        return f"{symbol}{amount}"
+    return f"{symbol}{amount // 100}.{amount % 100:02d}"
+
+
+def describe_interval(interval: str, interval_count: int = 1) -> str:
+    """`month, 1` -> `month`; `month, 3` -> `3 months` (the count>1 spelling
+    is unrecorded; the plural is the natural English form)."""
+    if interval_count == 1:
+        return interval
+    return f"{interval_count} {_PLURAL[interval]}"
+
+
+# --- the pure arithmetic -----------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class DiscountSpec:
+    """A resolved coupon: `percent_off` is the exact TEXT-decimal Fraction."""
+
+    discount_id: str
+    coupon_id: str
+    amount_off: int | None
+    percent_off: Fraction | None
+
+
+@dataclass(frozen=True)
+class TaxRateSpec:
+    tax_rate_id: str
+    percentage: Fraction
+    inclusive: bool
+
+
+@dataclass(frozen=True)
+class ItemLine:
+    """One subscription item's contribution, pre-arithmetic.
+
+    `proration` marks a proration-shaped line (a conversion credit, later
+    the Phase 14 proration lines): never discountable, `proration: true`
+    under the line's `parent.subscription_item_details`, and no
+    `unit_amount_decimal` (`spec3.json`'s own rule; probed on the
+    conversion credit, round 4's trail)."""
+
+    subscription_item_id: str
+    subscription_id: str
+    price_id: str
+    product_id: str
+    unit_amount: int
+    quantity: int
+    period_start: str
+    period_end: str
+    description: str
+    proration: bool = False
+
+
+@dataclass(frozen=True)
+class Totals:
+    lines: list[dict[str, Any]]
+    subtotal: int
+    invoice_discount_total: int
+    total_discount_amounts: list[dict[str, Any]]
+    exclusive_tax_total: int
+    inclusive_tax_total: int
+    total_excluding_tax: int
+    subtotal_excluding_tax: int
+    total: int
+    total_taxes: list[dict[str, Any]]
+
+
+def build_item_lines(
+    ctx: seahaven.Ctx,
+    items: Sequence[Mapping[str, Any]],
+    *,
+    currency: str,
+    trial: bool = False,
+) -> list[ItemLine]:
+    """One `ItemLine` per subscription-item row, in creation order (the
+    recorded `items` order, Phase 12). `quantity` defaults to 1; a price
+    with no integer unit amount (metered, tiered) bills 0 here — no usage
+    exists to bill, which is what the real API invoices at creation too.
+
+    `trial=True` builds the recorded trial-create line: amount 0,
+    `Free trial for 1 x <product>` over `[start, trial_end)` (probed,
+    Phase 12 — the trialing subscription's first invoice is a paid $0
+    `subscription_create` invoice, not no invoice at all).
+    """
+    lines: list[ItemLine] = []
+    for item in items:
+        price = _lookup.require_row(ctx, "prices", "price", item["price"], param="price")
+        product = _lookup.require_row(ctx, "products", "product", price["product"], param="product")
+        recurring = _load_dict(price["recurring"])
+        unit_amount = price["unit_amount"] or 0
+        quantity = item["quantity"] if item["quantity"] is not None else 1
+        if trial:
+            description = f"Free trial for {quantity} \u00d7 {product['name']}"
+            unit_amount = 0
+        else:
+            description = (
+                f"{quantity} \u00d7 {product['name']} "
+                f"(at {describe_amount(unit_amount, currency)} / "
+                f"{
+                    describe_interval(
+                        recurring.get('interval', 'month'), recurring.get('interval_count', 1)
+                    )
+                })"
+            )
+        lines.append(
+            ItemLine(
+                subscription_item_id=item["id"],
+                subscription_id=item["subscription"],
+                price_id=price["id"],
+                product_id=price["product"],
+                unit_amount=unit_amount,
+                quantity=quantity,
+                period_start=item["current_period_start"],
+                period_end=item["current_period_end"],
+                description=description,
+            )
+        )
+    return lines
+
+
+def _tax_entry(tax: TaxRateSpec, amount: int) -> int:
+    if tax.inclusive:
+        exact = Fraction(amount * tax.percentage, 100 + tax.percentage)
+    else:
+        exact = Fraction(amount * tax.percentage, 100)
+    return round_half_up(exact)
+
+
+def compute_totals(
+    line_inputs: Sequence[ItemLine],
+    *,
+    currency: str,
+    invoice_discounts: Sequence[DiscountSpec] = (),
+    tax_rates: Sequence[TaxRateSpec] = (),
+    invoice_id: str = "",
+) -> Totals:
+    """The recorded arithmetic, pure: per-line amounts, invoice-scope
+    discounts apportioned floor-then-remainder (`_money`'s rule, documented
+    for coupons), then exclusive/inclusive tax on each line's
+    post-discount net (recorded: the 5% GST taxes 2700, not 3000).
+
+    `invoice_id` is threaded only so draft lines can name their invoice;
+    pass "" while the invoice's id is still unminted.
+    """
+    amounts = [line.unit_amount * line.quantity for line in line_inputs]
+    subtotal = sum(amounts)
+
+    # Invoice-scope discounts, sequential, apportioned back per line. A
+    # proration line is never a discount base (`spec3.json`: "Always false
+    # for prorations" — discountable both as a flag and as an apportion
+    # weight).
+    discountable = [
+        amount if not line.proration else 0
+        for amount, line in zip(amounts, line_inputs, strict=True)
+    ]
+    per_line_discounts: list[dict[str, int]] = [{} for _ in line_inputs]
+    total_discount_amounts: list[dict[str, Any]] = []
+    for discount in invoice_discounts:
+        base = sum(discountable)
+        if discount.amount_off is not None:
+            amount = min(discount.amount_off, base)
+        else:
+            assert discount.percent_off is not None
+            amount = round_half_up(Fraction(base * discount.percent_off, 100))
+        if base > 0 and amount > 0:
+            shares = apportion(amount, discountable)
+        else:
+            shares = [0] * len(discountable)
+        for index, share in enumerate(shares):
+            if share:
+                per_line_discounts[index][discount.discount_id] = share
+            discountable[index] -= share
+        if amount:
+            total_discount_amounts.append({"amount": amount, "discount": discount.discount_id})
+
+    # Tax on each line's post-discount net — where a proration line's net
+    # is its own amount: any coupon it carries was pre-netted into that
+    # amount (the conversion credit's probed shape), never apportioned, so
+    # the zeroed discount weight must not zero the tax base.
+    tax_base = [
+        amount - sum(per_line_discounts[index].values()) for index, amount in enumerate(amounts)
+    ]
+    per_line_taxes: list[list[dict[str, Any]]] = []
+    taxes_by_rate: dict[str, dict[str, Any]] = {}
+    exclusive_total = 0
+    inclusive_total = 0
+    for _index, net in enumerate(tax_base):
+        entries: list[dict[str, Any]] = []
+        for tax in tax_rates:
+            tax_amount = _tax_entry(tax, net)
+            entry = {
+                "amount": tax_amount,
+                "tax_behavior": "inclusive" if tax.inclusive else "exclusive",
+                "tax_rate_details": {"tax_rate": tax.tax_rate_id},
+                "taxability_reason": _TAXABILITY_REASON,
+                "taxable_amount": net,
+                "type": "tax_rate_details",
+            }
+            entries.append(entry)
+            aggregated: dict[str, Any] = taxes_by_rate.setdefault(
+                tax.tax_rate_id,
+                {
+                    "amount": 0,
+                    "tax_behavior": entry["tax_behavior"],
+                    "tax_rate_details": entry["tax_rate_details"],
+                    "taxability_reason": _TAXABILITY_REASON,
+                    "taxable_amount": 0,
+                    "type": "tax_rate_details",
+                },
+            )
+            aggregated["amount"] += tax_amount
+            aggregated["taxable_amount"] += net
+            if tax.inclusive:
+                inclusive_total += tax_amount
+            else:
+                exclusive_total += tax_amount
+        per_line_taxes.append(entries)
+
+    lines: list[dict[str, Any]] = []
+    for index, line in enumerate(line_inputs):
+        discount_amounts = [
+            {"amount": amount, "discount": discount_id}
+            for discount_id, amount in per_line_discounts[index].items()
+        ]
+        lines.append(
+            {
+                "id": _line_placeholder_id(index),
+                "object": "line_item",
+                "livemode": False,
+                "amount": amounts[index],
+                "currency": currency,
+                "description": line.description,
+                "discount_amounts": discount_amounts,
+                "discountable": not line.proration,
+                "discounts": sorted(per_line_discounts[index]),
+                "invoice": invoice_id,
+                "metadata": {},
+                "parent": {
+                    "type": "subscription_item_details",
+                    "subscription_item_details": {
+                        "invoice_item": None,
+                        "proration": line.proration,
+                        "proration_details": {"credited_items": None},
+                        "subscription": line.subscription_id,
+                        "subscription_item": line.subscription_item_id,
+                    },
+                },
+                "period": {
+                    "start": _time.to_unix(line.period_start),
+                    "end": _time.to_unix(line.period_end),
+                },
+                "pretax_credit_amounts": [],
+                "pricing": {
+                    "type": "price_details",
+                    "price_details": {
+                        "price": line.price_id,
+                        "product": line.product_id,
+                    },
+                    "unit_amount_decimal": None if line.proration else str(line.unit_amount),
+                },
+                "quantity": line.quantity,
+                "quantity_decimal": str(line.quantity),
+                "subtotal": amounts[index],
+                "taxes": per_line_taxes[index],
+            }
+        )
+
+    invoice_discount_total = sum(entry["amount"] for entry in total_discount_amounts)
+    return Totals(
+        lines=lines,
+        subtotal=subtotal,
+        invoice_discount_total=invoice_discount_total,
+        total_discount_amounts=total_discount_amounts,
+        exclusive_tax_total=exclusive_total,
+        inclusive_tax_total=inclusive_total,
+        total_excluding_tax=subtotal - invoice_discount_total - inclusive_total,
+        subtotal_excluding_tax=subtotal - inclusive_total,
+        total=subtotal - invoice_discount_total + exclusive_total,
+        total_taxes=list(taxes_by_rate.values()),
+    )
+
+
+def _line_placeholder_id(index: int) -> str:
+    """Draft lines are built before the invoice's id exists; the `il_` ids
+    are minted when the row is written (`create_invoice` rewrites them)."""
+    return f"__line_{index}"
+
+
+def settle_customer_balance(total: int, starting_balance: int) -> tuple[int, int, int]:
+    """§3.5 verbatim: -> (amount_due, ending_balance, customer_balance_delta).
+
+    `customer.balance` negative means credit available, positive means owed.
+    """
+    if total >= 0:
+        credit_available = max(0, -starting_balance)
+        credit_used = min(credit_available, total)
+        debit_pending = max(0, starting_balance)
+        amount_due = total + debit_pending - credit_used
+        delta = credit_used - debit_pending
+    else:
+        amount_due = 0
+        delta = total
+    return amount_due, starting_balance + delta, delta
+
+
+def compute_automatically_finalizes_at(
+    created_iso: str, *, auto_advance: bool, collection_method: str
+) -> str | None:
+    """Populated and honest, never self-firing (the frozen clock): the real
+    ~1-hour draft window for an auto-advancing draft, NULL otherwise."""
+    if not auto_advance:
+        return None
+    return iso_plus_hours(created_iso, hours=1)
+
+
+# --- the stateful path ----------------------------------------------------------------
+
+
+def create_invoice(
+    ctx: seahaven.Ctx,
+    *,
+    customer_id: str,
+    currency: str,
+    collection_method: str,
+    billing_reason: str,
+    totals: Totals,
+    subscription_id: str | None,
+    auto_advance: bool,
+    days_until_due: int | None,
+    period_start: str,
+    period_end: str,
+    discounts: Sequence[Mapping[str, Any]] = (),
+    tax_rate_ids: Sequence[str] = (),
+) -> dict[str, Any]:
+    """Write one draft invoice row with its lines and totals already
+    computed, and emit `invoice.created`. Finalization (`finalize_invoice`)
+    is the caller's next step or never, per the flow."""
+    now = ctx.clock.iso()
+    customer = _lookup.require_row(ctx, "customers", "customer", customer_id, param="customer")
+    id_ = _ids.stripe_id(ctx, "in_")
+    lines = [{**line, "id": _ids.stripe_id(ctx, "il_"), "invoice": id_} for line in totals.lines]
+    due_date = (
+        _time.from_unix(_time.to_unix(now) + days_until_due * 86_400)
+        if days_until_due is not None
+        else None
+    )
+    cols: dict[str, Any] = {
+        "id": id_,
+        "x_seq": _seq.next_seq(ctx, "invoices"),
+        "created": now,
+        "amount_due": 0,
+        "amount_paid": 0,
+        "amount_remaining": 0,
+        "attempt_count": 0,
+        "attempted": 0,
+        "auto_advance": int(auto_advance),
+        "automatically_finalizes_at": compute_automatically_finalizes_at(
+            now, auto_advance=auto_advance, collection_method=collection_method
+        ),
+        "billing_reason": billing_reason,
+        "collection_method": collection_method,
+        "currency": currency,
+        "customer": customer_id,
+        "customer_address": customer["address"],
+        "customer_email": customer["email"],
+        "customer_name": customer["name"],
+        "customer_phone": customer["phone"],
+        "customer_shipping": customer["shipping"],
+        "customer_tax_exempt": customer["tax_exempt"],
+        "default_tax_rates": _json.dumps(list(tax_rate_ids)),
+        "discounts": _json.dumps(list(discounts)),
+        "due_date": due_date,
+        "effective_at": now,
+        "lines": _json.dumps(lines),
+        "parent_type": "subscription_details" if subscription_id else None,
+        "parent_subscription": subscription_id,
+        "payment_settings": _json.dumps(INVOICE_PAYMENT_SETTINGS),
+        "period_start": period_start,
+        "period_end": period_end,
+        "starting_balance": 0,
+        "status": "draft",
+        "status_transitions": _json.dumps(
+            {
+                "finalized_at": None,
+                "marked_uncollectible_at": None,
+                "paid_at": None,
+                "voided_at": None,
+            }
+        ),
+        "subtotal": totals.subtotal,
+        "subtotal_excluding_tax": totals.subtotal_excluding_tax,
+        "total": totals.total,
+        "total_discount_amounts": _json.dumps(totals.total_discount_amounts),
+        "total_excluding_tax": totals.total_excluding_tax,
+        "total_taxes": _json.dumps(totals.total_taxes),
+    }
+    columns = ", ".join(cols)
+    placeholders = ", ".join("?" for _ in cols)
+    ctx.db.execute(f"INSERT INTO invoices ({columns}) VALUES ({placeholders})", *cols.values())
+    return _lookup.require_row(ctx, "invoices", "invoice", id_, param="invoice")
+
+
+def finalize_invoice(ctx: seahaven.Ctx, invoice_id: str) -> dict[str, Any]:
+    """draft -> open: the number (per-customer prefix + sequence,
+    `data_model.md` §3.13), the customer-balance settlement and its
+    `customer_balance_transactions` row, the frozen monetary fields."""
+    row = _lookup.require_row(ctx, "invoices", "invoice", invoice_id, param="invoice")
+    if row["status"] != "draft":
+        # billing_engine's Public Interface declares this the routed 400
+        # `invoice_not_editable`; Phase 13's /finalize route replaces this
+        # guard, and no Phase 12 caller can reach it (every invoice here is
+        # born draft into this flow).
+        raise seahaven.WorldBug(f"finalize_invoice on a {row['status']!r} invoice")
+    now = ctx.clock.iso()
+    customer = _lookup.require_row(ctx, "customers", "customer", row["customer"], param="customer")
+    number = f"{customer['invoice_prefix']}-{customer['next_invoice_sequence']:04d}"
+    ctx.db.execute(
+        "UPDATE customers SET next_invoice_sequence = next_invoice_sequence + 1 WHERE id = ?",
+        customer["id"],
+    )
+    starting_balance = customer["balance"]
+    amount_due, ending_balance, delta = settle_customer_balance(row["total"], starting_balance)
+    if delta:
+        ctx.db.execute(
+            "UPDATE customers SET balance = ? WHERE id = ?", ending_balance, customer["id"]
+        )
+        cbt_id = _ids.stripe_id(ctx, "cbtxn_")
+        ctx.db.execute(
+            "INSERT INTO customer_balance_transactions"
+            " (id, x_seq, created, amount, currency, customer, ending_balance,"
+            " invoice, type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            cbt_id,
+            _seq.next_seq(ctx, "customer_balance_transactions"),
+            now,
+            delta,
+            row["currency"],
+            customer["id"],
+            ending_balance,
+            invoice_id,
+            # Credit consumed at finalization (a positive delta: the balance
+            # grows toward zero); `adjustment` covers the debit-drawn and
+            # negative-total directions (§3.5's table; Phase 15 records the
+            # wire).
+            "applied_to_invoice" if delta > 0 else "adjustment",
+        )
+    transitions = _load_dict(row["status_transitions"])
+    transitions["finalized_at"] = _time.to_unix(now)
+    ctx.db.execute(
+        "UPDATE invoices SET number = ?, status = 'open', starting_balance = ?,"
+        " amount_due = ?, amount_remaining = ?, ending_balance = ?,"
+        " automatically_finalizes_at = NULL, status_transitions = ? WHERE id = ?",
+        number,
+        starting_balance,
+        amount_due,
+        amount_due,
+        ending_balance,
+        _json.dumps(transitions),
+        invoice_id,
+    )
+    return _lookup.require_row(ctx, "invoices", "invoice", invoice_id, param="invoice")
+
+
+def _resolve_pm(
+    ctx: seahaven.Ctx, invoice_row: Mapping[str, Any], sub_row: Mapping[str, Any] | None
+) -> dict[str, Any] | None:
+    """The invoice payment's resolution chain: the subscription's default,
+    then the customer's `invoice_settings.default_payment_method`."""
+    pm_id = None
+    if sub_row is not None:
+        pm_id = sub_row["default_payment_method"]
+    if pm_id is None:
+        customer = _lookup.require_row(
+            ctx, "customers", "customer", invoice_row["customer"], param="customer"
+        )
+        settings = _load_dict(customer["invoice_settings"])
+        pm_id = settings.get("default_payment_method")
+    if pm_id is None:
+        return None
+    return _lookup.require_live_row(
+        ctx, "payment_methods", "PaymentMethod", pm_id, param="payment_method"
+    )
+
+
+def pay_invoice(
+    ctx: seahaven.Ctx,
+    invoice_id: str,
+    *,
+    sub_row: Mapping[str, Any] | None = None,
+    pm_row: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """One collection attempt on an open invoice. The outcome dictionary
+    carries `outcome` ∈ `paid | failed | requires_action | no_payment_method`
+    and, on `failed`, the `error` envelope a caller may return or raise.
+
+    A decline is an outcome, not an exception — the invoice's rows survive
+    with `attempt_count` advanced (the raise-loses rule)."""
+    row = _lookup.require_row(ctx, "invoices", "invoice", invoice_id, param="invoice")
+    if row["status"] != "open":
+        # Phase 13's /pay route owns the `status_transition_invalid` 400;
+        # unreachable from Phase 12's callers (see finalize_invoice).
+        raise seahaven.WorldBug(f"pay_invoice on a {row['status']!r} invoice")
+    if row["amount_due"] == 0:
+        return _mark_paid(ctx, row, charge_free=True)
+    if pm_row is None:
+        pm_row = _resolve_pm(ctx, row, sub_row)
+    if pm_row is None:
+        # Nothing attempted: the recorded shape of the resume-time cycle
+        # invoice (`attempted: false`, the count untouched).
+        return {"outcome": "no_payment_method"}
+    tags = payment_intents._behavior_tags(pm_row)
+    if tags.get("three_d_secure") == "required":
+        _attempted_without_count(ctx, invoice_id)
+        return {"outcome": "requires_action"}
+    if "charge_declined" in tags:
+        code = tags["charge_declined"]
+        decline_code = tags.get("decline_code")
+        message = payment_intents._DECLINE_MESSAGES.get((code, decline_code))
+        if message is None:
+            raise seahaven.WorldBug(
+                f"no recorded message for decline ({code!r}, {decline_code!r}): "
+                "add the card's message to _DECLINE_MESSAGES"
+            )
+        charge = charges.insert_charge(
+            ctx,
+            payment_intent=None,
+            pm_row=pm_row,
+            amount=row["amount_due"],
+            captured=True,
+            currency=row["currency"],
+            customer=row["customer"],
+            description="Subscription creation"
+            if row["billing_reason"] == "subscription_create"
+            else None,
+            receipt_email=None,
+            shipping=None,
+            statement_descriptor=None,
+            statement_descriptor_suffix=None,
+            failure_code=code,
+            failure_message=message,
+            outcome=charges.outcome_declined(decline_code or "generic_decline"),
+        )
+        _count_attempt(ctx, invoice_id)
+        events.emit_event(ctx, type="charge.failed", obj=charges.serialize(ctx, charge))
+        error = declined_body(
+            code=code,
+            decline_code=decline_code,
+            message=message,
+            charge=charge["id"],
+        )
+        return {"outcome": "failed", "error": error}
+    charge = charges.insert_charge(
+        ctx,
+        payment_intent=None,
+        pm_row=pm_row,
+        amount=row["amount_due"],
+        captured=True,
+        currency=row["currency"],
+        customer=row["customer"],
+        description="Subscription creation"
+        if row["billing_reason"] == "subscription_create"
+        else None,
+        receipt_email=None,
+        shipping=None,
+        statement_descriptor=None,
+        statement_descriptor_suffix=None,
+    )
+    events.emit_event(ctx, type="charge.succeeded", obj=charges.serialize(ctx, charge))
+    return _mark_paid(ctx, _re_read(ctx, invoice_id), charge_id=charge["id"], counted=True)
+
+
+def _re_read(ctx: seahaven.Ctx, invoice_id: str) -> dict[str, Any]:
+    return _lookup.require_row(ctx, "invoices", "invoice", invoice_id, param="invoice")
+
+
+def _count_attempt(ctx: seahaven.Ctx, invoice_id: str) -> None:
+    ctx.db.execute(
+        "UPDATE invoices SET attempted = 1, attempt_count = attempt_count + 1 WHERE id = ?",
+        invoice_id,
+    )
+
+
+def _attempted_without_count(ctx: seahaven.Ctx, invoice_id: str) -> None:
+    """The recorded 3DS shape: `attempted: true, attempt_count: 0` — the
+    action gate blocks the network attempt, so the counter never moves."""
+    ctx.db.execute("UPDATE invoices SET attempted = 1 WHERE id = ?", invoice_id)
+
+
+def _mark_paid(
+    ctx: seahaven.Ctx,
+    row: Mapping[str, Any],
+    *,
+    charge_free: bool = False,
+    charge_id: str | None = None,
+    counted: bool = False,
+) -> dict[str, Any]:
+    now = ctx.clock.iso()
+    transitions = _load_dict(row["status_transitions"])
+    transitions["paid_at"] = _time.to_unix(now)
+    ctx.db.execute(
+        "UPDATE invoices SET status = 'paid', attempted = 1,"
+        # A charge-free payment ($0 or negative-total settlement) attempts
+        # nothing: `attempted` flips but the counter stays (probed on the
+        # trial-conversion invoice, Phase 12 CR round 3: attempt_count 0).
+        " attempt_count = CASE WHEN ? THEN attempt_count + 1 ELSE attempt_count END,"
+        " amount_paid = ?, amount_remaining = 0, status_transitions = ? WHERE id = ?",
+        int(counted),
+        row["amount_due"],
+        _json.dumps(transitions),
+        row["id"],
+    )
+    # The single recovery hook (billing_engine §1): incomplete/past_due/unpaid
+    # -> active when their latest invoice reaches paid. Function-level import
+    # because subscription_lifecycle imports this module for its own flows.
+    from stripeapi.billing import subscription_lifecycle
+
+    subscription_lifecycle.on_invoice_paid(ctx, row["id"])
+    return {"outcome": "paid", "charge": charge_id}
+
+
+def mark_uncollectible_invoice(ctx: seahaven.Ctx, invoice_id: str) -> dict[str, Any]:
+    """open -> uncollectible, stamping `status_transitions
+    .marked_uncollectible_at` (§2's transition; the sibling of
+    `void_invoice`). Phase 13's /mark_uncollectible route replaces the
+    guard with the routed `status_transition_invalid` 400."""
+    row = _lookup.require_row(ctx, "invoices", "invoice", invoice_id, param="invoice")
+    if row["status"] != "open":
+        raise seahaven.WorldBug(f"mark_uncollectible_invoice on a {row['status']!r} invoice")
+    now = ctx.clock.iso()
+    transitions = _load_dict(row["status_transitions"])
+    transitions["marked_uncollectible_at"] = _time.to_unix(now)
+    ctx.db.execute(
+        "UPDATE invoices SET status = 'uncollectible', status_transitions = ? WHERE id = ?",
+        _json.dumps(transitions),
+        invoice_id,
+    )
+    return _re_read(ctx, invoice_id)
+
+
+def void_invoice(ctx: seahaven.Ctx, invoice_id: str) -> dict[str, Any]:
+    row = _lookup.require_row(ctx, "invoices", "invoice", invoice_id, param="invoice")
+    if row["status"] != "open":
+        # Phase 13's /void route owns the `status_transition_invalid` 400;
+        # unreachable from Phase 12's callers (see finalize_invoice).
+        raise seahaven.WorldBug(f"void_invoice on a {row['status']!r} invoice")
+    now = ctx.clock.iso()
+    transitions = _load_dict(row["status_transitions"])
+    transitions["voided_at"] = _time.to_unix(now)
+    ctx.db.execute(
+        "UPDATE invoices SET status = 'void', status_transitions = ? WHERE id = ?",
+        _json.dumps(transitions),
+        invoice_id,
+    )
+    return _re_read(ctx, invoice_id)

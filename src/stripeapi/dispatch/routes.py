@@ -42,6 +42,8 @@ from stripeapi.resources import (
     promotion_codes,
     refunds,
     setup_intents,
+    subscription_items,
+    subscriptions,
     tax_rates,
 )
 
@@ -1016,19 +1018,50 @@ ALL: Final[tuple[Route, ...]] = (
         params=setup_intents.SETI_VERIFY_MICRODEPOSITS,
         handler=setup_intents.verify_microdeposits,
     ),
-    # subscription_items
-    Route(method="GET", pattern="/v1/subscription_items", op_id="GetSubscriptionItems"),
-    Route(method="POST", pattern="/v1/subscription_items", op_id="PostSubscriptionItems"),
-    Route(method="GET", pattern="/v1/subscription_items/{item}", op_id="GetSubscriptionItemsItem"),
+    # subscription_items — hand-written transitions (each write moves the
+    # subscription too), oldest-first list (probed, Phase 12)
+    Route(
+        method="GET",
+        pattern="/v1/subscription_items",
+        op_id="GetSubscriptionItems",
+        response_object="subscription_item",
+        envelope="list",
+        params=subscription_items.ITEM_LIST,
+        handler=subscription_items.list_,
+    ),
+    Route(
+        method="POST",
+        pattern="/v1/subscription_items",
+        op_id="PostSubscriptionItems",
+        response_object="subscription_item",
+        envelope="object",
+        params=subscription_items.ITEM_CREATE,
+        handler=subscription_items.create,
+    ),
+    Route(
+        method="GET",
+        pattern="/v1/subscription_items/{item}",
+        op_id="GetSubscriptionItemsItem",
+        response_object="subscription_item",
+        envelope="object",
+        params=subscription_items.ITEM_RETRIEVE,
+        handler=subscription_items.retrieve,
+    ),
     Route(
         method="POST",
         pattern="/v1/subscription_items/{item}",
         op_id="PostSubscriptionItemsItem",
+        response_object="subscription_item",
+        envelope="object",
+        params=subscription_items.ITEM_UPDATE,
+        handler=subscription_items.update,
     ),
     Route(
         method="DELETE",
         pattern="/v1/subscription_items/{item}",
         op_id="DeleteSubscriptionItemsItem",
+        params=subscription_items.ITEM_DELETE,
+        handler=subscription_items.delete,
     ),
     # subscription_schedules
     Route(method="GET", pattern="/v1/subscription_schedules", op_id="GetSubscriptionSchedules"),
@@ -1053,24 +1086,11 @@ ALL: Final[tuple[Route, ...]] = (
         pattern="/v1/subscription_schedules/{schedule}/release",
         op_id="PostSubscriptionSchedulesScheduleRelease",
     ),
-    # subscriptions
-    Route(method="GET", pattern="/v1/subscriptions", op_id="GetSubscriptions"),
-    Route(method="POST", pattern="/v1/subscriptions", op_id="PostSubscriptions"),
-    Route(
-        method="GET",
-        pattern="/v1/subscriptions/{subscription_exposed_id}",
-        op_id="GetSubscriptionsSubscriptionExposedId",
-    ),
-    Route(
-        method="POST",
-        pattern="/v1/subscriptions/{subscription_exposed_id}",
-        op_id="PostSubscriptionsSubscriptionExposedId",
-    ),
-    Route(
-        method="DELETE",
-        pattern="/v1/subscriptions/{subscription_exposed_id}",
-        op_id="DeleteSubscriptionsSubscriptionExposedId",
-    ),
+    # subscriptions — create/update/cancel/resume are the status machine
+    # (hand-written, in the lifecycle module); the list is hand-written for
+    # its `status=all`/`ended` filter spellings and the `price` membership
+    # filter. The legacy customer-scoped aliases, `/migrate` and the
+    # discount sub-routes stay unwired (Phase 12's declared scope cuts).
     Route(
         method="DELETE",
         pattern="/v1/subscriptions/{subscription_exposed_id}/discount",
@@ -1082,9 +1102,57 @@ ALL: Final[tuple[Route, ...]] = (
         op_id="PostSubscriptionsSubscriptionMigrate",
     ),
     Route(
+        method="GET",
+        pattern="/v1/subscriptions",
+        op_id="GetSubscriptions",
+        response_object="subscription",
+        envelope="list",
+        params=subscriptions.SUB_LIST,
+        handler=subscriptions.list_,
+    ),
+    Route(
+        method="POST",
+        pattern="/v1/subscriptions",
+        op_id="PostSubscriptions",
+        response_object="subscription",
+        envelope="object",
+        params=subscriptions.SUB_CREATE,
+        handler=subscriptions.create,
+    ),
+    Route(
+        method="GET",
+        pattern="/v1/subscriptions/{subscription_exposed_id}",
+        op_id="GetSubscriptionsSubscriptionExposedId",
+        response_object="subscription",
+        envelope="object",
+        params=subscriptions.SUB_RETRIEVE,
+        resource=subscriptions.SPEC,
+        action="retrieve",
+    ),
+    Route(
+        method="POST",
+        pattern="/v1/subscriptions/{subscription_exposed_id}",
+        op_id="PostSubscriptionsSubscriptionExposedId",
+        response_object="subscription",
+        envelope="object",
+        params=subscriptions.SUB_UPDATE,
+        handler=subscriptions.update,
+    ),
+    Route(
+        method="DELETE",
+        pattern="/v1/subscriptions/{subscription_exposed_id}",
+        op_id="DeleteSubscriptionsSubscriptionExposedId",
+        params=subscriptions.SUB_DELETE,
+        handler=subscriptions.cancel,
+    ),
+    Route(
         method="POST",
         pattern="/v1/subscriptions/{subscription}/resume",
         op_id="PostSubscriptionsSubscriptionResume",
+        response_object="subscription",
+        envelope="object",
+        params=subscriptions.SUB_RESUME,
+        handler=subscriptions.resume,
     ),
     # tax_rates
     Route(

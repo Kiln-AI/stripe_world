@@ -487,6 +487,20 @@ def _bt_settlement_status(recorded: Any, replayed: Any) -> bool:
     return recorded == "available" and replayed == "pending"
 
 
+#: The duplicate-price refusal: its only variable content is the price id
+#: (probed, Phase 12); form-only comparison.
+_DUP_PRICE = re.compile(
+    r"^Cannot create a Subscription with multiple Subscription Items with the "
+    r"same Price: price_[A-Za-z0-9]+$"
+)
+
+
+def _dup_price_modulo_id(recorded: Any, replayed: Any) -> bool:
+    if not isinstance(recorded, str) or not isinstance(replayed, str):
+        return False
+    return bool(_DUP_PRICE.fullmatch(recorded) and _DUP_PRICE.fullmatch(replayed))
+
+
 #: The dispute settle collapse (Phase 9): live test mode resolves the magic
 #: evidence strings asynchronously, answering `under_review`-shaped statuses
 #: and flipping seconds later; this world's frozen clock settles inside the
@@ -1360,6 +1374,161 @@ ALLOWED_DIFFERENCES: list[AllowedDifference] = [
         "request.",
         scenario="03_malformed_stripe_version",
     ),
+    # --- the subscriptions slice's reference pairs and periods (Phase 12) ---
+    AllowedDifference(
+        "**.latest_invoice",
+        "The first invoice's freshly minted `in_` id — the `**.id` rule on "
+        "the field a subscription's invoice reference lands on, predicated "
+        "to id-shaped pairs (and null pairs) so a real divergence fails.",
+        predicate=_both_prefixed_ids("in_"),
+    ),
+    AllowedDifference(
+        "**.subscription",
+        "A subscription_item's parent reference carries the minted `sub_` "
+        "id — the `**.id` rule, predicated.",
+        predicate=_both_prefixed_ids("sub_"),
+    ),
+    AllowedDifference(
+        "**.pending_setup_intent",
+        "The resume flow's SetupIntent id is minted per instance — the "
+        "`**.id` rule on the pause/resume machinery's reference.",
+        predicate=_both_prefixed_ids("seti_"),
+    ),
+    AllowedDifference(
+        "**.default_payment_method",
+        "A subscription's explicit default-method reference — minted `pm_` "
+        "ids both sides, predicated so a non-id divergence still fails.",
+        predicate=_both_prefixed_ids("pm_"),
+    ),
+    AllowedDifference(
+        "**.start_date",
+        "The subscription's start is the creation clock — the `**.created` "
+        "reasoning on the one timestamp field the suffix rule cannot catch "
+        "(`start_date` carries no `_at`).",
+        predicate=lambda recorded, replayed: (
+            isinstance(recorded, int) and isinstance(replayed, int)
+        ),
+    ),
+    AllowedDifference(
+        "**.billing_cycle_anchor",
+        "The anchor is the creation clock (or a caller timestamp, which "
+        "then compares equal); predicated to integer pairs so only the "
+        "clock-derived case is admitted.",
+        predicate=lambda recorded, replayed: (
+            isinstance(recorded, int) and isinstance(replayed, int)
+        ),
+    ),
+    AllowedDifference(
+        "**.current_period_start",
+        "An item's period opens at the subscription's clock-derived anchor "
+        "— the `**.created` reasoning on the period pair this version "
+        "carries per item (there is no subscription-level period).",
+        predicate=lambda recorded, replayed: (
+            isinstance(recorded, int) and isinstance(replayed, int)
+        ),
+    ),
+    AllowedDifference(
+        "**.current_period_end",
+        "An item's period closes one calendar interval past its start "
+        "(clock-derived) — the same reasoning as its start.",
+        predicate=lambda recorded, replayed: (
+            isinstance(recorded, int) and isinstance(replayed, int)
+        ),
+    ),
+    AllowedDifference(
+        "**.trial_start",
+        "A trial's start is the creation clock — `**.created` again, on "
+        "the field name the suffix rule cannot catch.",
+        predicate=lambda recorded, replayed: (
+            isinstance(recorded, int) and isinstance(replayed, int)
+        ),
+    ),
+    AllowedDifference(
+        "**.trial_end",
+        "A caller-supplied trial end compares equal; the `trial_end: "
+        '"now"` path derives the instant from the clock, which is the '
+        "only pair this entry admits.",
+        predicate=lambda recorded, replayed: (
+            isinstance(recorded, int) and isinstance(replayed, int)
+        ),
+    ),
+    # The live-only legacy echoes the pinned spec does not declare
+    # (recorded, Phase 12); the spec is the authority for shape.
+    AllowedDifference(
+        "**.plan",
+        "The live subscription and item bodies carry a legacy `plan` "
+        "object the pinned spec no longer declares; omitted here like "
+        "every other undeclared live field.",
+        predicate=lambda recorded, replayed: isinstance(recorded, dict) and replayed is None,
+    ),
+    AllowedDifference(
+        "body.quantity",
+        "The live subscription body's legacy top-level `quantity` echo "
+        "(item 0's quantity, probed present even on a two-item "
+        "subscription); undeclared at the pinned version and omitted. "
+        "Path-scoped so an item's own `quantity` still compares byte-exact.",
+        predicate=lambda recorded, replayed: isinstance(recorded, int) and replayed is None,
+    ),
+    AllowedDifference(
+        "body.data[*].quantity",
+        "The list-bodies form of the legacy subscription `quantity` echo.",
+        predicate=lambda recorded, replayed: isinstance(recorded, int) and replayed is None,
+    ),
+    AllowedDifference(
+        "**.current_trial",
+        "The live item body's `current_trial` echo; undeclared at the pinned version, omitted.",
+        predicate=lambda recorded, replayed: replayed is None,
+    ),
+    AllowedDifference(
+        "**.items.total_count",
+        "The live `items` envelope carries `total_count`, which the pinned "
+        "spec's nested list schema does not declare — the `charge.refunds` "
+        "ruling (Phase 9), omitted and allow-listed.",
+        predicate=lambda recorded, replayed: replayed is None,
+    ),
+    AllowedDifference(
+        "**.trial_settings.end_behavior.billing_cycle_anchor",
+        "The live trial_settings echo carries `billing_cycle_anchor: "
+        '"now"`, undeclared at the pinned version; omitted.',
+        predicate=lambda recorded, replayed: recorded == "now" and replayed is None,
+    ),
+    AllowedDifference(
+        "**.pending_update.cancel_at_period_end",
+        "The live pending_update echo carries `cancel_at_period_end` "
+        "(null), undeclared at the pinned version; this world's parked "
+        "update follows the schema's property set.",
+        predicate=lambda recorded, replayed: recorded is None and replayed is None,
+    ),
+    AllowedDifference(
+        "**.billing_mode.type",
+        "The recording account's dashboard default is flexible billing "
+        "mode; this world's constant is `classic` until the flexible-mode "
+        "phase (conformance scenario 1's business). Predicated to exactly "
+        "that pair.",
+        predicate=lambda recorded, replayed: recorded == "flexible" and replayed == "classic",
+    ),
+    AllowedDifference(
+        "**.billing_mode.flexible",
+        "The flexible-mode configuration object, present on the recording "
+        "account's bodies and null on this world's classic ones.",
+        predicate=lambda recorded, replayed: isinstance(recorded, dict) and replayed is None,
+    ),
+    AllowedDifference(
+        "**.pending_update.billing_cycle_anchor",
+        "The parked resume's anchor target: cassette 12's resume body parks "
+        "null where this world parks the instant the confirming SetupIntent "
+        "applies (`now` -> the resume moment, `unchanged` -> the stored "
+        "anchor). Predicated to that recorded-null/replayed-integer pair so "
+        "any other divergence on the field still fails.",
+        predicate=lambda recorded, replayed: recorded is None and isinstance(replayed, int),
+    ),
+    AllowedDifference(
+        "**.error.message",
+        "The duplicate-price refusal names the price id — the `**.id` rule "
+        "where the id is the message's whole variable content, narrowed to "
+        "the recorded form.",
+        predicate=_dup_price_modulo_id,
+    ),
 ]
 
 # --- Structural differences ------------------------------------------------------
@@ -1525,6 +1694,56 @@ STRUCTURAL_DIFFERENCES: list[str] = [
     "available balance instead. The `instant_available` bucket itself is "
     "omitted from /v1/balance while empty (spec-optional), so the "
     "substituted draw is unobservable through the tools.",
+    "The resume flow's SetupIntent lifecycle: live mints it (at trial "
+    "create without a payment method, reused by /resume) and it reads "
+    "`canceled` moments later, refusing its own confirm — an async expiry "
+    "a frozen clock cannot reproduce and no tool could survive. This "
+    "world's seti is a real requires-confirmation row: confirming it pays "
+    "the cycle invoice and applies the parked update (`paused` -> `active`, "
+    "the documented mechanism), which is the unit-tested path the recording "
+    "cannot carry (`tests/billing/test_subscription_machine.py`).",
+    "The recorded pause collapses each item's period to the pause instant "
+    "(`[trial_start, pause_moment)`); under a frozen clock that instant "
+    "equals the trial start and the schema's "
+    "`current_period_start < current_period_end` CHECK forbids a "
+    "zero-length period, so the items keep their `[start, trial_end)` "
+    "periods. The honest frozen-clock analog, declared here (Phase 12).",
+    "The decline-card subscription creation is **not recorded**, and this "
+    "round's probe closed the last apparent route to it: every decline-table "
+    "token except `4000000000000341` refuses attach (probed, Phase 6), "
+    "`…0341` has no token spelling (probed, Phase 12), and the raw PAN is "
+    "refused by the recording account itself (402, 'Sending credit card "
+    "numbers directly to the Stripe API is generally unsafe…' — Phase 6's "
+    "declaration; re-confirmed against a subscription flow, Phase 12 CR "
+    "round). No step on this account can reach a subscription whose first "
+    "charge declines; recording one needs a host whose account enables raw "
+    "card data. The `incomplete`-by-decline branch (open invoice, "
+    "attempt_count advanced, `invoice.payment_failed`, sub `incomplete`) is "
+    "spec-derived and unit-tested; cassette 12 carries the 3DS flavor, "
+    "which the `tok_threeDSecure2Required` token reaches.",
+    "A future `billing_cycle_anchor` on create is refused here until the "
+    "proration phase: the stub-period first invoice bills a flexible-mode "
+    "fraction (116 recorded for a $30/10-day stub — the recording "
+    "account's own mode) whose arithmetic conformance scenario 1 exists to "
+    "settle. `billing_cycle_anchor` on update is the same cut (`now` "
+    "truncates and prorates).",
+    "Subscription invoice events are deferred to the invoices phase: an "
+    "event's data.object is the verbatim serialized object "
+    "(cross_cutting §3.4.3), and the invoice serializer is Phase 13's. The "
+    "invoice rows themselves are written now (creation, trial, resume, "
+    "advance_cycle); only their `invoice.*` emissions wait.",
+    "Item-level proration is the proration phase's span: item "
+    "create/update/delete and `proration_behavior` are accepted and "
+    "validated, and no proration lines are generated until Phase 14 lands "
+    "`proration_lines` (implementation plan Phase 14: 'the behavior "
+    "spanning Phases 12 and 13').",
+    "The recorded pending_update's `billing_cycle_anchor` disagrees "
+    "between recordings (null in cassette 12's resume body, a timestamp in "
+    "the ad-hoc probe); this world parks the anchor the confirming "
+    "SetupIntent will apply — `now` resolves to the resume instant, "
+    "`unchanged` to the stored anchor — where the cassette parks null. The "
+    "predicated `**.pending_update.billing_cycle_anchor` entry carries the "
+    "pair the replay diff sees.",
 ]
 
 # --- Matching --------------------------------------------------------------------

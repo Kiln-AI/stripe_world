@@ -57,7 +57,9 @@ def test_a_lifted_parameter_the_operation_refuses_is_unknown(instance: seahaven.
 
 def test_literal_choice_rejected(instance: seahaven.Instance) -> None:
     error = error_of(write(instance, "/v1/customers", {"tax_exempt": "sometimes"}))
-    assert error["code"] == "parameter_invalid_string"
+    # Recorded (Phase 12, the subscriptions cassette): a bad literal answers
+    # type/message/param with no `code` — the one refusal family that does.
+    assert "code" not in error
     assert error["param"] == "tax_exempt"
     assert "must be one of" in error["message"]
 

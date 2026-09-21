@@ -363,7 +363,7 @@ def record_capture_ledger(
 def insert_charge(
     ctx: seahaven.Ctx,
     *,
-    payment_intent: str,
+    payment_intent: str | None,
     pm_row: Mapping[str, Any],
     amount: int,
     captured: bool,
@@ -381,7 +381,9 @@ def insert_charge(
 ) -> dict[str, Any]:
     """Write one charge row and return it re-read. The one place a `ch_` row
     is born; the PaymentIntent transitions and (later) the billing engine
-    both come through here so the shape cannot fork. A charge that captures
+    both come through here so the shape cannot fork — an invoice-born charge
+    (Phase 12's `pay_invoice`) passes `payment_intent=None`, the column's
+    NULL. A charge that captures
     inside this call takes its ledger row immediately
     (`record_capture_ledger`); a manual hold's row lands at the capture
     transition."""

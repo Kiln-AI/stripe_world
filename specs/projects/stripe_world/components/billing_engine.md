@@ -258,16 +258,16 @@ def finalize_invoice(ctx, invoice_id: str, *, auto_advance: bool | None = None) 
     status_transitions.finalized_at and confirmation_secret. Emits invoice.finalized.
     Raises StripeApiError(400, invalid_request_error, 'invoice_not_editable') if not draft."""
 
-def pay_invoice(ctx, invoice_id: str, *, payment_method_id: str | None = None,
-                off_session: bool = True, paid_out_of_band: bool = False,
-                automatic: bool = False) -> dict:
-    """Attempt collection on an open invoice. `automatic=True` marks this as a retry
-    driven by the dunning schedule, which is the ONLY thing that increments attempt_count
-    past 1. Returns the invoice row. A decline is a return value, not an exception:
-    the invoice stays `open` and invoice.payment_failed is emitted."""
+def pay_invoice(ctx, invoice_id: str, *, sub_row: Mapping | None = None,
+                pm_row: Mapping | None = None) -> dict
+    """One collection attempt on an open invoice (open only — Phase 13's /pay
+    route owns the status_transition_invalid 400). Returns the outcome dict:
+    `outcome` ∈ paid | failed | requires_action | no_payment_method. A decline
+    is an outcome, not an exception — the invoice's rows survive with
+    attempt_count advanced (the raise-loses rule)."""
 
 def void_invoice(ctx, invoice_id: str) -> dict
-def mark_uncollectible(ctx, invoice_id: str) -> dict
+def mark_uncollectible_invoice(ctx, invoice_id: str) -> dict
 def delete_draft_invoice(ctx, invoice_id: str) -> dict
 def compute_automatically_finalizes_at(created_iso: str, *, auto_advance: bool,
                                        collection_method: str) -> str | None
@@ -281,9 +281,10 @@ def apply_update(ctx, subscription_id: str, params: dict) -> dict
 def cancel_subscription(ctx, subscription_id: str, *, prorate: bool = False,
                         invoice_now: bool = False,
                         cancellation_details: dict | None = None) -> dict
-def resume_subscription(ctx, subscription_id: str, *, billing_cycle_anchor: str = "now",
-                        proration_behavior: str = "create_prorations",
-                        proration_date: int | None = None) -> dict
+def resume_subscription(ctx, subscription_id: str, *, billing_cycle_anchor: str = "now") -> dict
+    # The proration family on /resume (`proration_behavior`, `proration_date`) is
+    # accepted by the parameter layer and lands with Phase 14's proration span;
+    # the recorded park itself needs neither.
 def advance_cycle(ctx, subscription_id: str) -> dict
     """Roll the items' periods forward and create the subscription_cycle invoice.
     FIXTURE-GENERATOR AND TEST ONLY: it is not routed, because nothing in a frozen-clock
@@ -368,10 +369,10 @@ nothing here invents one.
 | Finalize a manual invoice with no lines | 400 | `invalid_request_error` | `invoice_no_customer_line_items` |
 | Pay an invoice whose charge declines | 402 | `card_error` | `card_declined` (+ `decline_code`) |
 | Pay an invoice needing 3DS off-session | 400 | `invalid_request_error` | `invoice_payment_intent_requires_action` |
-| `payment_behavior=error_if_incomplete` and the first invoice fails | 402 | `card_error` | `card_declined` (+ `decline_code`); **no subscription row is written** |
-| `payment_behavior=pending_if_incomplete` on create | 400 | `invalid_request_error` | `parameter_unknown`, `param="payment_behavior"` |
-| Update a `canceled` / `incomplete_expired` subscription | 400 | `invalid_request_error` | `status_transition_invalid` |
-| Update anything but `metadata` / `default_source` on an `incomplete` subscription | 400 | `invalid_request_error` | `status_transition_invalid` |
+| `payment_behavior=pending_if_incomplete` on create | 400 | `invalid_request_error` | *(none)* — message "Setting \`payment_behavior\` to \`pending_if_incomplete\` has no effect when creating a subscription.", `param="payment_behavior"` (recorded, Phase 12; corrects this row's earlier `parameter_unknown`) |
+| `payment_behavior=error_if_incomplete` and the first payment needs action | 402 | `card_error` | `subscription_payment_intent_requires_action` (recorded, Phase 12); **no subscription row is written** |
+| Update a `canceled` / `incomplete_expired` subscription beyond `metadata` / `cancellation_details` | 400 | `invalid_request_error` | `invalid_canceled_subscription_fields` — "A canceled subscription can only update its cancellation_details and metadata." (recorded, Phase 12; corrects this row's earlier `status_transition_invalid`. `metadata` itself succeeds on a canceled row) |
+| Update anything but `metadata` / `default_source` / `default_payment_method` / `description` on an `incomplete` subscription | 400 | `invalid_request_error` | `status_transition_invalid` (code from this table; `metadata` and `description` succeed — recorded, Phase 12 — and `default_payment_method` accepts both a set and the `""` clear — probed live on an incomplete 3DS subscription, Phase 12 CR round 2; the natural rescue-by-reattach move. The refusal's message spelling is unprobed, declared) |
 | Expired coupon applied | 400 | `invalid_request_error` | `coupon_expired` |
 | Payout exceeding the available balance | 400 | `invalid_request_error` | `balance_insufficient` |
 | Refund a charge with an open dispute | 400 | `invalid_request_error` | `charge_disputed` |
@@ -401,11 +402,11 @@ transaction Seahaven opens for the call.
 
 | Trigger | Guard | → | Side effects | Events |
 |---|---|---|---|---|
-| `create` | `trial_end` in the future, or `trial_period_days > 0` | `trialing` | Items' periods span `[now, trial_end)`; `trial_start`/`trial_end` set; **no invoice**; `billing_cycle_anchor := trial_end` | `customer.subscription.created` |
+| `create` | `trial_end` in the future, or `trial_period_days > 0` | `trialing` | Items' periods span `[now, trial_end)`; `trial_start`/`trial_end` set; a **paid $0 `subscription_create` invoice** whose line is `Free trial for 1 × <product>` over `[start, trial_end)` (recorded, Phase 12 — corrects this row's earlier "no invoice"); `billing_cycle_anchor := trial_end` | `customer.subscription.created`, `invoice.created`, `invoice.finalized`, `invoice.paid` |
 | `create` | no trial, first invoice total ≤ 0 | `active` | `subscription_create` invoice created, finalized, `paid` with `amount_due = 0` | `customer.subscription.created`, `invoice.created`, `invoice.finalized`, `invoice.paid` |
-| `create` | `collection_method = send_invoice` | `active` | Invoice created + finalized, left `open` with `due_date = now + days_until_due`. Activation does **not** depend on payment — `spec3.json` verbatim | `customer.subscription.created`, `invoice.created`, `invoice.finalized`, `invoice.sent` |
+| `create` | `collection_method = send_invoice` | `active` | Invoice created and left **`draft`** with `auto_advance = 1` and `due_date = now + days_until_due` (recorded, Phase 12 — corrects this table's earlier "created + finalized, left open"; the hour window follows). Activation does **not** depend on payment — `spec3.json` verbatim | `customer.subscription.created` |
 | `create` | `charge_automatically`, payment required, charge succeeds | `active` | Invoice created → finalized → `paid`; charge + `balance_transaction` | `customer.subscription.created`, `invoice.created`, `invoice.finalized`, `invoice.payment_succeeded`, `invoice.paid` |
-| `create` | `payment_behavior ∈ {allow_incomplete, default_incomplete}`, charge fails | `incomplete` | Invoice stays `open`; `attempt_count = 1`; `latest_invoice` set. Only `metadata` and `default_source` are updatable from here | `customer.subscription.created`, `invoice.created`, `invoice.finalized`, `invoice.payment_failed` |
+| `create` | `payment_behavior ∈ {allow_incomplete, default_incomplete}`, charge fails or needs action | `incomplete` | Invoice stays `open` (a decline: `attempted = 1, attempt_count = 1`; 3DS: `attempted = 1, attempt_count = 0` — recorded, Phase 12); `latest_invoice` set. `metadata` and `description` are updatable from here (recorded, Phase 12) | `customer.subscription.created`, `invoice.created`, `invoice.finalized`, `invoice.payment_failed` |
 | `create` | `payment_behavior = default_incomplete`, payment required | `incomplete` | Same as above, but the PaymentIntent is created **unconfirmed** and no charge is attempted; `confirmation_secret` is the agent's handle | `customer.subscription.created`, `invoice.created`, `invoice.finalized` |
 | `create` | `payment_behavior = error_if_incomplete`, charge fails | — | **Nothing is written.** 402 `card_error`. The whole call rolls back with Seahaven's per-call transaction | — |
 | `create` | `payment_behavior = pending_if_incomplete` | — | 400. Update-only value | — |
@@ -430,18 +431,19 @@ otherwise-mysterious `paused` status, and it is the reason `paused` is "only rea
 | Trigger | Guard | → | Side effects | Events |
 |---|---|---|---|---|
 | `trial_end` | default payment method present | `active` | `subscription_cycle` invoice for the first paid period, finalized, paid | `customer.subscription.updated`, `invoice.*` |
-| `trial_end` | no PM, `missing_payment_method = create_invoice` (Stripe's default) | `active` → likely `past_due` | Invoice created and finalized; collection is attempted and fails; falls straight into the `past_due` row below | `customer.subscription.updated`, `invoice.payment_failed` |
+| `trial_end` | **`charge_automatically`**, no PM, `missing_payment_method = create_invoice` (Stripe's default) | — | **400** `resource_missing`, the no-attached-payment-source message, nothing written (recorded, Phase 12 — corrects this table's earlier "falls into past_due"; the invoice the behavior names cannot be collected without a method. `send_invoice` never refuses here — probed, Phase 12 CR round 5: 200 `active`, the invoice left **draft** with `auto_advance: true`, `attempted: false`, `attempt_count: 0`, `due_date = now + days_until_due`, and no charge with or without a PM) | — |
 | `trial_end` | no PM, `missing_payment_method = pause` | `paused` | **No invoice is generated at all** while paused — this is what distinguishes it from `pause_collection` | `customer.subscription.paused` |
-| `trial_end` | no PM, `missing_payment_method = cancel` | `canceled` | `canceled_at = now`, `ended_at = now`, `cancellation_details.reason = payment_failed` | `customer.subscription.deleted` |
+| `trial_end` | no PM, `missing_payment_method = cancel` | `canceled` | `canceled_at = now`, `ended_at = now`, `cancellation_details.reason = payment_failed`… **corrected by the Phase 12 recording: the stamp is `cancellation_requested`** | `customer.subscription.deleted` |
 | `trial_will_end` | fixture/test only | unchanged | none | `customer.subscription.trial_will_end` |
-| `update trial_end = "now"` | — | `active` (or `past_due`) | Ends the trial immediately and runs the `trial_end` path above | `customer.subscription.updated` |
+| `update trial_end = "now"` | — | `active` (or `past_due`) | Ends the trial immediately and runs the `trial_end` path above; the update-driven end's first paid invoice bills `billing_reason: subscription_update` with its line spanning the NEW period `[now, now + interval)` (probed in both billing modes, Phase 12 CR round 4's trail — correcting this row's earlier `subscription_cycle`; `advance_cycle`'s natural-boundary walker keeps `subscription_cycle`, unprobed) | `customer.subscription.updated` |
+| `update trial_end = <future>` on `active` | — | `trialing` | The conversion edge (probed, Phase 12 CR round 3/4's trail): `trial_start = now`, the item period rebuilds to `[now, trial_end)`, the anchor moves to the trial end, and one `subscription_update` invoice is minted — a full-price `Unused time on <product> after <date>` proration credit for the abandoned remainder plus the $0 `Free trial` line, paid with no counted attempt, the credit landing as customer balance. Conversions from other statuses are unprobed and refused | `customer.subscription.updated` |
 
 #### Out of `paused`
 
 | Trigger | Guard | → | Side effects | Events |
 |---|---|---|---|---|
-| `resume` (`POST /v1/subscriptions/{id}/resume`) | a default payment method now exists | `active` | `billing_cycle_anchor ∈ {now, unchanged}` (default `now`); with `now`, periods restart at `now` and **no proration is produced**; with `unchanged`, `proration_behavior` applies to the un-invoiced gap | `customer.subscription.resumed`, `customer.subscription.updated` |
-| `resume` | no payment method | — | 400 `status_transition_invalid` | — |
+| `resume` (`POST /v1/subscriptions/{id}/resume`) | any (with or without a payment method — both probed) | `paused` (unchanged) | **The recorded park (Phase 12)**: 200 with the status still `paused`; a SetupIntent is minted (at trial create for a no-PM trial, reused by `/resume`), the resume lands as `pending_update` with `expires_at = now + 23h`, the anchor target is recorded, and a `subscription_cycle` invoice is created open and unattempted. Activation happens when the SetupIntent confirms — this world wires that hook; live's minted seti reads `canceled` within moments (an async artifact, declared) | `customer.subscription.updated` |
+| `resume` | the subscription is not `paused` | — | 400 "You can only resume a subscription if it is \`paused\`." (recorded); on a terminal status, the 404 `No such subscription` (recorded) | — |
 
 `paused` and `pause_collection` are unrelated and must never be conflated:
 
@@ -455,8 +457,17 @@ otherwise-mysterious `paused` status, and it is the reason `paused` is "only rea
 
 `pause_collection.behavior` is applied by `advance_cycle`, not by the status machine: the cycle
 invoice is created as usual and then immediately taken to `draft` (kept), `uncollectible`, or `void`.
-`keep_as_draft` is the case that overlaps behaviorally with `unpaid` (both leave `draft` invoices)
-while leaving `status` untouched.
+`keep_as_draft` is the case that overlaps behaviorally with `unpaid` (both leave `draft`
+invoices) while leaving `status` untouched.
+
+**Itemless subscriptions** (settled, Phase 12 CR round 7): `spec3.json` blesses the
+delete-the-last-item state ("Removing a subscription item from a subscription will not cancel
+the subscription"), and no item means no period. `cancel_at_period_end` sets the flag with a
+null `cancel_at`; a new item spans its own `[now, now + interval)` (the create shape); a trial
+end, conversion or resume bills nothing (no invoice is minted); and the unrouted `advance_cycle`
+refuses the state outright (an authoring fault, not stored state). Live's itemless-update shapes
+are unprobed — the item DELETE is not reachable through the recording surface — so every one of
+these outcomes is an honestly-declared unrecorded ruling.
 
 #### Out of `active`
 
@@ -496,7 +507,7 @@ because there is no new configuration to charge for.
 | Trigger | Guard | → | Side effects | Events |
 |---|---|---|---|---|
 | `invoice_paid` | the **most recent** invoice reaches `paid` | `active` | **Automatic. No `subscriptions.update` call is required or accepted as the trigger.** Implemented as the single hook `on_invoice_paid`, called from `pay_invoice` | `customer.subscription.updated`, `invoice.paid` |
-| `cycle_boundary` | — | `unpaid` | A `subscription_cycle` invoice is created and **left in `draft`**: never finalized, never attempted, `auto_advance = 0`, `automatically_finalizes_at = NULL` | `invoice.created` |
+| `cycle_boundary` | — | `unpaid` | A `subscription_cycle` invoice is created and **left in `draft`**: never finalized, never attempted, `auto_advance = 0`, `automatically_finalizes_at = NULL`. **Unpaid wins over a pause behavior** (settled, Phase 12 CR round 7): `void`/`mark_uncollectible` act on finalized invoices, and an unpaid renewal never becomes one — the draft stands exactly as `keep_as_draft` leaves it, and no `marked_uncollectible_at` stamp exists to write because §2's stamp marks an open → uncollectible transition this cell never performs | `invoice.created` |
 
 The `draft` ruling is a real, live contradiction inside Stripe's own corpus and is resolved here
 deliberately. `spec3.json`'s `subscription.status` prose says invoices are "immediately automatically
@@ -514,8 +525,11 @@ generated *after* it stays `draft`. `on_invoice_paid` therefore keys on "the sub
 #### Terminal states
 
 `canceled` and `incomplete_expired` have no outgoing transitions. Any `subscriptions.update` against
-either is `status_transition_invalid`. A test asserts the transition table has no row whose source is
-one of these two.
+either beyond `metadata` / `cancellation_details` is refused — `invalid_canceled_subscription_fields`
+(recorded, Phase 12, correcting the earlier `status_transition_invalid` spelling), with `metadata`
+updates succeeding — and the terminal paths that read an id (`DELETE`, `/resume`) answer the 404
+`No such subscription` (recorded, Phase 12). A test asserts the transition table has no row whose
+source is one of these two.
 
 ### 2. The invoice status machine
 
@@ -588,7 +602,7 @@ What this world emits, and when:
 |---|---|
 | `subscription_create` | `create_subscription` |
 | `subscription_cycle` | `advance_cycle`, at the period boundary with **zero lead time** |
-| `subscription_update` | `apply_update` with `proration_behavior = always_invoice` |
+| `subscription_update` | `apply_update` with `proration_behavior = always_invoice`; the update-driven trial end (`trial_end: "now"`) — probed in both billing modes, Phase 12 CR round 4's trail; the active→trialing conversion invoice — probed, round 3/5's trails |
 | `manual` | `POST /v1/invoices` with no subscription |
 | `automatic_pending_invoice_item_invoice` | `POST /v1/invoices` for a customer with pending `invoiceitems` and `subscription.pending_invoice_item_interval` set |
 | `subscription` | **never.** Legacy, pre-May-2018. A test asserts no row carries it |

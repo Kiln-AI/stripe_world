@@ -250,7 +250,13 @@ def _check(
         return _check_string(param, value, path)
     if kind == "literal":
         if not isinstance(value, str) or value not in param.choices:
-            raise _invalid("string", path, _choices_message(path, param.choices))
+            # Recorded (Phase 12, the subscriptions cassette): a bad literal
+            # answers type/message/param with NO `code` — unlike every
+            # `parameter_invalid_*` shape — so this one refusal is built
+            # directly rather than through `_invalid`.
+            raise invalid_request(
+                _choices_message(path, param.choices), param=path, pre_execution=True
+            )
         return value
     if kind == "integer":
         if not isinstance(value, int) or isinstance(value, bool):
@@ -284,9 +290,19 @@ def _check(
             raise _invalid("number", path, f"Invalid number: {value!r}")
         return value
     if kind == "id":
+        if value is None and param.unset_with_empty_string:
+            # The JSON spelling of Stripe's empty-string clear.
+            return None
         text = _check_string(param, value, path)
         if text is None:
-            # An id parameter never declares the empty-string-unset sentinel.
+            if param.unset_with_empty_string:
+                # Stripe's `""` clears the field (probed, Phase 12 CR round:
+                # a subscription update with `default_payment_method: ""`
+                # answers 200 with the field null); the handler writes the
+                # column's NULL. A JSON surface spells the same clear `null`.
+                return None
+            # An id parameter otherwise never declares the sentinel — an
+            # authoring mistake, not an agent error.
             raise seahaven.WorldBug(f"id parameter {path!r} cannot be cleared with an empty string")
         if param.id_prefixes and not text.startswith(param.id_prefixes):
             raise resource_missing(
@@ -294,6 +310,11 @@ def _check(
             )
         return text
     if kind == "timestamp":
+        if param.unset_with_empty_string and (value is None or value == ""):
+            # Stripe's `""` clears a scheduled timestamp (probed, round 6:
+            # `cancel_at: ""` clears the scheduled cancel); the JSON
+            # spelling of the same clear is `null`.
+            return None
         if not isinstance(value, int) or isinstance(value, bool):
             raise _invalid("integer", path, f"Invalid integer: {value}")
         return _time.from_unix(value)
@@ -342,8 +363,16 @@ def _check_range(param: Param, value: object, path: str) -> dict[str, str]:
     return bounds
 
 
-def _check_object(param: Param, value: object, path: str, id_status: int = 400) -> dict[str, Any]:
+def _check_object(
+    param: Param, value: object, path: str, id_status: int = 400
+) -> dict[str, Any] | None:
     if not isinstance(value, dict):
+        if param.unset_with_empty_string and (value is None or value == ""):
+            # Stripe's form encoding clears an object parameter with an
+            # empty string; a JSON surface spells the same clear `null`
+            # (probed Phase 12: `pause_collection=""` clears live). Both
+            # map to the column's NULL.
+            return None
         raise _invalid("string", path, f"Invalid {param.name}: must be an object")
     by_name = {shape.name: shape for shape in param.shape}
     for key in value:

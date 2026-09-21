@@ -9,6 +9,6 @@ which is why `ledger` keeps its own copy of the currency-symbol table
 rather than reaching for `refunds._CURRENCY_SYMBOLS`.
 """
 
-from stripeapi.billing import _money, ledger, magic_cards
+from stripeapi.billing import _money, invoicing, ledger, magic_cards, subscription_lifecycle
 
-__all__ = ["_money", "ledger", "magic_cards"]
+__all__ = ["_money", "invoicing", "ledger", "magic_cards", "subscription_lifecycle"]

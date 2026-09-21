@@ -13,10 +13,11 @@ and the recorded values are allow-listed rather than matched.
 """
 
 import decimal
+from collections.abc import Sequence
 from dataclasses import dataclass
 from fractions import Fraction
 
-__all__ = ["FeeSchedule", "round_half_up", "stripe_fee"]
+__all__ = ["FeeSchedule", "apportion", "round_half_up", "stripe_fee"]
 
 
 def round_half_up(value: Fraction) -> int:
@@ -27,6 +28,30 @@ def round_half_up(value: Fraction) -> int:
     """
     quotient = decimal.Decimal(value.numerator) / decimal.Decimal(value.denominator)
     return int(quotient.quantize(decimal.Decimal("1"), rounding=decimal.ROUND_HALF_UP))
+
+
+def apportion(total: int, weights: Sequence[int]) -> list[int]:
+    """Split `total` across `weights` so the parts sum EXACTLY to `total`.
+
+    Floor every share, then give the entire remainder to the LAST non-zero-weight
+    entry. This is Stripe's documented coupon-across-items rule, NOT independent
+    rounding: a $5 coupon split 1:2 over a $10 and a $20 item yields [166, 334],
+    not [167, 333] (gap-closure-2026-09-18.md item 1, closing paragraph).
+    Never call round_cents_half_up here — the two rounding behaviors are
+    documented separately and must not blur.
+    """
+    if not weights:
+        return []
+    weight_sum = sum(weights)
+    if weight_sum <= 0:
+        return [0] * len(weights)
+    shares = [total * weight // weight_sum for weight in weights]
+    remainder = total - sum(shares)
+    for index in range(len(weights) - 1, -1, -1):
+        if weights[index] > 0:
+            shares[index] += remainder
+            break
+    return shares
 
 
 @dataclass(frozen=True, slots=True)

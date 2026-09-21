@@ -509,6 +509,14 @@ def _confirm(
     )
     body = serialize(ctx, _re_read(ctx, row["id"]))
     events.emit_event(ctx, type="setup_intent.succeeded", obj=body)
+    # A resume-flow SetupIntent applies its parked subscription update when
+    # it confirms (Phase 12): the documented mechanism — updates land once
+    # the customer completes setup. Function-level import: the lifecycle
+    # imports this module's neighbors, not this one, but the dodge keeps the
+    # billing package's import graph one-directional at module scope.
+    from stripeapi.billing import subscription_lifecycle
+
+    subscription_lifecycle.apply_pending_update_on_seti_success(ctx, row["id"])
     return body
 
 

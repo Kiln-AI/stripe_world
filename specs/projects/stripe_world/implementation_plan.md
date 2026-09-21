@@ -67,7 +67,7 @@ Each still touches only its own tables.
 - [x] **Phase 10: Setup intents.**
 - [x] **Phase 11: Ledger and payouts.** `balance_transactions`, computed `balance`, `payouts`. The
        ledger invariants land here.
-- [ ] **Phase 12: Subscriptions.** `subscriptions`, `subscription_items`, the eight-status machine.
+- [x] **Phase 12: Subscriptions.** `subscriptions`, `subscription_items`, the eight-status machine.
 - [ ] **Phase 13: Invoices.** `invoices`, `invoiceitems`, nested lines, the status machine,
       `automatically_finalizes_at`.
 - [ ] **Phase 14: Proration and dunning.** The behavior spanning Phases 12 and 13. Proration's

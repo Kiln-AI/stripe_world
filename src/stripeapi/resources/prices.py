@@ -12,6 +12,7 @@ price's amounts are accepted and stored but never serialized: none of them
 appears in a recorded response body at the pinned version.
 """
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 import seahaven
@@ -64,6 +65,15 @@ _RECURRING = Param(
         Param(name="interval", kind="literal", choices=_INTERVALS, required=True),
         Param(name="interval_count", kind="integer", minimum=1),
         Param(name="meter", kind="string", max_length=5_000),
+        Param(
+            # Accepted and stored in the recurring JSON (probed, Phase 12:
+            # a price created with it trials a subscription through
+            # `trial_from_plan`); the pinned spec does not declare it on
+            # the wire shape, so it is never serialized.
+            name="trial_period_days",
+            kind="integer",
+            minimum=1,
+        ),
         Param(name="usage_type", kind="literal", choices=("licensed", "metered")),
     ),
 )
@@ -164,6 +174,17 @@ PRICE_RETRIEVE = ParamSpec(op_id="GetPricesPrice", path=("price",))
 
 always_present, omit_when_none = presence_sets("price")
 
+
+def _recurring_body(ctx: seahaven.Ctx, row: Mapping[str, Any]) -> dict[str, Any] | None:
+    """The wire's recurring: the stored JSON without its trial key."""
+    loaded: object = _json.loads(row["recurring"])
+    if not isinstance(loaded, dict):
+        return None
+    recurring = dict(loaded)
+    recurring.pop("trial_period_days", None)
+    return recurring
+
+
 FIELDS = FieldMap(
     object="price",
     table="prices",
@@ -178,7 +199,8 @@ FIELDS = FieldMap(
         "metadata": "metadata",
         "nickname": "nickname",
         "product": "product",
-        "recurring": "recurring",
+        # `recurring` is derived below: the stored JSON may carry
+        # `trial_period_days`, which never reaches the wire.
         "tax_behavior": "tax_behavior",
         "tiers_mode": "tiers_mode",
         "transform_quantity": "transform_quantity",
@@ -190,7 +212,8 @@ FIELDS = FieldMap(
     # `tiers` and `currency_options` are stored columns that never serialise:
     # no recorded response body at the pinned version carries either, so they
     # stay out of the map entirely rather than riding `omit_when_none`.
-    json_columns=frozenset({"custom_unit_amount", "metadata", "recurring", "transform_quantity"}),
+    json_columns=frozenset({"custom_unit_amount", "metadata", "transform_quantity"}),
+    derived={"recurring": _recurring_body},
     booleans=frozenset({"active"}),
     constants={"livemode": False},
     always_present=always_present,
@@ -208,16 +231,20 @@ def _require_product(ctx: seahaven.Ctx, product_id: str) -> dict[str, Any]:
 
 
 def _canonical_recurring(recurring: dict[str, Any]) -> dict[str, Any]:
-    """The recorded wire shape of `price.recurring`: interval and usage_type
-    defaulted, `meter` always present and null. The live body also carries
-    `trial_period_days`, which the pinned spec does not declare — the same
-    ruling as every undeclared live field: not emitted, allow-listed."""
-    return {
+    """The stored recurring JSON: the wire's four fields plus
+    `trial_period_days` when the caller set it (probed, Phase 12 — the
+    field `trial_from_plan` reads). The undeclared trial key never reaches
+    the wire (`_recurring_body` strips it; the same ruling as every
+    undeclared live field)."""
+    canonical = {
         "interval": recurring["interval"],
         "interval_count": recurring.get("interval_count") or 1,
         "meter": recurring.get("meter"),
         "usage_type": recurring.get("usage_type") or "licensed",
     }
+    if recurring.get("trial_period_days") is not None:
+        canonical["trial_period_days"] = int(recurring["trial_period_days"])
+    return canonical
 
 
 def _canonical_custom_unit_amount(custom: dict[str, Any]) -> dict[str, Any]:
