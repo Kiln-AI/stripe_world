@@ -14,6 +14,10 @@ Every `seahaven` subcommand needs `--world stripeapi:world`: the distribution na
 project-name heuristic cannot find the world without it.
 Conformance cassettes re-record with `uv run python -m tools_dev.record --scenario <name>`
 (`--list` prints names; needs a test-mode key, never runs in CI).
+CI (`.github/workflows/ci.yml`) runs that same check list on every push to main and every pull
+request, over `uv sync --locked` — so a `rev` moved in `[tool.uv.sources]` without its `uv lock`
+fails there rather than resolving to something nobody reviewed. It syncs without the `serve` extra:
+`seahaven.openenv` pulls in `beartype`, which cannot import on 3.14, and no suite here needs it.
 
 Rules: time comes from `ctx.clock` and ids and randomness from `ctx.ids`, so a replay of the same
 fixture and seed gives the same result; SQL goes through `ctx.db` (`ctx.db.conn` is the raw APSW
