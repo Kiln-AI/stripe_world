@@ -16,6 +16,14 @@ gains zero records for it.
 import seahaven
 
 world = seahaven.World(
+    # Not `seahaven_stripe_world`, which is what the distribution, the package and
+    # the hub card should say, because this one string is also the MCP
+    # `serverInfo.name` the tool-calling agent handshakes against
+    # (`seahaven.mcp.server`, `Server(name=resolved.name)`). Renaming it before the
+    # framework can carry an agent-facing name of its own would move the disclosure
+    # name into the agent's view, which is backwards. It moves to the disclosing
+    # form once `World(mcp_server_name=...)` exists to hold `stripe-mcp`:
+    # `SEAHAVEN_FINDINGS.md` Entry 10.
     name="stripeapi",
     version="0.1.0",
     schema=seahaven.sql_files(__package__, "schema"),

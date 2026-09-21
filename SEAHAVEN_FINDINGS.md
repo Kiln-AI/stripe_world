@@ -398,3 +398,47 @@ def raising(ctx) -> dict:
 **Minimal reproduction.** N/A — an absence: `grep -n "result" src/seahaven/changes.py` over the `CallRecord` block finds nothing.
 
 **Where the code points at it.** `tests/schema_conformance/capture.py`'s module docstring and `tests/conftest.py`'s `_schema_conformance` fixture carry comments referencing this entry.
+
+---
+
+### Entry 10 — A world that emulates a real product can set the MCP `instructions` an agent reads, but not the server `name` it reads them from
+
+**Category**: Missing capability (with a docs gap beside it).
+
+**Date**: 2026-09-21 (naming pass).
+
+**What we were trying to do.** Split this world's names by audience. The distribution, the package
+and the hub card are read by humans, PyPI, a hub and a coding agent, and they should say *synthetic
+Seahaven world* as loudly as possible — `seahaven-stripe-world` / `seahaven_stripe_world`. What the
+tool-calling agent sees mid-rollout should feel like the product: `stripe_api_*` tool names,
+`cus_…`/`pi_…` ids, Stripe's error envelopes. Two audiences, opposite goals, and no reason they
+cannot both be served.
+
+**What we expected.** That the MCP server's identity would sit on the agent-facing side of that
+line, the way `mcp_server_instructions` already does. `authoring.md` makes exactly this argument
+for the instruction string: *"A world that emulates a real product has this string to copy. Read
+the instructions the real product's own MCP server sends, and write those… so an agent that reads
+it sees the product and not Seahaven."*
+
+**What happened.** The instructions are the author's, but the name beside them is not.
+`mcp/server.py` builds `Server(name=resolved.name if resolved is not None else UNRESOLVED_NAME, …)`,
+so `serverInfo.name` in the MCP handshake is `World(name=…)` — the same string that is the OpenEnv
+card's name, a directory under the working root, the `world:` field in every fixture sidecar, the
+seed material for a blank instance, and the default alias when another world adds this one. One
+name, six jobs, two of which now pull in opposite directions: a world that names itself for
+disclosure hands that disclosure to the agent it is testing, and a world that names itself for
+fidelity puts the product's name on its own hub card and in its own fixture metadata.
+
+The gap is narrow and the fix is narrow with it: `World(mcp_server_name=…)`, defaulting to
+`world.name` so nothing changes for a world that does not set it. Its absence is why this repo's
+world is still `World(name="stripeapi")` — renaming it to the disclosing form today would move that
+string straight into the agent's handshake, which is the opposite of what the rename is for.
+
+**Suggested fix / what Seahaven could add.** The field, and the authoring docs extended with it.
+The section is already titled "Instructions for an MCP client" and already tells an emulating world
+to copy the real product's instructions; it should say *name and instructions* — read the real
+server's `serverInfo.name` and copy that too, for the same reason and in the same breath. A world
+that emulates a product and sets only one of the two ships a handshake that half-announces itself.
+
+**Where the code points at it.** `src/seahaven_stripe_world/world.py` carries the comment on
+`name=`, and `AGENTS.md` records why the world's name has not moved yet.
