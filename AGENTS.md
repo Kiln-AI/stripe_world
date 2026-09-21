@@ -50,19 +50,6 @@ and every workaround in the code carries a comment linking to its entry there.
   return it, never raise it. Seahaven errors (`errors.py`) are authoring mistakes: an unusable
   `method`, a malformed parameter object. Raise loses the writes, return keeps them.
 - **JSON TEXT columns** are written only through `_json.dumps`, so fixture bytes are reproducible.
-- **Names are split by audience, and the split is load-bearing.** Everything a person, a hub or a
-  coding agent reads says *synthetic Seahaven world* and never impersonates Stripe: the
-  distribution `seahaven-stripe-world`, the package and world name `seahaven_stripe_world` (one
-  name, two spellings — the normalisation the CLI's own discovery does), the OpenEnv card, the
-  `world:` field in every fixture sidecar. Everything the **tool-calling agent** reads is Stripe's,
-  verbatim: `World(mcp_server_name="stripe-mcp")` on the MCP handshake, the `stripe_api_*` tool
-  names, the id prefixes, the field names, the error envelopes. Adding a name means deciding which
-  side of that line it falls on first. The world name is spelled with underscores because an added
-  world's default alias is its name, and an alias is lowercase letters, digits and single
-  underscores — `seahaven-stripe-world` would be legal as a world name and illegal as the alias.
-  One last `stripeapi` survives, frozen: `@conformance.stripeapi.invalid`, the reserved email
-  domain recorded into the conformance cassettes. Never rewrite it — it would mean re-recording
-  every cassette against live Stripe.
 - **This repo is the world checkout**: `pyproject.toml` and `src/seahaven_stripe_world/` at the root, beside
   `specs/` and `research/`. The framework is not vendored here: the bare `seahaven` requirement
   resolves through `[tool.uv.sources]` to `github.com/Kiln-AI/Seahaven` at a pinned full commit

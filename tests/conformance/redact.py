@@ -29,6 +29,12 @@ from conformance.cassette import Step
 
 __all__ = ["RESERVED_EMAIL_DOMAIN", "RedactionError", "scrub"]
 
+# Recorded data, not a name: it is inside the committed cassettes, in bodies
+# Stripe echoed back. The `stripeapi` in it is what this world's package used to
+# be called and has no relationship to the package any more — leave it be. A
+# rename here and in the cassettes together would keep the suite green while
+# making the cassettes say something live Stripe never returned, which is the
+# one property they exist to have.
 RESERVED_EMAIL_DOMAIN = "@conformance.stripeapi.invalid"
 
 _API_KEY = re.compile(r"\b(?:sk|rk|pk)_(?:test|live)_[A-Za-z0-9]{10,}\b")
