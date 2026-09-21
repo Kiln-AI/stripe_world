@@ -177,7 +177,7 @@ def test_cancel_returns_the_funds_and_unsweeps(instance: seahaven.Instance) -> N
 def test_settle_then_reverse(instance: seahaven.Instance) -> None:
     po = payout_id(instance, 4000)
     with instance.bulk() as ctx:
-        from stripeapi.billing import ledger
+        from seahaven_stripe_world.billing import ledger
 
         ledger.settle_payout(ctx, po)
     original = call(instance, "GET", f"/v1/payouts/{po}")["body"]
@@ -203,7 +203,7 @@ def test_settle_then_reverse(instance: seahaven.Instance) -> None:
 def test_fail_payout_is_the_fixture_surface(instance: seahaven.Instance) -> None:
     po = payout_id(instance, 4000)
     with instance.bulk() as ctx:
-        from stripeapi.billing import ledger
+        from seahaven_stripe_world.billing import ledger
 
         ledger.fail_payout(ctx, po, failure_code="no_account")
     failed = call(instance, "GET", f"/v1/payouts/{po}")["body"]
@@ -216,8 +216,8 @@ def test_fail_payout_is_the_fixture_surface(instance: seahaven.Instance) -> None
     assert "payout.failed" in events_of(instance)
     # a paid payout is not failable — unwinding one is reverse's job
     settled = payout_id(instance, 1000)
-    from stripeapi.billing import ledger
-    from stripeapi.stripe_errors import StripeApiError
+    from seahaven_stripe_world.billing import ledger
+    from seahaven_stripe_world.stripe_errors import StripeApiError
 
     with instance.bulk() as ctx:
         ledger.settle_payout(ctx, settled)

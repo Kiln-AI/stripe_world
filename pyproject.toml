@@ -1,5 +1,5 @@
 # uv's build backend, the one Seahaven itself is built with. Every file under
-# `src/stripeapi` travels into the wheel, not only the `.py` ones, so `schema/*.sql`
+# `src/seahaven_stripe_world` travels into the wheel, not only the `.py` ones, so `schema/*.sql`
 # reaches `importlib.resources` in an installed world. `fixtures/` is outside the
 # package and deliberately does not travel: a fixture is a checkout's file.
 [build-system]
@@ -37,7 +37,7 @@ dev = ["pytest>=8", "ruff>=0.14", "ty>=0.0.1a21", "stripe>=13"]
 # before the sync, or `uv sync` fails as a git auth error that reads like a bad
 # lock. CI does that in its own guarded step (`.github/workflows/ci.yml`).
 [tool.uv.sources]
-seahaven = { git = "https://github.com/Kiln-AI/Seahaven.git", rev = "48dad1f01df5ff15bb6c5a152d1b49251235eda8" }
+seahaven = { git = "https://github.com/Kiln-AI/Seahaven.git", rev = "8bfd3cb2da745fc170f87236351e1b8150db2df1" }
 
 [tool.uv]
 conflicts = [[{ extra = "serve" }, { extra = "mcp" }]]
@@ -48,11 +48,12 @@ conflicts = [[{ extra = "serve" }, { extra = "mcp" }]]
 # Revisit on a confirmed final-3.14 + fixed lock combination.
 override-dependencies = ["pydantic==2.12.3"]
 
-# Spelled out rather than left to the backend's default, because the module is
-# this world's name normalised the way `seahaven new` normalises it, which is not
-# always the way uv would.
+# It matches `[project] name` normalised, and has to: the CLI and the pytest
+# plugin find the world by importing the package that name normalises to
+# (`seahaven.cli.discover`), so a distribution name that is not the package name
+# is a world neither can find (`SEAHAVEN_FINDINGS.md` Entry 7).
 [tool.uv.build-backend]
-module-name = "stripeapi"
+module-name = "seahaven_stripe_world"
 
 [tool.ruff]
 line-length = 100
@@ -77,10 +78,8 @@ extra-paths = ["tests"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 # The repo root, so tests can import `tools_dev` (the build-time generator,
-# which is not installed) alongside the installed `stripeapi` package.
+# which is not installed) alongside the installed `seahaven_stripe_world` package.
 pythonpath = ["."]
-# The distribution name (`seahaven-stripe-world`) is deliberately not the world's
-# package name (`stripeapi`), so the plugin's project-name heuristic cannot find
-# the world; `--seahaven-world` is its documented override for exactly this
-# layout. The CLI commands carry `--world stripeapi:world` for the same reason.
-addopts = "-q --seahaven-world stripeapi:world"
+# No `--seahaven-world`: the distribution normalises to the package, so the
+# plugin's project-name heuristic finds the world on its own.
+addopts = "-q"

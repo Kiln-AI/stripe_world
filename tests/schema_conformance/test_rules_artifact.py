@@ -8,8 +8,8 @@ from __future__ import annotations
 from typing import Any
 
 from schema_conformance.validate import BY_OBJECT, DELETED_BY_OBJECT, RULES
-from stripeapi.dispatch.routes import ALL as ROUTES
-from stripeapi.spec import ENUM_OVERRIDES, schema_rules, spec_document
+from seahaven_stripe_world.dispatch.routes import ALL as ROUTES
+from seahaven_stripe_world.spec import ENUM_OVERRIDES, schema_rules, spec_document
 
 
 def _discriminate(body: dict[str, Any]) -> str | None:

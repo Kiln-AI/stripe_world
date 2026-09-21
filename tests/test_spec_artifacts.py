@@ -22,13 +22,13 @@ from tools_dev.prune_spec import (
     main as prune_main,
 )
 
-from stripeapi.dispatch import routes
-from stripeapi.spec.enums import DECLINE_CODES, DOC_ONLY_ENUMS
-from stripeapi.spec.event_types import EVENT_TYPES
-from stripeapi.spec.expandable import EXPANDABLE_FIELDS
+from seahaven_stripe_world.dispatch import routes
+from seahaven_stripe_world.spec.enums import DECLINE_CODES, DOC_ONLY_ENUMS
+from seahaven_stripe_world.spec.event_types import EVENT_TYPES
+from seahaven_stripe_world.spec.expandable import EXPANDABLE_FIELDS
 
 REPO = Path(__file__).resolve().parents[1]
-SPEC_DIR = REPO / "src/stripeapi/spec"
+SPEC_DIR = REPO / "src/seahaven_stripe_world/spec"
 MIN_JSON = SPEC_DIR / "spec3.min.json"
 EVENT_TYPES_TXT = (
     REPO / "specs/projects/stripe_world/research/stripe-billing-and-payments/"

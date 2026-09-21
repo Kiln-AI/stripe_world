@@ -78,8 +78,7 @@ jobs:
         run: uv run --no-sync pytest
 
       # The framework's own lints over this world: schema, fixtures, tool
-      # signatures and the rest. `--world stripeapi:world` because the
-      # distribution name is not the package name, so the CLI's project-name
-      # heuristic cannot find the world on its own.
+      # signatures and the rest. No `--world`: the distribution name normalises
+      # to the package, which is what the CLI's project-name heuristic imports.
       - name: World check
-        run: uv run --no-sync seahaven check --world stripeapi:world
+        run: uv run --no-sync seahaven check

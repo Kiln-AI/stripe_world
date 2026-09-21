@@ -9,7 +9,7 @@ import pytest
 import seahaven
 
 from conftest import BLANK_NOW
-from stripeapi.middleware.idempotency import request_hash
+from seahaven_stripe_world.middleware.idempotency import request_hash
 
 pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
 

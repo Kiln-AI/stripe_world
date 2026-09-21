@@ -19,7 +19,7 @@ There is no live-mode escape hatch.
 
 CI never runs this: the suite replays committed cassettes and never imports
 `stripe` (enforced by a static test over `tests/conformance/`,
-`tests/schema_conformance/` and `src/stripeapi/`).
+`tests/schema_conformance/` and `src/seahaven_stripe_world/`).
 """
 
 import argparse

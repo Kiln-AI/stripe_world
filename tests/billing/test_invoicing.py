@@ -11,7 +11,7 @@ import pytest
 import seahaven
 
 from conftest import BLANK_NOW
-from stripeapi.billing import invoicing
+from seahaven_stripe_world.billing import invoicing
 
 pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
 

@@ -50,10 +50,10 @@ Five ideas carry the design:
 Scaffolded with `seahaven new`, following ProjectTracker's shape exactly.
 
 ```
-pyproject.toml                      # distribution: seahaven-stripe-world
+pyproject.toml                      # distribution: seahaven-stripe-world (= the package)
 AGENTS.md
 README.md
-src/stripeapi/
+src/seahaven_stripe_world/
   __init__.py                       # imports world, then tools/ and middleware/ for side effects
   world.py                          # world = seahaven.World(..., state_format="seahaven.state/1")
   errors.py                         # ToolError subclasses — authoring errors only (§7)
@@ -98,7 +98,7 @@ src/stripeapi/
     expandable.py  enums.py  event_types.py   # generated, committed
 fixtures_src/generate.py
 fixtures/{empty,small,large}/
-tools_dev/prune_spec.py             # regenerates everything under src/stripeapi/spec/
+tools_dev/prune_spec.py             # regenerates everything under src/seahaven_stripe_world/spec/
 tests/
 ```
 
@@ -236,7 +236,7 @@ Built on `ctx.ids.random`, which the framework documents as the stream product-s
 a tool that slips back to `ctx.ids.uuid()` produces a UUID where Stripe expects `cus_…`
 (`SEAHAVEN_FINDINGS.md` Entry 2). Two project-local guards, because the framework has none:
 
-- a test that greps `src/stripeapi/resources/` and `billing/` for `ctx.ids.uuid(` and fails on a hit;
+- a test that greps `src/seahaven_stripe_world/resources/` and `billing/` for `ctx.ids.uuid(` and fails on a hit;
 - a fixture-wide test asserting every primary key in every table matches its resource's prefix.
 
 ### 4.5 Serialization and expansion
@@ -270,7 +270,7 @@ discovery index and the route table have identical key sets.
 ### 5.2 The pruned spec
 
 `spec3.json` is 8 MB — too large to load per instance and too large to commit into the package.
-`tools_dev/prune_spec.py` generates, and we commit, `src/stripeapi/spec/spec3.min.json`: only routed
+`tools_dev/prune_spec.py` generates, and we commit, `src/seahaven_stripe_world/spec/spec3.min.json`: only routed
 operations, only referenced schemas, with descriptions retained (they are the discovery text and, per
 the research, they carry Stripe's own documentation prose). It also generates `expandable.py`,
 `enums.py` — including the bare-`string`-but-closed-set fields, whose values are recoverable only

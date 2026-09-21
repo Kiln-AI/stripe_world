@@ -16,9 +16,9 @@ import pytest
 import seahaven
 
 from schema_conformance import capture
-from stripeapi.middleware.error_handler import error_handler
-from stripeapi.middleware.stripe_envelope import stripe_envelope
-from stripeapi.world import world
+from seahaven_stripe_world.middleware.error_handler import error_handler
+from seahaven_stripe_world.middleware.stripe_envelope import stripe_envelope
+from seahaven_stripe_world.world import world
 
 # The instant every fixture of this world is frozen at (`fixtures_src/generate.py`).
 FIXTURE_NOW = "2026-09-01T14:00:00.000Z"
@@ -51,7 +51,7 @@ def probe(tmp_path: Path) -> Callable[..., seahaven.World]:
     the process.
 
     The one registered tool is `call_stripe`-backed, so a probe world speaks
-    the real dispatcher: the test patches `stripeapi.dispatch.router.ROUTER`
+    the real dispatcher: the test patches `seahaven_stripe_world.dispatch.router.ROUTER`
     (a module attribute the dispatcher reads per call) to add its routes.
     """
 
@@ -82,7 +82,7 @@ def dispatch_tool() -> Any:
     """The probe world's face over the real dispatcher (functional spec §2.5's
     unregistered escape hatch, registered here where it is the point)."""
 
-    from stripeapi.tools.api import call_stripe
+    from seahaven_stripe_world.tools.api import call_stripe
 
     def call(
         ctx: seahaven.Ctx,

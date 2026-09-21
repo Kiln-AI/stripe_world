@@ -66,8 +66,8 @@ def test_page_embedded_backward_page_is_adjacent_to_the_cursor() -> None:
     Probed live this round for the exhausted end: the cursor row never
     appears, however close to the top the walk is.
     """
-    from stripeapi.dispatch.resource import page_embedded
-    from stripeapi.dispatch.response import Page
+    from seahaven_stripe_world.dispatch.resource import page_embedded
+    from seahaven_stripe_world.dispatch.response import Page
 
     items = [{"id": f"il_{i}", "object": "line_item"} for i in range(9, 0, -1)]
     page = page_embedded(
@@ -95,8 +95,8 @@ def test_page_embedded_backward_page_is_adjacent_to_the_cursor() -> None:
 
 
 def test_page_embedded_forward_page_and_envelope() -> None:
-    from stripeapi.dispatch.resource import page_embedded
-    from stripeapi.dispatch.response import Page
+    from seahaven_stripe_world.dispatch.resource import page_embedded
+    from seahaven_stripe_world.dispatch.response import Page
 
     items = [{"id": f"il_{i}"} for i in range(9, 0, -1)]
     page = page_embedded(
@@ -117,9 +117,9 @@ def test_page_embedded_bogus_cursor_is_400_resource_missing() -> None:
     """The embedded twin of the table-backed rule: a query-side
     `resource_missing` is a 400, not the 404 a path id earns (recorded
     Phase 5, scenario 09)."""
-    from stripeapi.dispatch.resource import page_embedded
-    from stripeapi.dispatch.response import Page
-    from stripeapi.stripe_errors import StripeApiError
+    from seahaven_stripe_world.dispatch.resource import page_embedded
+    from seahaven_stripe_world.dispatch.response import Page
+    from seahaven_stripe_world.stripe_errors import StripeApiError
 
     items = [{"id": f"il_{i}"} for i in range(9, 0, -1)]
     with pytest.raises(StripeApiError) as raised:
@@ -139,9 +139,9 @@ def test_page_embedded_resolves_both_cursors_before_refusing_the_pair() -> None:
     """Mirrors `page()`: a bogus cursor 400s even alongside a second cursor,
     and only a pair that both resolves is refused — message wire-verbatim,
     no `code` (recorded Phase 5, scenario 09)."""
-    from stripeapi.dispatch.resource import page_embedded
-    from stripeapi.dispatch.response import Page
-    from stripeapi.stripe_errors import StripeApiError
+    from seahaven_stripe_world.dispatch.resource import page_embedded
+    from seahaven_stripe_world.dispatch.response import Page
+    from seahaven_stripe_world.stripe_errors import StripeApiError
 
     items = [{"id": f"il_{i}"} for i in range(9, 0, -1)]
 

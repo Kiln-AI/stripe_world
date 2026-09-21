@@ -4,7 +4,7 @@ import re
 
 import pytest
 
-from stripeapi._time import ISO_PATTERN, from_unix, to_unix
+from seahaven_stripe_world._time import ISO_PATTERN, from_unix, to_unix
 
 
 def test_round_trip_preserves_the_second() -> None:

@@ -12,15 +12,15 @@ from typing import Any
 import pytest
 import seahaven
 
-from stripeapi.dispatch import routes
-from stripeapi.dispatch.params import ParamSpec
-from stripeapi.dispatch.router import Router
-from stripeapi.dispatch.routes import Route
-from stripeapi.stripe_errors import StripeApiError
+from seahaven_stripe_world.dispatch import routes
+from seahaven_stripe_world.dispatch.params import ParamSpec
+from seahaven_stripe_world.dispatch.router import Router
+from seahaven_stripe_world.dispatch.routes import Route
+from seahaven_stripe_world.stripe_errors import StripeApiError
 
 
 def op_id_of(method: str, path: str) -> str:
-    from stripeapi.dispatch.router import ROUTER
+    from seahaven_stripe_world.dispatch.router import ROUTER
 
     return ROUTER.match(method, path).route.op_id
 
@@ -34,7 +34,7 @@ def test_exact_beats_placeholder_invoices_create_preview() -> None:
 
 
 def test_placeholder_matches_a_real_id() -> None:
-    from stripeapi.dispatch.router import ROUTER
+    from seahaven_stripe_world.dispatch.router import ROUTER
 
     match = ROUTER.match("GET", "/v1/credit_notes/cn_123")
     assert match.route.op_id == "GetCreditNotesId"
@@ -45,7 +45,7 @@ def test_backtracks_out_of_a_literal_dead_end() -> None:
     """`POST /v1/credit_notes/preview/void` is a legal call: void the credit
     note whose id is the string `preview`. The exact branch dead-ends and the
     walk returns to the placeholder (`components/dispatcher.md` §3.2.3)."""
-    from stripeapi.dispatch.router import ROUTER
+    from seahaven_stripe_world.dispatch.router import ROUTER
 
     match = ROUTER.match("POST", "/v1/credit_notes/preview/void")
     assert match.route.op_id == "PostCreditNotesIdVoid"
@@ -53,7 +53,7 @@ def test_backtracks_out_of_a_literal_dead_end() -> None:
 
 
 def test_two_placeholder_names_share_one_node() -> None:
-    from stripeapi.dispatch.router import ROUTER
+    from seahaven_stripe_world.dispatch.router import ROUTER
 
     assert ROUTER.match("POST", "/v1/subscriptions/sub_1/resume").path_values == ("sub_1",)
     assert (
@@ -69,7 +69,7 @@ def test_method_mismatch_prefers_a_placeholder_route() -> None:
 
 
 def test_unknown_path_is_404() -> None:
-    from stripeapi.dispatch.router import ROUTER
+    from seahaven_stripe_world.dispatch.router import ROUTER
 
     with pytest.raises(StripeApiError) as raised:
         ROUTER.match("GET", "/v1/widgets")
@@ -86,7 +86,7 @@ def test_method_mismatch_is_the_unrecognized_404() -> None:
     DELETE on /v1/prices/{price}, which carries GET and POST, answered 404
     `Unrecognized request URL`), superseding the 405 the dispatcher design
     had to declare as a guess."""
-    from stripeapi.dispatch.router import ROUTER
+    from seahaven_stripe_world.dispatch.router import ROUTER
 
     with pytest.raises(StripeApiError) as raised:
         ROUTER.match("GET", "/v1/charges/ch_1/capture")
@@ -95,14 +95,14 @@ def test_method_mismatch_is_the_unrecognized_404() -> None:
 
 
 def test_trailing_slash_is_404() -> None:
-    from stripeapi.dispatch.router import ROUTER
+    from seahaven_stripe_world.dispatch.router import ROUTER
 
     with pytest.raises(StripeApiError):
         ROUTER.match("GET", "/v1/customers/")
 
 
 def test_empty_segment_is_404() -> None:
-    from stripeapi.dispatch.router import ROUTER
+    from seahaven_stripe_world.dispatch.router import ROUTER
 
     with pytest.raises(StripeApiError):
         ROUTER.match("GET", "/v1/customers//balance_transactions")
@@ -111,7 +111,7 @@ def test_empty_segment_is_404() -> None:
 def test_every_pattern_round_trips() -> None:
     """Substituting a plausible id for each placeholder matches back to the
     same route, for all 148."""
-    from stripeapi.dispatch.router import ROUTER
+    from seahaven_stripe_world.dispatch.router import ROUTER
 
     for route in routes.ALL:
         path = route.pattern
@@ -128,7 +128,7 @@ def test_every_pattern_round_trips() -> None:
 
 
 def test_resolve_finds_a_pattern_and_a_concrete_path() -> None:
-    from stripeapi.dispatch.router import ROUTER
+    from seahaven_stripe_world.dispatch.router import ROUTER
 
     pattern_route = ROUTER.resolve("GET", "/v1/customers/{customer}")
     concrete_route = ROUTER.resolve("GET", "/v1/customers/cus_1")
@@ -143,7 +143,7 @@ def test_resolve_finds_a_pattern_and_a_concrete_path() -> None:
 
 def wired(**kwargs: Any) -> Route:
     """A minimally wired route: an engine-served list of the customers table."""
-    from stripeapi.resources.customers import SPEC
+    from seahaven_stripe_world.resources.customers import SPEC
 
     route = Route(
         method="GET",
@@ -190,7 +190,7 @@ def test_a_param_spec_path_that_disagrees_with_the_pattern_is_refused() -> None:
 
 
 def test_a_central_parameter_in_a_body_is_refused() -> None:
-    from stripeapi.dispatch.params import Param
+    from seahaven_stripe_world.dispatch.params import Param
 
     spec = ParamSpec(op_id="GetProbe", body=(Param(name="limit", kind="integer"),))
     with pytest.raises(seahaven.WorldBug, match="handled centrally"):
@@ -212,7 +212,7 @@ def test_a_creatable_that_drifts_from_the_route_body_is_refused() -> None:
     not read — the route's `ParamSpec` is the enforced allowlist — so the
     router refuses a route whose body has drifted from its resource's
     declaration: the two cannot silently diverge."""
-    from stripeapi.dispatch.params import Param, ParamSpec
+    from seahaven_stripe_world.dispatch.params import Param, ParamSpec
 
     drifted = replace(
         wired(),

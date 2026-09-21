@@ -87,7 +87,7 @@ def _package_world() -> seahaven.World:
     `world.py` rather than through the package attribute, which is a `World`
     shadowing the module of that name.
     """
-    from stripeapi.world import world
+    from seahaven_stripe_world.world import world
 
     return world
 

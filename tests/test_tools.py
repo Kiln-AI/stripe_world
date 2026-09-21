@@ -44,8 +44,8 @@ def test_call_stripe_reaches_every_verb(instance: seahaven.Instance) -> None:
     """The unregistered escape hatch cannot rot: it dispatches all three verbs
     over the same router (functional spec §2.5). Driven through `bulk()`'s
     context, the one context a caller can hold outside a tool call."""
-    from stripeapi.dispatch.response import ApiResponse
-    from stripeapi.tools.api import call_stripe
+    from seahaven_stripe_world.dispatch.response import ApiResponse
+    from seahaven_stripe_world.tools.api import call_stripe
 
     with instance.bulk() as ctx:
         created = call_stripe(ctx, "POST", "/v1/customers", {"name": "hatch"})
@@ -71,7 +71,7 @@ def test_the_tool_descriptions_name_no_sibling_tool() -> None:
 
 
 def seahaven_world_tool_description(name: str) -> str:
-    from stripeapi.world import world
+    from seahaven_stripe_world.world import world
 
     return str(world.tools[name].description)
 
@@ -209,6 +209,6 @@ def test_the_wired_surface_is_small_and_named() -> None:
 
 
 def _all_routes():
-    from stripeapi.dispatch.routes import ALL
+    from seahaven_stripe_world.dispatch.routes import ALL
 
     return ALL

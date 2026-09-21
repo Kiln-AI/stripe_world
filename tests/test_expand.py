@@ -120,7 +120,7 @@ def test_more_than_four_segments_is_rejected(instance: seahaven.Instance) -> Non
 
 
 def test_paths_merge_into_one_trie() -> None:
-    from stripeapi.serialize.expand import validate_paths as validate
+    from seahaven_stripe_world.serialize.expand import validate_paths as validate
 
     trie = validate(
         ("invoice_settings.default_payment_method", "discount"),
@@ -183,8 +183,8 @@ def test_a_dangling_reference_is_a_world_bug() -> None:
     """The engine emitted an id from a row it just read; a missing target row
     is a schema or write bug, not something an agent did
     (`components/cross_cutting.md` §3.3.4)."""
-    import stripeapi.dispatch.resource as resource
-    import stripeapi.serialize.expand as expand
+    import seahaven_stripe_world.dispatch.resource as resource
+    import seahaven_stripe_world.serialize.expand as expand
 
     class FakeCtx:
         class db:

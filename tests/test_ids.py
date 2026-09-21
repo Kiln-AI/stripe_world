@@ -13,8 +13,8 @@ import pytest
 import seahaven
 
 from conftest import BLANK_NOW, a_tool
-from stripeapi import _ids
-from stripeapi._ids import REQUEST_ID_PREFIX, coupon_id, stripe_id
+from seahaven_stripe_world import _ids
+from seahaven_stripe_world._ids import REQUEST_ID_PREFIX, coupon_id, stripe_id
 
 type Probe = Callable[..., seahaven.World]
 

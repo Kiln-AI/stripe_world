@@ -8,7 +8,7 @@ returned decline keeps its writes) is exercised by later phases, which have
 handlers to raise.
 """
 
-from stripeapi import stripe_errors as se
+from seahaven_stripe_world import stripe_errors as se
 
 
 def test_the_type_enum_is_exactly_the_four_wire_values() -> None:

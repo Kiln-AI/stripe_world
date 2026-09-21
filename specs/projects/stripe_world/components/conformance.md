@@ -338,7 +338,7 @@ the same way `stripe_api_write` exposes it — a request option `stripe-python` 
 
 `Stripe-Version: 2026-08-26.dahlia` is passed as `stripe_version=` on **every** `raw_request` call by
 default, sourced from one constant (`tools_dev/scenarios/_dsl.py::PINNED_VERSION`, re-exported from
-`src/stripeapi/spec/` so the pin cannot drift between the recorder and the served version — see
+`src/seahaven_stripe_world/spec/` so the pin cannot drift between the recorder and the served version — see
 Dependencies). Scenario 3 is the sole declared exception: it exists specifically to observe a
 malformed version, so `Recorder.step(..., stripe_version_override="not-a-real-version")` is a named,
 visible parameter used in exactly one scenario file, with a comment at that call site naming the
@@ -564,14 +564,14 @@ schema conformance tests for this resource" step in the recipe, and none is need
 - `dispatch/` (the four tools, `stripe_api_read`/`stripe_api_write`) — the replayer's and the schema
   hook's only way into the world, per architecture §11's "every tool exercised through
   `instance.call(...)`" rule.
-- `src/stripeapi/spec/spec3.min.json`, `enums.py`, `expandable.py` — generated in Phase 2; schema
+- `src/seahaven_stripe_world/spec/spec3.min.json`, `enums.py`, `expandable.py` — generated in Phase 2; schema
   conformance's structural rules and enum overrides are read from these, never re-derived.
 - `fixtures/empty` — every conformance scenario's starting state (Phase 1).
 - `stripe-python` (PyPI `stripe`, MIT) — **recording-only.** It is a dev/optional dependency
   (`pyproject.toml`'s `[project.optional-dependencies].dev` or an equivalent extra), never a runtime
   dependency of `seahaven-stripe-world`, and `import stripe` appears **only** inside `tools_dev/` —
   enforced by a static test (`test_conformance_code_never_imports_stripe_python`, an AST/grep check
-  over `tests/conformance/`, `tests/schema_conformance/` and `src/stripeapi/`) so that CI's dependency
+  over `tests/conformance/`, `tests/schema_conformance/` and `src/seahaven_stripe_world/`) so that CI's dependency
   set for running the test suite doesn't need `stripe` installed at all, and there is no code path in
   replay or schema validation that could accidentally attempt a network call.
 - `seahaven.instances.Instance.call_log` — schema conformance's hook into what a test actually did.
@@ -587,7 +587,7 @@ schema conformance tests for this resource" step in the recipe, and none is need
   decisions that phase's own unit tests assume; billing engine in turn must expose dunning retries as
   explicitly callable, independent of elapsed time, for scenario 5 to be replayable at all (see "Time-
   dependent preconditions" above) — a requirement this document states but does not itself satisfy.
-- Nothing in `src/stripeapi/` imports this component; it is test-only and dev-tool-only, by design —
+- Nothing in `src/seahaven_stripe_world/` imports this component; it is test-only and dev-tool-only, by design —
   the shipped package never needs `stripe-python` or a Stripe key to run.
 
 ## Test Plan
@@ -657,7 +657,7 @@ schema conformance tests for this resource" step in the recipe, and none is need
 **End-to-end / CI shape**
 
 - `test_conformance_code_never_imports_stripe_python` — static check over `tests/conformance/`,
-  `tests/schema_conformance/`, `src/stripeapi/`.
+  `tests/schema_conformance/`, `src/seahaven_stripe_world/`.
 - `test_replay_conformance` (parametrized over every conformance cassette) — the actual merge gate;
   green with no network access, using only `fixtures/empty` and the world's own tools.
 - Scenario-specific conformance tests, one assertion group per §12 scenario once recorded:

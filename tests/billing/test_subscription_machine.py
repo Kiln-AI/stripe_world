@@ -537,7 +537,7 @@ def subscription_row(instance: seahaven.Instance, id_: str):
 
 
 def test_advance_cycle_renews_and_the_deferred_cancel_fires(instance: seahaven.Instance) -> None:
-    import stripeapi.billing.subscription_lifecycle as lifecycle
+    import seahaven_stripe_world.billing.subscription_lifecycle as lifecycle
 
     cus, _, price = setup_catalog(instance)
     sub = call(
@@ -576,7 +576,7 @@ def test_advance_cycle_renews_and_the_deferred_cancel_fires(instance: seahaven.I
 
 
 def test_expire_incomplete_voids_and_is_terminal(instance: seahaven.Instance) -> None:
-    import stripeapi.billing.subscription_lifecycle as lifecycle
+    import seahaven_stripe_world.billing.subscription_lifecycle as lifecycle
 
     cus, _pm, price = setup_catalog(instance)
     tds = call(
@@ -607,7 +607,7 @@ def test_expire_incomplete_voids_and_is_terminal(instance: seahaven.Instance) ->
 def test_on_invoice_paid_recovers_incomplete(instance: seahaven.Instance) -> None:
     """The single recovery hook: paying the latest invoice moves
     incomplete to active with no subscriptions.update anywhere."""
-    import stripeapi.billing.invoicing as invoicing
+    import seahaven_stripe_world.billing.invoicing as invoicing
 
     cus, pm, price = setup_catalog(instance)
     tds = call(
@@ -692,7 +692,7 @@ def test_terminal_states_are_stamped(instance: seahaven.Instance) -> None:
 def test_transition_table_has_no_edges_out_of_terminal_states() -> None:
     """§Terminal-states as data: no row's source is `canceled` or
     `incomplete_expired`, and every row's target is a real status."""
-    from stripeapi.billing import subscription_lifecycle as lifecycle
+    from seahaven_stripe_world.billing import subscription_lifecycle as lifecycle
 
     for row in lifecycle.TRANSITIONS:
         assert row.source not in lifecycle.TERMINAL_STATUSES, row
@@ -710,7 +710,7 @@ def test_transition_table_has_no_edges_out_of_terminal_states() -> None:
 
 
 def test_transition_lookup_answers_none_for_unknown_rows() -> None:
-    from stripeapi.billing import subscription_lifecycle as lifecycle
+    from seahaven_stripe_world.billing import subscription_lifecycle as lifecycle
 
     assert lifecycle.transition("canceled", "cycle_boundary", "") is None
     assert lifecycle.transition("active", "bogus_trigger", "") is None
@@ -857,7 +857,7 @@ def test_advance_cycle_refuses_non_renewing_statuses(instance: seahaven.Instance
     import pytest as _pytest
     import seahaven
 
-    import stripeapi.billing.subscription_lifecycle as lifecycle
+    import seahaven_stripe_world.billing.subscription_lifecycle as lifecycle
 
     _, _, price = setup_catalog(instance)
     sub = call(
@@ -952,7 +952,7 @@ def test_renewals_apply_the_persisted_discounts_and_tax(instance: seahaven.Insta
     """A `forever` coupon and the default tax rates bill on every invoice,
     and the invoice's own `discounts` column carries what its totals
     applied."""
-    import stripeapi.billing.subscription_lifecycle as lifecycle
+    import seahaven_stripe_world.billing.subscription_lifecycle as lifecycle
 
     cus, _, price = setup_catalog(instance)
     coupon = call(instance, "POST", "/v1/coupons", {"percent_off": 10, "duration": "forever"})[
@@ -1025,8 +1025,8 @@ def test_recovery_events_carry_previous_attributes(instance: seahaven.Instance) 
     like every other subscription writer."""
     import json
 
-    import stripeapi.billing.invoicing as invoicing
-    import stripeapi.billing.subscription_lifecycle as lifecycle
+    import seahaven_stripe_world.billing.invoicing as invoicing
+    import seahaven_stripe_world.billing.subscription_lifecycle as lifecycle
 
     cus, pm, price = setup_catalog(instance)
     tds = call(
@@ -1210,7 +1210,7 @@ def test_once_coupon_set_via_update_parks_and_consumes(instance: seahaven.Instan
         instance, "POST", f"/v1/subscriptions/{sub2['id']}", {"discounts": [{"coupon": coupon}]}
     )["body"]
     assert len(body["discounts"]) == 1
-    import stripeapi.billing.subscription_lifecycle as lifecycle
+    import seahaven_stripe_world.billing.subscription_lifecycle as lifecycle
 
     with instance.bulk() as ctx:
         lifecycle.advance_cycle(ctx, sub2["id"])
@@ -1327,7 +1327,7 @@ def test_conversion_applies_the_rows_coupon_and_tax(instance: seahaven.Instance)
 
 
 def test_advance_cycles_trial_at_the_boundary(instance: seahaven.Instance) -> None:
-    import stripeapi.billing.subscription_lifecycle as lifecycle
+    import seahaven_stripe_world.billing.subscription_lifecycle as lifecycle
 
     cus, _, price = setup_catalog(instance)
     sub = call(
@@ -1354,7 +1354,7 @@ def test_advance_cycles_trial_at_the_boundary(instance: seahaven.Instance) -> No
 def test_keep_as_draft_pause_leaves_the_renewal_in_draft(instance: seahaven.Instance) -> None:
     """billing_engine §1: a keep_as_draft pause takes the cycle invoice to
     `draft` (kept) — never finalized, never attempted, no charge."""
-    import stripeapi.billing.subscription_lifecycle as lifecycle
+    import seahaven_stripe_world.billing.subscription_lifecycle as lifecycle
 
     cus, _, price = setup_catalog(instance)
     sub = call(
@@ -1408,7 +1408,7 @@ def test_send_invoice_trial_end_bills_the_new_period(instance: seahaven.Instance
         line["period"]["end"] - line["period"]["start"] == 30 * 86_400
     )  # one month, not the trial
     # the period columns are ISO in storage; unix on the wire
-    from stripeapi import _time
+    from seahaven_stripe_world import _time
 
     assert _time.to_unix(invoice["period_start"]) == item["current_period_start"]
     assert _time.to_unix(invoice["period_end"]) == item["current_period_end"]
@@ -1440,7 +1440,7 @@ def test_resume_cycle_invoice_bills_the_parked_anchor_period(instance: seahaven.
     line = json.loads(invoice["lines"])[0]
     assert line["period"]["start"] == body["created"]  # the parked `now` anchor
     assert line["period"]["end"] - line["period"]["start"] == 30 * 86_400
-    from stripeapi import _time
+    from seahaven_stripe_world import _time
 
     assert _time.to_unix(invoice["period_start"]) == line["period"]["start"]
     assert _time.to_unix(invoice["period_end"]) == line["period"]["end"]
@@ -1491,7 +1491,7 @@ def test_advance_cycle_emits_from_the_true_pre_stamp_body(instance: seahaven.Ins
     (the status delta) and never invents one."""
     import json
 
-    import stripeapi.billing.subscription_lifecycle as lifecycle
+    import seahaven_stripe_world.billing.subscription_lifecycle as lifecycle
 
     cus, _, price = setup_catalog(instance)
     sub = call(
@@ -1519,7 +1519,7 @@ def _unpaid_subscription(instance: seahaven.Instance, price: str) -> str:
     """An `unpaid` row laid down directly — the walker the fixture
     generator will drive once dunning lands (Phase 14); the status is
     stored state, not a routed outcome."""
-    import stripeapi.billing.subscription_lifecycle as lifecycle
+    import seahaven_stripe_world.billing.subscription_lifecycle as lifecycle
 
     cus = call(instance, "POST", "/v1/customers", {"email": "u8@example.test"})["body"]["id"]
     dec = call(
@@ -1551,7 +1551,7 @@ def test_unpaid_wins_over_pause_behaviors(instance: seahaven.Instance) -> None:
     no crash, no finalization, no stamp."""
     import json
 
-    import stripeapi.billing.subscription_lifecycle as lifecycle
+    import seahaven_stripe_world.billing.subscription_lifecycle as lifecycle
 
     _cus, _pm, price = setup_catalog(instance)
     for behavior in ("void", "mark_uncollectible"):
@@ -1579,7 +1579,7 @@ def test_mark_uncollectible_stamp_on_the_standard_cell(instance: seahaven.Instan
     marks uncollectible WITH the §2 stamp; void stamps voided_at."""
     import json
 
-    import stripeapi.billing.subscription_lifecycle as lifecycle
+    import seahaven_stripe_world.billing.subscription_lifecycle as lifecycle
 
     cus, _pm, price = setup_catalog(instance)
     sub = call(
@@ -1725,7 +1725,7 @@ def test_advance_cycle_refuses_the_itemless_state(instance: seahaven.Instance) -
     import pytest
     import seahaven
 
-    import stripeapi.billing.subscription_lifecycle as lifecycle
+    import seahaven_stripe_world.billing.subscription_lifecycle as lifecycle
 
     cus, _, price = setup_catalog(instance)
     sub = call(

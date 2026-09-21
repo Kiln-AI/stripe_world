@@ -8,9 +8,9 @@ import pytest
 import seahaven
 
 from conftest import BLANK_NOW
-from stripeapi.discovery import index
-from stripeapi.dispatch import routes
-from stripeapi.dispatch.params import body_of
+from seahaven_stripe_world.discovery import index
+from seahaven_stripe_world.dispatch import routes
+from seahaven_stripe_world.dispatch.params import body_of
 
 pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
 
@@ -102,7 +102,7 @@ def test_wired_details_document_exactly_the_enforced_allowlist(
     route: a wired operation's documented parameters are its `ParamSpec`'s
     plus the central parameters that operation accepts, so nothing advertised
     is rejected and nothing enforced is undocumented."""
-    from stripeapi.dispatch.router import ROUTER
+    from seahaven_stripe_world.dispatch.router import ROUTER
 
     documented = instance.call("stripe_api_details", method="POST", path="/v1/customers")
     spec_parameters = {parameter["name"] for parameter in documented["parameters"]}
@@ -181,7 +181,7 @@ def test_details_response_size_budget() -> None:
 def test_the_index_comes_from_the_committed_artifact() -> None:
     """Tier-1 drift guard: the index's operation ids are the artifact's, so a
     hand edit of `spec3.min.json` shows up here before anywhere else."""
-    raw = json.loads((REPO / "src/stripeapi/spec/spec3.min.json").read_text())
+    raw = json.loads((REPO / "src/seahaven_stripe_world/spec/spec3.min.json").read_text())
     artifact_ops = {
         (method.upper(), path)
         for path, item in raw["paths"].items()

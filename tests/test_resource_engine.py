@@ -5,7 +5,7 @@ import pytest
 import seahaven
 
 from conftest import BLANK_NOW, dispatch_tool
-from stripeapi.dispatch.response import ApiResponse
+from seahaven_stripe_world.dispatch.response import ApiResponse
 
 pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
 
@@ -24,7 +24,7 @@ def _clean_by_object():
     Every test here (re-)registers what it needs, so holding the snapshot
     across the module is safe.
     """
-    from stripeapi.dispatch import resource
+    from seahaven_stripe_world.dispatch import resource
 
     before = set(resource.BY_OBJECT)
     yield
@@ -62,7 +62,7 @@ def test_crud_round_trip(instance: seahaven.Instance) -> None:
 
 def test_created_id_has_the_right_prefix_and_created_is_unix(instance: seahaven.Instance) -> None:
     from conftest import BLANK_NOW as NOW
-    from stripeapi import _time
+    from seahaven_stripe_world import _time
 
     created = create(instance)
     assert created["id"].startswith("cus_")
@@ -141,7 +141,7 @@ def test_update_of_a_missing_row_is_resource_missing(instance: seahaven.Instance
 
 
 def test_list_filters(instance: seahaven.Instance) -> None:
-    from stripeapi import _time
+    from seahaven_stripe_world import _time
 
     one = create(instance, email="one@example.test")
     create(instance, email="two@example.test")
@@ -238,10 +238,10 @@ def test_an_empty_without_filter_yields_an_empty_page_not_an_error(probe, monkey
     `GET /v1/payment_methods` — while cursors still resolve and a scoped
     route never sees the clause."""
     from conftest import BLANK_NOW as NOW
-    from stripeapi.dispatch import routes as routes_module
-    from stripeapi.dispatch.params import ParamSpec
-    from stripeapi.dispatch.router import Router
-    from stripeapi.dispatch.routes import Route
+    from seahaven_stripe_world.dispatch import routes as routes_module
+    from seahaven_stripe_world.dispatch.params import ParamSpec
+    from seahaven_stripe_world.dispatch.router import Router
+    from seahaven_stripe_world.dispatch.routes import Route
 
     routes = (
         Route(
@@ -256,7 +256,9 @@ def test_an_empty_without_filter_yields_an_empty_page_not_an_error(probe, monkey
         ),
         *_probe_routes(),
     )
-    monkeypatch.setattr("stripeapi.dispatch.router.ROUTER", Router((*routes_module.ALL, *routes)))
+    monkeypatch.setattr(
+        "seahaven_stripe_world.dispatch.router.ROUTER", Router((*routes_module.ALL, *routes))
+    )
     world = probe(dispatch_tool(), schema=SCOPED_SCHEMA)
     with world.instance(None, now=NOW) as instance:
         cus = instance.call("call_stripe", method="POST", path="/v1/customers")["body"]["id"]
@@ -306,10 +308,10 @@ CREATE UNIQUE INDEX probe_notes_by_seq ON probe_notes (x_seq DESC);
 
 
 def _probe_routes() -> tuple:
-    from stripeapi.dispatch.params import ParamSpec
-    from stripeapi.dispatch.resource import Scope
-    from stripeapi.dispatch.routes import Route
-    from stripeapi.resources.customers import SPEC
+    from seahaven_stripe_world.dispatch.params import ParamSpec
+    from seahaven_stripe_world.dispatch.resource import Scope
+    from seahaven_stripe_world.dispatch.routes import Route
+    from seahaven_stripe_world.resources.customers import SPEC
 
     return (
         Route(
@@ -334,8 +336,8 @@ _NOTE_SPEC = {}
 
 
 def _note_spec():
-    from stripeapi.dispatch.resource import ListFilter, ResourceSpec, register
-    from stripeapi.serialize.fields import FieldMap, serializer_for
+    from seahaven_stripe_world.dispatch.resource import ListFilter, ResourceSpec, register
+    from seahaven_stripe_world.serialize.fields import FieldMap, serializer_for
 
     if not _NOTE_SPEC:
         _NOTE_SPEC["spec"] = register(
@@ -371,11 +373,12 @@ def _note_spec():
 
 def test_scoped_list_filters_by_parent_and_404s_a_missing_one(probe, monkeypatch) -> None:
     from conftest import BLANK_NOW as NOW
-    from stripeapi.dispatch import routes as routes_module
-    from stripeapi.dispatch.router import Router
+    from seahaven_stripe_world.dispatch import routes as routes_module
+    from seahaven_stripe_world.dispatch.router import Router
 
     monkeypatch.setattr(
-        "stripeapi.dispatch.router.ROUTER", Router((*routes_module.ALL, *_probe_routes()))
+        "seahaven_stripe_world.dispatch.router.ROUTER",
+        Router((*routes_module.ALL, *_probe_routes())),
     )
     world = probe(dispatch_tool(), schema=SCOPED_SCHEMA)
     with world.instance(None, now=NOW) as instance:
@@ -413,12 +416,12 @@ def test_a_raised_handler_rolls_back_and_a_returned_failure_commits(probe, monke
     writes (zero change-log records), return keeps them
     (`components/cross_cutting.md` §3.5.4)."""
     from conftest import BLANK_NOW as NOW
-    from stripeapi.dispatch import routes as routes_module
-    from stripeapi.dispatch.params import ParamSpec
-    from stripeapi.dispatch.response import Request
-    from stripeapi.dispatch.router import Router
-    from stripeapi.dispatch.routes import Route
-    from stripeapi.stripe_errors import resource_missing
+    from seahaven_stripe_world.dispatch import routes as routes_module
+    from seahaven_stripe_world.dispatch.params import ParamSpec
+    from seahaven_stripe_world.dispatch.response import Request
+    from seahaven_stripe_world.dispatch.router import Router
+    from seahaven_stripe_world.dispatch.routes import Route
+    from seahaven_stripe_world.stripe_errors import resource_missing
 
     def refusing(ctx: seahaven.Ctx, req: Request) -> dict:
         cus = req.path_params["customer"]
@@ -458,7 +461,9 @@ def test_a_raised_handler_rolls_back_and_a_returned_failure_commits(probe, monke
             handler=declining,
         ),
     )
-    monkeypatch.setattr("stripeapi.dispatch.router.ROUTER", Router((*routes_module.ALL, *routes)))
+    monkeypatch.setattr(
+        "seahaven_stripe_world.dispatch.router.ROUTER", Router((*routes_module.ALL, *routes))
+    )
     world = probe(dispatch_tool(), schema=SCOPED_SCHEMA)
     with world.instance(None, now=NOW) as instance:
         cus = instance.call("call_stripe", method="POST", path="/v1/customers")["body"]["id"]

@@ -15,7 +15,14 @@ Its purpose is rollouts: thousands of them, in parallel, each forked from a know
 milliseconds, each with every changed row recoverable afterwards. Evals grade on final state, not on
 transcripts, which is what makes a double-charge or a misapplied refund visible at all.
 
-- **World name:** `stripeapi`. **Python distribution:** `seahaven-stripe-world`.
+- **Names, split by audience.** **World name** and **package:** `seahaven_stripe_world`. **Python
+  distribution:** `seahaven-stripe-world` — the same name in packaging's spelling, and they match
+  because the CLI and the pytest plugin find a world by importing the package the distribution name
+  normalises to (`SEAHAVEN_FINDINGS.md` Entry 7). All three are read by humans, PyPI, a hub and a
+  coding agent, and all three say *synthetic Seahaven world*. **MCP server name:** `stripe-mcp`,
+  Stripe's own, because it is read by the tool-calling agent — as are the `stripe_api_*` tool
+  names, the id prefixes, the field names and the error envelopes, which are the fidelity surface.
+  Disclosure everywhere a person looks, fidelity everywhere the agent does.
 - **Pinned API version:** `2026-08-26.dahlia` — the `info.version` of the `spec3.json` snapshot in
   `research/` (see `research/MANIFEST.md`). Every object shape, every fixture and every conformance
   cassette is that version. There is no version negotiation.

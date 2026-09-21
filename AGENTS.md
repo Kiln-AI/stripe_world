@@ -7,11 +7,9 @@ authoring.md, db_schema_and_fixtures.md, testing.md, state.md, reference/lints.m
 if this world adds other worlds.
 
 Commands: `uv run ruff format --check && uv run ruff check`, `uv run ty check`, `uv run pytest`,
-`uv run seahaven check --world stripeapi:world` (run all before every commit),
-`uv run seahaven fixture list --world stripeapi:world`, `uv run seahaven serve --world stripeapi:world`.
-Every `seahaven` subcommand needs `--world stripeapi:world`: the distribution name
-(`seahaven-stripe-world`) is not the world's package name (`stripeapi`), so the CLI's
-project-name heuristic cannot find the world without it.
+`uv run seahaven check` (run all before every commit), `uv run seahaven fixture list`,
+`uv run seahaven serve`. No `--world` is needed: `[project] name` normalises to the package, which
+is what the CLI's project-name heuristic imports.
 Conformance cassettes re-record with `uv run python -m tools_dev.record --scenario <name>`
 (`--list` prints names; needs a test-mode key, never runs in CI).
 CI (`.github/workflows/ci.yml`) runs that same check list on every push to main and every pull
@@ -52,7 +50,7 @@ and every workaround in the code carries a comment linking to its entry there.
   return it, never raise it. Seahaven errors (`errors.py`) are authoring mistakes: an unusable
   `method`, a malformed parameter object. Raise loses the writes, return keeps them.
 - **JSON TEXT columns** are written only through `_json.dumps`, so fixture bytes are reproducible.
-- **This repo is the world checkout**: `pyproject.toml` and `src/stripeapi/` at the root, beside
+- **This repo is the world checkout**: `pyproject.toml` and `src/seahaven_stripe_world/` at the root, beside
   `specs/` and `research/`. The framework is not vendored here: the bare `seahaven` requirement
   resolves through `[tool.uv.sources]` to `github.com/Kiln-AI/Seahaven` at a pinned full commit
   SHA, so `uv sync` installs the same core every time and moving it is one reviewable edit to that

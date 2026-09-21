@@ -4,7 +4,7 @@ status: complete
 
 # Component: Billing Engine
 
-`src/stripeapi/billing/` — the behavior that spans resources. Architecture
+`src/seahaven_stripe_world/billing/` — the behavior that spans resources. Architecture
 [§8](../architecture.md); functional spec [§5](../functional_spec.md) (time) and
 [§7](../functional_spec.md) (billing behavior); research lane
 [`billing-and-money-behavior/`](../research/stripe-billing-and-payments/billing-and-money-behavior/),

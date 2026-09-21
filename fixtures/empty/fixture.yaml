@@ -1,4 +1,4 @@
-created_at: '2026-09-21T13:27:48.981Z'
+created_at: '2026-09-21T16:47:05.756Z'
 description: Schema only. Start here to write history, or to test setup flows.
 file_sha256: a6c0110f7897a9718bade4e07ad7ff9725e9a462af09f4a4f414daa144a678c7
 format_version: 1
@@ -6,5 +6,5 @@ id: empty
 now: '2026-09-01T14:00:00.000Z'
 parent_id: null
 schema_hash: be97befecaf348ac82841c3f77af2014d72a8fec5b607b457bba94264fc8800f
-world: stripeapi
+world: seahaven_stripe_world
 world_version: 0.1.0

@@ -22,7 +22,7 @@ from tools_dev.prune_spec import (
     derive_operations,
 )
 
-from stripeapi.dispatch.routes import Route
+from seahaven_stripe_world.dispatch.routes import Route
 
 EVENTS = frozenset({"invoice.paid", "customer.created"})
 
@@ -474,7 +474,7 @@ def test_a_wired_route_filters_its_request_body_to_the_allowlist() -> None:
     write tool rejects. A wired route's body keeps its `ParamSpec`'s names
     plus the centrally-handled `expand` and `metadata` — and `required`
     follows."""
-    from stripeapi.dispatch.params import Param, ParamSpec
+    from seahaven_stripe_world.dispatch.params import Param, ParamSpec
 
     spec = synthetic_spec()
     spec["paths"]["/v1/prices"]["post"]["requestBody"]["content"][
@@ -533,8 +533,8 @@ def test_a_wired_route_filters_its_query_parameters_to_the_allowlist() -> None:
     (`test_clock`-shaped cut filters included) and must be reduced to the
     enforced set — the body's names, the path placeholders, and the central
     parameters the operation actually accepts."""
-    from stripeapi.dispatch.params import ParamSpec
-    from stripeapi.resources.customers import SPEC
+    from seahaven_stripe_world.dispatch.params import ParamSpec
+    from seahaven_stripe_world.resources.customers import SPEC
 
     spec = synthetic_spec()
     spec["paths"]["/v1/prices/{id}"] = {
@@ -581,8 +581,8 @@ def test_a_wired_route_filters_its_query_parameters_to_the_allowlist() -> None:
 def test_a_stub_delete_drops_expand_from_its_query_parameters() -> None:
     """One of the nine `expand=False` stub DELETEs: `expand` is rejected, so
     it must not be documented."""
-    from stripeapi.dispatch.params import ParamSpec
-    from stripeapi.resources.customers import SPEC
+    from seahaven_stripe_world.dispatch.params import ParamSpec
+    from seahaven_stripe_world.resources.customers import SPEC
 
     spec = synthetic_spec()
     spec["paths"]["/v1/prices/{id}"] = {
@@ -613,8 +613,8 @@ def test_central_parameters_are_gated_on_their_param_spec_flags() -> None:
     accepts them: a wired route with `metadata=False` whose spec body carries
     `metadata` must have it filtered out (and the mirrored `expand=False`
     case on the body side likewise) — the §8a hole one parameter over."""
-    from stripeapi.dispatch.params import Param, ParamSpec
-    from stripeapi.resources.customers import SPEC
+    from seahaven_stripe_world.dispatch.params import Param, ParamSpec
+    from seahaven_stripe_world.resources.customers import SPEC
 
     spec = synthetic_spec()
     spec["paths"]["/v1/prices/{id}"] = {

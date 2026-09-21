@@ -27,7 +27,7 @@ from schema_conformance.validate import (
     validate_object,
     violations_in_body,
 )
-from stripeapi.spec import DECLARED_OVERRIDES, ENUM_OVERRIDES
+from seahaven_stripe_world.spec import DECLARED_OVERRIDES, ENUM_OVERRIDES
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -322,7 +322,7 @@ def test_a_registered_scaffold_object_is_skipped_not_flagged(
     imported is still seen."""
     from typing import cast
 
-    from stripeapi.dispatch import resource
+    from seahaven_stripe_world.dispatch import resource
 
     body = {"id": "note_1", "object": "note", "body": "text"}
     assert violations_in_body(body, source="unit"), "an unregistered type is flagged"
@@ -371,7 +371,7 @@ def test_enum_overrides_are_exactly_the_generated_set() -> None:
 def test_http_tool_names_match_the_envelope_middleware() -> None:
     """The hook and the Stripe-envelope boundary must agree on which tools
     carry HTTP responses; a fourth tool on either side fails here first."""
-    from stripeapi.middleware.stripe_envelope import _HTTP_TOOLS
+    from seahaven_stripe_world.middleware.stripe_envelope import _HTTP_TOOLS
 
     assert capture.HTTP_TOOL_NAMES == _HTTP_TOOLS
 
@@ -443,7 +443,7 @@ def test_conformance_code_never_imports_stripe_python() -> None:
     scanned = [
         path
         for path in (
-            *Path(REPO, "src/stripeapi").rglob("*.py"),
+            *Path(REPO, "src/seahaven_stripe_world").rglob("*.py"),
             *Path(REPO, "tests/schema_conformance").rglob("*.py"),
             *Path(REPO, "tests/conformance").rglob("*.py"),
         )

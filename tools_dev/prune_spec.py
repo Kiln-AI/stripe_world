@@ -1,8 +1,8 @@
-"""Regenerate the committed spec artifacts under ``src/stripeapi/spec/``.
+"""Regenerate the committed spec artifacts under ``src/seahaven_stripe_world/spec/``.
 
 Reads the pinned Stripe OpenAPI snapshot (``research/stripe-openapi/spec3.json``,
 git-ignored; provenance in ``research/MANIFEST.md``) and the route table
-(``src/stripeapi/dispatch/routes.py``) and writes:
+(``src/seahaven_stripe_world/dispatch/routes.py``) and writes:
 
 - ``spec3.min.json`` — only the routed operations, only the reachable schemas,
   with HTML stripped from every summary/description;
@@ -44,12 +44,12 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, NamedTuple
 
-from stripeapi.dispatch.routes import Route
+from seahaven_stripe_world.dispatch.routes import Route
 
 REPO = Path(__file__).resolve().parents[1]
 SPEC_PATH = REPO / "research/stripe-openapi/spec3.json"
-SPEC_DIR = REPO / "src/stripeapi/spec"
-ROUTES_PY = REPO / "src/stripeapi/dispatch/routes.py"
+SPEC_DIR = REPO / "src/seahaven_stripe_world/spec"
+ROUTES_PY = REPO / "src/seahaven_stripe_world/dispatch/routes.py"
 EVENT_TYPES_TXT = (
     REPO / "specs/projects/stripe_world/research/stripe-billing-and-payments/"
     "api-surface-and-object-graph/event-types-closed-set.txt"
@@ -952,7 +952,7 @@ def _filter_request_surface(trimmed: dict[str, Any], route: Route) -> dict[str, 
     spec = route.params
     if spec is None:
         return trimmed
-    from stripeapi.dispatch.params import body_of
+    from seahaven_stripe_world.dispatch.params import body_of
 
     allowed_body = {param.name for param in body_of(route)}
     if spec.expand:
@@ -1310,7 +1310,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"wrote {ROUTES_PY.relative_to(REPO)}")
         return 0
 
-    from stripeapi.dispatch import routes as routes_module
+    from seahaven_stripe_world.dispatch import routes as routes_module
 
     artifacts = build_artifacts(full_spec, routes_module.ALL, _load_event_types())
     expected: dict[str, str] = {
@@ -1325,12 +1325,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.check:
         drifted = [name for name, content in expected.items() if _committed(name) != content]
         for name in drifted:
-            print(f"drifted: src/stripeapi/spec/{name}", file=sys.stderr)
+            print(f"drifted: src/seahaven_stripe_world/spec/{name}", file=sys.stderr)
         return 1 if drifted else 0
 
     for name, content in expected.items():
         (SPEC_DIR / name).write_text(content)
-        print(f"wrote src/stripeapi/spec/{name}")
+        print(f"wrote src/seahaven_stripe_world/spec/{name}")
     return 0
 
 

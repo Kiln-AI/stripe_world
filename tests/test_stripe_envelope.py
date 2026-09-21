@@ -12,12 +12,12 @@ NOW = BLANK_NOW
 def test_a_raised_error_is_rendered_and_rolls_the_call_back(probe, monkeypatch) -> None:
     """The subtle one, through a real chain: a handler that writes then raises
     leaves **no** change-log records, and the agent reads the envelope."""
-    from stripeapi.dispatch import routes as routes_module
-    from stripeapi.dispatch.params import ParamSpec
-    from stripeapi.dispatch.response import Request
-    from stripeapi.dispatch.router import Router
-    from stripeapi.dispatch.routes import Route
-    from stripeapi.stripe_errors import missing_parameter
+    from seahaven_stripe_world.dispatch import routes as routes_module
+    from seahaven_stripe_world.dispatch.params import ParamSpec
+    from seahaven_stripe_world.dispatch.response import Request
+    from seahaven_stripe_world.dispatch.router import Router
+    from seahaven_stripe_world.dispatch.routes import Route
+    from seahaven_stripe_world.stripe_errors import missing_parameter
 
     def half_writes_then_refuses(ctx: seahaven.Ctx, req: Request) -> dict:
         ctx.db.execute(
@@ -36,7 +36,9 @@ def test_a_raised_error_is_rendered_and_rolls_the_call_back(probe, monkeypatch) 
             handler=half_writes_then_refuses,
         ),
     )
-    monkeypatch.setattr("stripeapi.dispatch.router.ROUTER", Router((*routes_module.ALL, *routes)))
+    monkeypatch.setattr(
+        "seahaven_stripe_world.dispatch.router.ROUTER", Router((*routes_module.ALL, *routes))
+    )
     world = probe(dispatch_tool())
     with world.instance(None, now=NOW) as instance:
         result = instance.call("call_stripe", method="POST", path="/v1/probe/refuse")
@@ -47,12 +49,12 @@ def test_a_raised_error_is_rendered_and_rolls_the_call_back(probe, monkeypatch) 
 
 
 def test_the_error_envelope_omits_null_fields(probe, monkeypatch) -> None:
-    from stripeapi.dispatch import routes as routes_module
-    from stripeapi.dispatch.params import ParamSpec
-    from stripeapi.dispatch.response import Request
-    from stripeapi.dispatch.router import Router
-    from stripeapi.dispatch.routes import Route
-    from stripeapi.stripe_errors import unknown_parameter
+    from seahaven_stripe_world.dispatch import routes as routes_module
+    from seahaven_stripe_world.dispatch.params import ParamSpec
+    from seahaven_stripe_world.dispatch.response import Request
+    from seahaven_stripe_world.dispatch.router import Router
+    from seahaven_stripe_world.dispatch.routes import Route
+    from seahaven_stripe_world.stripe_errors import unknown_parameter
 
     def refusing(ctx: seahaven.Ctx, req: Request) -> dict:
         raise unknown_parameter("nope")
@@ -66,7 +68,9 @@ def test_the_error_envelope_omits_null_fields(probe, monkeypatch) -> None:
             handler=refusing,
         ),
     )
-    monkeypatch.setattr("stripeapi.dispatch.router.ROUTER", Router((*routes_module.ALL, *routes)))
+    monkeypatch.setattr(
+        "seahaven_stripe_world.dispatch.router.ROUTER", Router((*routes_module.ALL, *routes))
+    )
     world = probe(dispatch_tool())
     with world.instance(None, now=NOW) as instance:
         result = instance.call("call_stripe", method="POST", path="/v1/probe/unknown")
@@ -87,9 +91,9 @@ def test_the_error_envelope_omits_null_fields(probe, monkeypatch) -> None:
 def test_the_discovery_tools_pass_through_untouched() -> None:
     """They are not HTTP faces: their results are their own shapes, never an
     envelope, and a request id is not minted for them."""
-    import stripeapi
+    import seahaven_stripe_world
 
-    with stripeapi.world.instance(None, now=NOW) as instance:
+    with seahaven_stripe_world.world.instance(None, now=NOW) as instance:
         results = instance.call("stripe_api_search", query="customer")
         assert isinstance(results, list) and results
         assert set(results[0]) == {"method", "path", "summary"}
@@ -106,9 +110,9 @@ def test_the_discovery_tools_pass_through_untouched() -> None:
 
 
 def test_the_request_id_is_minted_per_call_and_carries_the_key() -> None:
-    import stripeapi
+    import seahaven_stripe_world
 
-    with stripeapi.world.instance(None, now=NOW) as instance:
+    with seahaven_stripe_world.world.instance(None, now=NOW) as instance:
         instance.call(
             "stripe_api_write",
             method="POST",
@@ -129,7 +133,7 @@ def test_the_request_id_is_minted_per_call_and_carries_the_key() -> None:
 def test_a_bug_in_the_boundary_is_the_error_handlers_internal(probe) -> None:
     """The boundary registers inside the error handler, so its own bugs reach
     the agent as this world's `INTERNAL`, never as a raw traceback."""
-    from stripeapi.errors import Internal
+    from seahaven_stripe_world.errors import Internal
 
     def exploding(ctx: seahaven.Ctx) -> None:
         raise RuntimeError("the boundary itself broke")
