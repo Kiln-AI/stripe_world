@@ -36,21 +36,21 @@ jobs:
       # person to `uv lock` rather than to the repository's secrets.
       - name: Give git a credential for the private Seahaven repository
         env:
-          SEAHAVEN_TOKEN: ${{ secrets.SEAHAVEN_CORE_DEPLOY_KEY }}
+          SEAHAVEN_TOKEN: ${{ secrets.SEAHAVEN_CORE_TOKEN }}
         run: |
           if [ -z "$SEAHAVEN_TOKEN" ]; then
-            echo "::error::The secret SEAHAVEN_CORE_DEPLOY_KEY is empty or not set for this run."
+            echo "::error::The secret SEAHAVEN_CORE_TOKEN is empty or not set for this run."
             echo "::error::'seahaven' is a git dependency on the private Kiln-AI/Seahaven repo and cannot be fetched without it."
-            echo "::error::Set it under Settings -> Secrets and variables -> Actions. A fork's pull request cannot see it; run such a PR from a branch in this repository."
+            echo "::error::Set it under Settings -> Secrets and variables -> Actions. An organization secret also has to list this repository, and a fork's pull request cannot see either; run such a PR from a branch in this repository."
             exit 1
           fi
-          # The secret is named ..._DEPLOY_KEY, and a GitHub *deploy key* is an
-          # SSH private key -- which this HTTPS rewrite cannot use. Say so here
-          # rather than letting git fail later with "could not read Username".
+          # A private key pasted in here would configure an HTTPS credential out
+          # of something only SSH can use, and git would not complain until it
+          # asked for a username several steps later. Cheaper to say it here.
           case "$SEAHAVEN_TOKEN" in
             -----BEGIN*)
-              echo "::error::SEAHAVEN_CORE_DEPLOY_KEY holds an SSH private key, but this step configures an HTTPS credential."
-              echo "::error::Either store a token with read access to Kiln-AI/Seahaven under that name, or switch this step to ssh-agent and the source URL in pyproject.toml to ssh://."
+              echo "::error::SEAHAVEN_CORE_TOKEN holds an SSH private key, but this step configures an HTTPS credential."
+              echo "::error::Store a token with read access to Kiln-AI/Seahaven under that name, or switch this step to ssh-agent and the source URL in pyproject.toml to ssh://."
               exit 1
               ;;
           esac
