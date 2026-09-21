@@ -317,6 +317,26 @@ look for a `[tool.uv.build-backend] module-name` (which a scaffold with this exa
 writes) before giving up — or name `--world` in the `ModuleNotFoundError` message the way
 `_import`'s other branches do.
 
+**Resolved here (2026-09-21) by renaming the package, not the distribution.** `src/stripeapi/`
+became `src/seahaven_stripe_world/`, so the distribution keeps the descriptive, disclosing name and
+the convention finds it. `--world` and `--seahaven-world` are gone from `pyproject.toml`,
+`AGENTS.md` and the README.
+
+The rename earned its keep independently, and that is the part worth carrying back. A top-level
+module name is a global claim inside every venv it is installed into, and worlds compose —
+`add_world` makes multi-world venvs the design rather than an edge case. A world that takes
+`stripeapi` squats a short, generic, plausible name on `sys.modules` exactly as it would on PyPI,
+and reads like the vendor's own library in a traceback. Namespacing both is one piece of hygiene.
+
+**The finding still stands** for a world that wants a short package behind a namespaced
+distribution, which is a reasonable thing to want: the mismatch is invisible until import time, and
+the `ModuleNotFoundError` names neither `--world` nor the heuristic. Two candidate shapes, not yet
+decided: a `[tool.seahaven] world = "pkg:world"` key read by `cli.discover` before the project-name
+convention — backend-agnostic, names the attribute too, and both the CLI and the pytest plugin
+inherit it from that one function — or making `seahaven new` scaffold the namespaced pair by
+default, so the convention never has to bend. The minimum under either is an error message that
+names `--world`.
+
 ---
 
 ### Entry 8 — `invoke` logs an ERROR-level traceback for every *raised* exception, including ones the world's own middleware catches and renders as ordinary results

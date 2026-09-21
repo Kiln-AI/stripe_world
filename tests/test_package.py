@@ -1,12 +1,12 @@
 """The package's public surface: one import, one `World`."""
 
-import stripeapi
+import seahaven_stripe_world
 
 
 def test_importing_the_package_builds_the_world() -> None:
     """The tooling finds a world by importing its package and reading `world`."""
-    assert stripeapi.world.name == "stripeapi"
-    assert stripeapi.world.pinned_state_format == "seahaven.state/1"
+    assert seahaven_stripe_world.world.name == "stripeapi"
+    assert seahaven_stripe_world.world.pinned_state_format == "seahaven.state/1"
 
 
 def test_the_chain_is_error_handler_then_stripe_envelope_then_idempotency() -> None:
@@ -18,11 +18,15 @@ def test_the_chain_is_error_handler_then_stripe_envelope_then_idempotency() -> N
     so it sees `ApiResponse` returns and `StripeApiError` raises rather than
     rendered bodies (`components/cross_cutting.md` §3.1.7).
     """
-    from stripeapi.middleware.error_handler import error_handler
-    from stripeapi.middleware.idempotency import idempotency
-    from stripeapi.middleware.stripe_envelope import stripe_envelope
+    from seahaven_stripe_world.middleware.error_handler import error_handler
+    from seahaven_stripe_world.middleware.idempotency import idempotency
+    from seahaven_stripe_world.middleware.stripe_envelope import stripe_envelope
 
-    assert list(stripeapi.world.middlewares) == [error_handler, stripe_envelope, idempotency]
+    assert list(seahaven_stripe_world.world.middlewares) == [
+        error_handler,
+        stripe_envelope,
+        idempotency,
+    ]
 
 
 def test_the_four_stripe_tools_are_registered() -> None:
@@ -30,7 +34,7 @@ def test_the_four_stripe_tools_are_registered() -> None:
     controller tool is the framework's, contributed to every world and not
     part of this world's surface; `call_stripe` is deliberately unregistered
     (functional spec §2.5)."""
-    assert set(stripeapi.world.tools) == {
+    assert set(seahaven_stripe_world.world.tools) == {
         "stripe_api_read",
         "stripe_api_write",
         "stripe_api_search",

@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from stripeapi.dispatch import routes
+from seahaven_stripe_world.dispatch import routes
 
 REPO = Path(__file__).resolve().parents[1]
 SPEC_PATH = REPO / "research/stripe-openapi/spec3.json"

@@ -17,22 +17,23 @@ Stripe API version (`2026-08-26.dahlia`).
 |---|---|
 | Schema | Phase 1 skeleton — tables arrive with the resource phases |
 | Tools | none yet — the four Stripe tools arrive with the dispatcher phase |
-| Errors | `INVALID_INPUT`, `INTERNAL` (`src/stripeapi/errors.py`); Stripe's own error envelope (`src/stripeapi/stripe_errors.py`) is a return value, not an exception |
+| Errors | `INVALID_INPUT`, `INTERNAL` (`src/seahaven_stripe_world/errors.py`); Stripe's own error envelope (`src/seahaven_stripe_world/stripe_errors.py`) is a return value, not an exception |
 | Fixtures | `empty` — the schema and nothing else, frozen at `2026-09-01T14:00:00.000Z` |
 
 ## Using it
 
 ```python
-import stripeapi
+import seahaven_stripe_world
 
-with stripeapi.world.instance("empty") as instance:
+with seahaven_stripe_world.world.instance("empty") as instance:
     ...
 ```
 
-Serve it over OpenEnv with `uv run seahaven serve --world stripeapi:world`, list its fixtures with
-`uv run seahaven fixture list --world stripeapi:world`, and run its tests with `uv run pytest`.
-Every `seahaven` subcommand needs `--world stripeapi:world`, because the distribution
-(`seahaven-stripe-world`) is not the world's package (`stripeapi`).
+Serve it over OpenEnv with `uv run seahaven serve`, list its fixtures with
+`uv run seahaven fixture list`, and run its tests with `uv run pytest`. No `--world` anywhere: the
+distribution (`seahaven-stripe-world`) normalises to the package (`seahaven_stripe_world`), which is
+what the CLI's and the pytest plugin's project-name convention expects. The world's own name is
+`stripeapi`: three names, two audiences, explained in AGENTS.md.
 
 ## Conventions
 

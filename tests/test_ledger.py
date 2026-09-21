@@ -366,8 +366,8 @@ def test_the_currency_symbol_tables_are_in_sync() -> None:
     (importing it would be a cycle — refunds imports the ledger); this is the
     guard that keeps the copy from drifting, so an HKD `balance_insufficient`
     message renders `$40.00` exactly like the refund messages do."""
-    from stripeapi.billing import ledger
-    from stripeapi.resources import refunds
+    from seahaven_stripe_world.billing import ledger
+    from seahaven_stripe_world.resources import refunds
 
     assert dict(ledger._CURRENCY_SYMBOLS) == dict(refunds._CURRENCY_SYMBOLS)
 
@@ -378,7 +378,7 @@ def test_an_unknown_balance_transaction_type_is_a_world_bug(
     """`record`'s type check is the never-invent-a-type rule (billing_engine
     §6): a value outside the 50-member set is world code inventing behavior
     Stripe does not have, and fails at the author, never at the agent."""
-    from stripeapi.billing import ledger
+    from seahaven_stripe_world.billing import ledger
 
     with (
         instance.bulk() as ctx,

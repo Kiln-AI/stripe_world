@@ -15,11 +15,11 @@ This component owns:
 
 - **`tools_dev/prune_spec.py`** — the build-time generator. Reads `research/stripe-openapi/spec3.json`
   (git-ignored, 8,028,700 bytes, 419 paths, 1454 schemas, version `2026-08-26.dahlia` per
-  `research/MANIFEST.md`) and `src/stripeapi/dispatch/routes.py` (the 148-entry route table), and
-  writes four committed, generated files under `src/stripeapi/spec/`.
-- **`src/stripeapi/spec/spec3.min.json`**, **`expandable.py`**, **`enums.py`**, **`event_types.py`** —
+  `research/MANIFEST.md`) and `src/seahaven_stripe_world/dispatch/routes.py` (the 148-entry route table), and
+  writes four committed, generated files under `src/seahaven_stripe_world/spec/`.
+- **`src/seahaven_stripe_world/spec/spec3.min.json`**, **`expandable.py`**, **`enums.py`**, **`event_types.py`** —
   the generated artifacts themselves: their shape, and the algorithm that produces them.
-- **`src/stripeapi/discovery/index.py`** — the runtime module that loads `spec3.min.json` once and
+- **`src/seahaven_stripe_world/discovery/index.py`** — the runtime module that loads `spec3.min.json` once and
   answers the two discovery tools.
 - **`stripe_api_search(query)`** and **`stripe_api_details(method, path)`** — the ranking algorithm,
   the rendering algorithm, and their error conditions.
@@ -50,7 +50,7 @@ This component owns:
 
 ## Public Interface
 
-### Agent-facing tools (`src/stripeapi/tools/api.py`)
+### Agent-facing tools (`src/seahaven_stripe_world/tools/api.py`)
 
 ```python
 def stripe_api_search(ctx: seahaven.Ctx, query: str) -> list[SearchResult]:
@@ -99,7 +99,7 @@ error conditions it needs there.
 
 A well-formed `query` that matches nothing is **not** an error: `stripe_api_search` returns `[]`.
 
-### Internal module (`src/stripeapi/discovery/index.py`)
+### Internal module (`src/seahaven_stripe_world/discovery/index.py`)
 
 Framework-agnostic — no `seahaven` import, no `ctx` parameter, unit-testable as plain Python.
 
@@ -145,7 +145,7 @@ class Artifacts(NamedTuple):
 
 def main(argv: Sequence[str]) -> int:
     """CLI. `python -m tools_dev.prune_spec` regenerates and writes the four files under
-    src/stripeapi/spec/. `python -m tools_dev.prune_spec --check` regenerates in memory and exits
+    src/seahaven_stripe_world/spec/. `python -m tools_dev.prune_spec --check` regenerates in memory and exits
     non-zero if any committed file would change — see "The drift test" below. Both modes require
     research/stripe-openapi/spec3.json on disk and fail immediately, with that path named in the
     error, if it is absent."""

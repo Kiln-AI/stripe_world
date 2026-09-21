@@ -196,7 +196,7 @@ def test_a_minted_prefix_collision_re_mints(probe, monkeypatch) -> None:
     genuine collision through the seeded stream is impractical, so the mint
     function is stubbed to collide twice first."""
     from conftest import BLANK_NOW as NOW
-    from stripeapi.resources import customers
+    from seahaven_stripe_world.resources import customers
 
     draws = iter(["COLLIDE", "COLLIDE", "FREEONE"])
     monkeypatch.setattr(customers, "_mint_prefix", lambda ctx: next(draws))

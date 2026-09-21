@@ -2,7 +2,7 @@
 spec's own shape?
 
 The rules are generated, not hand-written — ``tools_dev/prune_spec.py``
-normalizes ``spec3.min.json`` into ``src/stripeapi/spec/schema_rules.json`` —
+normalizes ``spec3.min.json`` into ``src/seahaven_stripe_world/spec/schema_rules.json`` —
 so the validator and the discovery layer cannot drift from each other
 (functional spec §2.7). What is checked, per object:
 
@@ -37,8 +37,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from stripeapi.dispatch import resource as _resource
-from stripeapi.spec import ENUM_OVERRIDES, schema_rules
+from seahaven_stripe_world.dispatch import resource as _resource
+from seahaven_stripe_world.spec import ENUM_OVERRIDES, schema_rules
 
 __all__ = ["SchemaViolation", "validate_object", "violations_in_body"]
 

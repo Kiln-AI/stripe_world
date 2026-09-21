@@ -8,7 +8,7 @@ status: complete
 
 This component is the storage layer and the boundary that turns rows into Stripe objects. It owns:
 
-- the four DDL files under `src/stripeapi/schema/` (`001_core.sql`, `002_payments.sql`,
+- the four DDL files under `src/seahaven_stripe_world/schema/` (`001_core.sql`, `002_payments.sql`,
   `003_billing.sql`, `004_infra.sql`) — every table, column, type, nullability, primary key, foreign
   key, `CHECK` and index;
 - `_ids.py` — the id prefix per resource and the one minting function;

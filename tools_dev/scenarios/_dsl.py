@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from conformance.cassette import Ref
-from stripeapi.spec import pinned_version
+from seahaven_stripe_world.spec import pinned_version
 
 __all__ = ["PINNED_VERSION", "Recorder", "StepHandle", "ref"]
 

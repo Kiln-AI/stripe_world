@@ -12,10 +12,10 @@ import pytest
 import seahaven
 
 from conftest import BLANK_NOW
-from stripeapi.dispatch.params import Param, ParamSpec, bind
-from stripeapi.dispatch.response import Request
-from stripeapi.dispatch.routes import Route
-from stripeapi.stripe_errors import StripeApiError
+from seahaven_stripe_world.dispatch.params import Param, ParamSpec, bind
+from seahaven_stripe_world.dispatch.response import Request
+from seahaven_stripe_world.dispatch.routes import Route
+from seahaven_stripe_world.stripe_errors import StripeApiError
 
 pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
 
@@ -210,7 +210,7 @@ def test_required_one_of() -> None:
 
 
 def test_a_range_filter_accepts_object_and_integer() -> None:
-    from stripeapi import _time
+    from seahaven_stripe_world import _time
 
     coerced = bound(
         spec((Param(name="created", kind="range"),)),
@@ -227,7 +227,7 @@ def test_a_range_filter_accepts_object_and_integer() -> None:
 
 
 def test_metadata_update_semantics() -> None:
-    from stripeapi.dispatch.params import MetadataUpdate
+    from seahaven_stripe_world.dispatch.params import MetadataUpdate
 
     update = MetadataUpdate(clear=False, set={"a": "1"}, unset=frozenset({"b"}))
     assert update.apply({"b": "old", "c": "keep"}) == {"a": "1", "c": "keep"}

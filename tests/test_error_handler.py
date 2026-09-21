@@ -19,7 +19,7 @@ import pytest
 import seahaven
 
 from conftest import BLANK_NOW, a_tool
-from stripeapi.errors import Internal, InvalidInput
+from seahaven_stripe_world.errors import Internal, InvalidInput
 
 # A table no world here has, for the `DbError` an ordinary tool provokes by
 # writing SQL that cannot run. (This was `refunds` until Phase 9 built it —
@@ -108,12 +108,12 @@ def test_a_database_error_the_agent_never_sees_is_written_to_the_log(
 
     world = probe(a_tool(broken, "broken"))
     with (
-        caplog.at_level(logging.ERROR, logger="stripeapi.errors"),
+        caplog.at_level(logging.ERROR, logger="seahaven_stripe_world.errors"),
         world.instance(None, now=BLANK_NOW) as instance,
     ):
         with pytest.raises(Internal):
             instance.call("broken")
-        (record,) = [r for r in caplog.records if r.name == "stripeapi.errors"]
+        (record,) = [r for r in caplog.records if r.name == "seahaven_stripe_world.errors"]
         assert instance.id in record.getMessage()
         assert "broken" in record.getMessage()
         assert record.exc_info is not None
@@ -129,7 +129,7 @@ def test_a_world_bug_is_reraised_unchanged(probe: Probe) -> None:
     dressing those as product errors would grade this world's bugs as agent
     behavior, so the handler must not touch them.
     """
-    from stripeapi._ids import stripe_id
+    from seahaven_stripe_world._ids import stripe_id
 
     def minting_wrong(ctx: seahaven.Ctx) -> None:
         stripe_id(ctx, "cu_")  # typo of cus_

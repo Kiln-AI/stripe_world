@@ -1011,7 +1011,7 @@ task's primary failure mode above, i.e. the one most likely to look like a passi
 
 ## File Layout
 
-Sits **outside** `src/stripeapi/`, alongside `fixtures/`, `fixtures_src/` and `tests/` — the same
+Sits **outside** `src/seahaven_stripe_world/`, alongside `fixtures/`, `fixtures_src/` and `tests/` — the same
 "checked out, not installed" reasoning functional spec/capability-map already applies to fixtures
 (a wheel install of this world as someone else's billing subsystem has no use for fifteen eval
 task definitions any more than it needs the fixture generator):

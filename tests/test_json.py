@@ -1,6 +1,6 @@
 """`_json`: the single dump convention for every JSON TEXT column."""
 
-from stripeapi._json import dumps, loads
+from seahaven_stripe_world._json import dumps, loads
 
 
 def test_dumps_sorts_keys_and_compacts() -> None:
