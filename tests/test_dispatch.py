@@ -34,7 +34,9 @@ def test_an_unwired_route_is_a_world_bug(instance: seahaven.Instance) -> None:
     `WorldBug` unchanged — loudly, for the author — rather than dressing it as
     a product error an agent could be blamed for."""
     with pytest.raises(seahaven.WorldBug, match="not wired"):
-        instance.call("stripe_api_read", path="/v1/invoices")
+        instance.call(
+            "stripe_api_write", method="POST", path="/v1/invoices/create_preview", params={}
+        )
 
 
 def test_a_bad_expand_path_outranks_a_missing_resource(instance: seahaven.Instance) -> None:

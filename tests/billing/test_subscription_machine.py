@@ -90,9 +90,15 @@ def test_create_active_with_paid_first_invoice(instance: seahaven.Instance) -> N
     assert item["current_period_end"] > item["current_period_start"]
     assert item["quantity"] == 1
     assert item["price"]["id"] == price
-    # the subscription's own events, after the catalog's
-    assert events_of(instance)[-2:] == [
+    # the subscription's own events, after the catalog's — the invoice
+    # family now emits (Phase 13's serializer): created, finalized, the
+    # charge, the payment pair, then the subscription's own creation last.
+    assert events_of(instance)[-6:] == [
+        "invoice.created",
+        "invoice.finalized",
         "charge.succeeded",
+        "invoice.payment_succeeded",
+        "invoice.paid",
         "customer.subscription.created",
     ]
 
@@ -660,7 +666,7 @@ def test_the_decline_card_lands_incomplete_with_its_attempt_counted(instance: se
         instance, "SELECT * FROM charges WHERE payment_intent IS NULL AND status = 'failed'"
     )
     assert charge is not None
-    assert "invoice.payment_failed" not in events_of(instance)  # Phase 13's event
+    assert "invoice.payment_failed" in events_of(instance)  # Phase 13's event
 
 
 def test_terminal_states_are_stamped(instance: seahaven.Instance) -> None:

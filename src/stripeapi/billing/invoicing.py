@@ -1,29 +1,15 @@
-"""The invoice path subscriptions drive: line construction from items,
-totals arithmetic, and the draft → open → paid machine's internal steps
-(`components/billing_engine.md` §2 and §3, Phase 12's subset).
+"""The invoice path: line construction from subscription items and pending
+invoice items, totals arithmetic, and the draft → open → paid machine's
+internal steps (`components/billing_engine.md` §2 and §3).
 
-Phase 12's invoices are born only from subscription flows (creation, the
-trial-end cycle, resume, `advance_cycle`); `/v1/invoices` itself is Phase
-13's, so nothing here serializes an invoice — this module writes and moves
-ROWS, and the `lines` JSON it freezes is the recorded `line_item` shape
-Phase 13's serializer will emit verbatim.
-
-Scope, deliberately: lines come from subscription items only (pending
-`invoiceitems` and item-scope discounts are Phase 13's
-`compute_totals` completion), invoice-scope coupon discounts and default
-tax rates ARE here — both recorded on subscription creation (Phase 12
-probes, 2026-09-21: a 10%-off once-coupon takes 3000 → 2700, a 5% exclusive
-GST on the post-discount base adds 135, total 2835), and the customer
-balance settlement is §3.5 verbatim including its
-`customer_balance_transactions` row.
-
-This module emits **no `invoice.*` events**: an event's `data.object` is
-the verbatim serialized object (`components/cross_cutting.md` §3.4.3), and
-the invoice serializer is Phase 13's. The `invoice.created`/`finalized`/
-`paid`/`payment_failed` emissions the billing engine names join when that
-serializer exists — a declared gap, not an omission. The charge events an
-invoice payment writes (`charge.succeeded`/`charge.failed`) DO fire here;
-their serializer shipped in Phase 8.
+Since Phase 13 the routed `/v1/invoices` surface lives here too: the sweep
+of pending `invoiceitems` onto a draft (all of the customer's pending items,
+newest-first — the invoice's own zero-width period bounds nothing, recorded),
+the draft-edit rebuild, delete-draft (which does NOT release the swept items
+back to pending — recorded), and the `$0-settles` finalize helper the
+finalize/pay/send routes share. The invoice serializer shipped with Phase
+13's routes, so this module's `invoice.*` events emit verbatim serialized
+bodies (`components/cross_cutting.md` §3.4.3).
 
 Every amount is an `int` of minor units or a `fractions.Fraction` on the way
 to one; no float exists in this module's money path.
@@ -46,18 +32,26 @@ from stripeapi.stripe_errors import declined as declined_body
 __all__ = [
     "INVOICE_PAYMENT_SETTINGS",
     "DiscountSpec",
+    "ItemLine",
     "TaxRateSpec",
     "add_interval",
     "build_item_lines",
     "compute_automatically_finalizes_at",
     "compute_totals",
     "create_invoice",
+    "delete_draft_invoice",
     "describe_amount",
+    "finalize_and_settle",
     "finalize_invoice",
+    "invoice_item_line",
     "iso_plus_hours",
     "mark_uncollectible_invoice",
+    "next_payment_attempt_at",
     "pay_invoice",
+    "pending_invoice_item_rows",
+    "rebuild_invoice_lines",
     "settle_customer_balance",
+    "sweep_pending_items",
     "void_invoice",
 ]
 
@@ -184,7 +178,13 @@ class TaxRateSpec:
 
 @dataclass(frozen=True)
 class ItemLine:
-    """One subscription item's contribution, pre-arithmetic.
+    """One line's source configuration, pre-arithmetic.
+
+    A subscription-item line (`invoice_item_id is None`) carries
+    `parent.subscription_item_details`; an invoice-item line carries
+    `parent.invoice_item_details` naming the backing `ii_` row, with
+    `price_id`/`product_id` pointing at the one-off price the item's
+    `pricing` block names (recorded, cassette 13).
 
     `proration` marks a proration-shaped line (a conversion credit, later
     the Phase 14 proration lines): never discountable, `proration: true`
@@ -192,16 +192,18 @@ class ItemLine:
     `unit_amount_decimal` (`spec3.json`'s own rule; probed on the
     conversion credit, round 4's trail)."""
 
-    subscription_item_id: str
-    subscription_id: str
-    price_id: str
-    product_id: str
+    subscription_item_id: str | None
+    subscription_id: str | None
+    price_id: str | None
+    product_id: str | None
     unit_amount: int
     quantity: int
     period_start: str
     period_end: str
     description: str
     proration: bool = False
+    invoice_item_id: str | None = None
+    discountable: bool = True
 
 
 @dataclass(frozen=True)
@@ -210,6 +212,7 @@ class Totals:
     subtotal: int
     invoice_discount_total: int
     total_discount_amounts: list[dict[str, Any]]
+    total_pretax_credit_amounts: list[dict[str, Any]]
     exclusive_tax_total: int
     inclusive_tax_total: int
     total_excluding_tax: int
@@ -301,7 +304,9 @@ def compute_totals(
     # Invoice-scope discounts, sequential, apportioned back per line. A
     # proration line is never a discount base (`spec3.json`: "Always false
     # for prorations" — discountable both as a flag and as an apportion
-    # weight).
+    # weight), but it still carries an explicit 0-amount entry (recorded on
+    # the conversion credit's invoice, Phase 12's trail: a non-discountable
+    # line shows the discount with amount 0 rather than omitting it).
     discountable = [
         amount if not line.proration else 0
         for amount, line in zip(amounts, line_inputs, strict=True)
@@ -320,8 +325,10 @@ def compute_totals(
         else:
             shares = [0] * len(discountable)
         for index, share in enumerate(shares):
-            if share:
-                per_line_discounts[index][discount.discount_id] = share
+            # Every line names every invoice-scope discount, 0 included —
+            # the recorded shape (the `discounts` id array stays empty; the
+            # apportioned amount is what `discount_amounts` carries).
+            per_line_discounts[index][discount.discount_id] = share
             discountable[index] -= share
         if amount:
             total_discount_amounts.append({"amount": amount, "discount": discount.discount_id})
@@ -375,6 +382,37 @@ def compute_totals(
             {"amount": amount, "discount": discount_id}
             for discount_id, amount in per_line_discounts[index].items()
         ]
+        # The recorded pretax-credit echo: every invoice-scope discount a
+        # line carries reappears here with `type: "discount"` (observed on
+        # the Phase 12 conversion-credit invoices and the sandbox's own
+        # discounted bodies; cassette 13 carries no coupon to replay it).
+        pretax_credit_amounts = [
+            {"amount": amount, "discount": discount_id, "type": "discount"}
+            for discount_id, amount in per_line_discounts[index].items()
+        ]
+        if line.invoice_item_id is not None:
+            parent = {
+                "invoice_item_details": {
+                    "invoice_item": line.invoice_item_id,
+                    "proration": line.proration,
+                    "proration_details": {"credited_items": None},
+                    "subscription": line.subscription_id,
+                },
+                "subscription_item_details": None,
+                "type": "invoice_item_details",
+            }
+        else:
+            parent = {
+                "invoice_item_details": None,
+                "subscription_item_details": {
+                    "invoice_item": None,
+                    "proration": line.proration,
+                    "proration_details": {"credited_items": None},
+                    "subscription": line.subscription_id,
+                    "subscription_item": line.subscription_item_id,
+                },
+                "type": "subscription_item_details",
+            }
         lines.append(
             {
                 "id": _line_placeholder_id(index),
@@ -384,25 +422,16 @@ def compute_totals(
                 "currency": currency,
                 "description": line.description,
                 "discount_amounts": discount_amounts,
-                "discountable": not line.proration,
-                "discounts": sorted(per_line_discounts[index]),
+                "discountable": line.discountable and not line.proration,
+                "discounts": [],
                 "invoice": invoice_id,
                 "metadata": {},
-                "parent": {
-                    "type": "subscription_item_details",
-                    "subscription_item_details": {
-                        "invoice_item": None,
-                        "proration": line.proration,
-                        "proration_details": {"credited_items": None},
-                        "subscription": line.subscription_id,
-                        "subscription_item": line.subscription_item_id,
-                    },
-                },
+                "parent": parent,
                 "period": {
                     "start": _time.to_unix(line.period_start),
                     "end": _time.to_unix(line.period_end),
                 },
-                "pretax_credit_amounts": [],
+                "pretax_credit_amounts": pretax_credit_amounts,
                 "pricing": {
                     "type": "price_details",
                     "price_details": {
@@ -424,6 +453,11 @@ def compute_totals(
         subtotal=subtotal,
         invoice_discount_total=invoice_discount_total,
         total_discount_amounts=total_discount_amounts,
+        # The same aggregation with the echo's `type` key (recorded: the
+        # totals mirror the per-line pretax credits discount-for-discount).
+        total_pretax_credit_amounts=[
+            {**entry, "type": "discount"} for entry in total_discount_amounts
+        ],
         exclusive_tax_total=exclusive_total,
         inclusive_tax_total=inclusive_total,
         total_excluding_tax=subtotal - invoice_discount_total - inclusive_total,
@@ -460,10 +494,29 @@ def compute_automatically_finalizes_at(
     created_iso: str, *, auto_advance: bool, collection_method: str
 ) -> str | None:
     """Populated and honest, never self-firing (the frozen clock): the real
-    ~1-hour draft window for an auto-advancing draft, NULL otherwise."""
+    ~1-hour draft window for an auto-advancing draft, NULL otherwise.
+
+    The offset is **3601 seconds, not 3600** — recorded twice (cassette 13,
+    steps 20 and 55): Stripe computes the window from the un-floored
+    creation instant and ceils, where `next_payment_attempt_at` below floors
+    the same instant, which is why the two fields sit one second apart on
+    the wire.
+    """
     if not auto_advance:
         return None
-    return iso_plus_hours(created_iso, hours=1)
+    return _time.from_unix(_time.to_unix(created_iso) + 3_601)
+
+
+def next_payment_attempt_at(
+    created_iso: str, *, auto_advance: bool, collection_method: str
+) -> str | None:
+    """The scheduled first collection attempt on an auto-advancing
+    `charge_automatically` draft: `created + 3600s` (recorded, cassette 13
+    step 20). `send_invoice` drafts carry none — email collection has no
+    payment attempt — and neither does any non-advancing draft."""
+    if not auto_advance or collection_method != "charge_automatically":
+        return None
+    return _time.from_unix(_time.to_unix(created_iso) + 3_600)
 
 
 # --- the stateful path ----------------------------------------------------------------
@@ -484,10 +537,23 @@ def create_invoice(
     period_end: str,
     discounts: Sequence[Mapping[str, Any]] = (),
     tax_rate_ids: Sequence[str] = (),
+    sweep: bool = False,
+    extra_columns: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Write one draft invoice row with its lines and totals already
     computed, and emit `invoice.created`. Finalization (`finalize_invoice`)
-    is the caller's next step or never, per the flow."""
+    is the caller's next step or never, per the flow.
+
+    `effective_at` is NULL here and lands at finalization (recorded,
+    cassette 13: every draft — manual and subscription alike — carries
+    null; the finalize moment stamps it).
+
+    `sweep=True` attaches the customer's same-currency pending items and
+    rebuilds the lines BEFORE the event fires, so the `invoice.created`
+    snapshot is the object as the call left it — events are queryable
+    state (§6.6, "the object as of the change") and an eval reading a
+    pre-sweep snapshot would grade wrong. `extra_columns` folds the
+    manual-create field set into the INSERT for the same reason."""
     now = ctx.clock.iso()
     customer = _lookup.require_row(ctx, "customers", "customer", customer_id, param="customer")
     id_ = _ids.stripe_id(ctx, "in_")
@@ -501,9 +567,12 @@ def create_invoice(
         "id": id_,
         "x_seq": _seq.next_seq(ctx, "invoices"),
         "created": now,
-        "amount_due": 0,
+        # A draft's amount_due mirrors its total (recorded, cassette 13
+        # step 13: 3500 on the draft); finalization overwrites it with the
+        # post-settlement figure.
+        "amount_due": max(totals.total, 0),
         "amount_paid": 0,
-        "amount_remaining": 0,
+        "amount_remaining": max(totals.total, 0),
         "attempt_count": 0,
         "attempted": 0,
         "auto_advance": int(auto_advance),
@@ -523,8 +592,11 @@ def create_invoice(
         "default_tax_rates": _json.dumps(list(tax_rate_ids)),
         "discounts": _json.dumps(list(discounts)),
         "due_date": due_date,
-        "effective_at": now,
+        "effective_at": None,
         "lines": _json.dumps(lines),
+        "next_payment_attempt": next_payment_attempt_at(
+            now, auto_advance=auto_advance, collection_method=collection_method
+        ),
         "parent_type": "subscription_details" if subscription_id else None,
         "parent_subscription": subscription_id,
         "payment_settings": _json.dumps(INVOICE_PAYMENT_SETTINGS),
@@ -545,24 +617,234 @@ def create_invoice(
         "total": totals.total,
         "total_discount_amounts": _json.dumps(totals.total_discount_amounts),
         "total_excluding_tax": totals.total_excluding_tax,
+        "total_pretax_credit_amounts": _json.dumps(totals.total_pretax_credit_amounts),
         "total_taxes": _json.dumps(totals.total_taxes),
     }
+    cols.update({column: value for column, value in (extra_columns or {}).items()})
     columns = ", ".join(cols)
     placeholders = ", ".join("?" for _ in cols)
     ctx.db.execute(f"INSERT INTO invoices ({columns}) VALUES ({placeholders})", *cols.values())
-    return _lookup.require_row(ctx, "invoices", "invoice", id_, param="invoice")
+    if sweep:
+        sweep_pending_items(ctx, id_, customer_id, currency)
+        row = rebuild_invoice_lines(ctx, id_)
+    else:
+        row = _lookup.require_row(ctx, "invoices", "invoice", id_, param="invoice")
+    emit_invoice_event(ctx, "invoice.created", row)
+    return row
+
+
+# --- the pending-item path (Phase 13) -------------------------------------------------
+
+
+def invoice_item_line(ctx: seahaven.Ctx, item: Mapping[str, Any]) -> ItemLine:
+    """One attached invoiceitem row as a line input: `pricing` names the
+    one-off price behind the item (the recorded shape — an `amount+currency`
+    create mints a price and product live, and so does this world)."""
+    pricing = _load_dict(item["pricing"])
+    price_details = pricing.get("price_details")
+    if not isinstance(price_details, dict):
+        raise seahaven.WorldBug(f"invoiceitem {item['id']} carries no price_details")
+    return ItemLine(
+        subscription_item_id=None,
+        subscription_id=None,
+        price_id=price_details.get("price"),
+        product_id=price_details.get("product"),
+        unit_amount=item["amount"],
+        quantity=item["quantity"],
+        period_start=item["period_start"],
+        period_end=item["period_end"],
+        description=item["description"] or "",
+        invoice_item_id=item["id"],
+        discountable=bool(item["discountable"]),
+    )
+
+
+def pending_invoice_item_rows(ctx: seahaven.Ctx, customer_id: str) -> list[dict[str, Any]]:
+    """The customer's unswept items, newest-first (the recorded `lines`
+    order for the pending bucket)."""
+    return ctx.db.rows(
+        "SELECT * FROM invoiceitems WHERE customer = ? AND invoice IS NULL ORDER BY x_seq DESC",
+        customer_id,
+    )
+
+
+def sweep_pending_items(
+    ctx: seahaven.Ctx, invoice_id: str, customer_id: str, currency: str
+) -> None:
+    """Attach the customer's pending items that match the invoice's
+    currency (the `include` behavior, recorded: the sweep is bounded by the
+    customer, never by the invoice's own zero-width period). One currency
+    per invoice is Stripe's own invariant — an invoice sums one currency —
+    so mismatched items stay pending for a later invoice of theirs
+    (unprobed live; the declared ruling)."""
+    ctx.db.execute(
+        "UPDATE invoiceitems SET invoice = ? WHERE customer = ? AND invoice IS NULL"
+        " AND currency = ?",
+        invoice_id,
+        customer_id,
+        currency,
+    )
+
+
+def _line_inputs_for(ctx: seahaven.Ctx, row: Mapping[str, Any]) -> list[ItemLine]:
+    """A draft's line inputs: its attached invoice items newest-first, then
+    the subscription's items newest-first (the recorded collapse of the
+    spec's three buckets into two — a later-added item is simply the newest
+    pending item, cassette 13 step 32)."""
+    inputs = [
+        invoice_item_line(ctx, item)
+        for item in ctx.db.rows(
+            "SELECT * FROM invoiceitems WHERE invoice = ? ORDER BY x_seq DESC", row["id"]
+        )
+    ]
+    if row["parent_subscription"] is not None:
+        items = ctx.db.rows(
+            "SELECT * FROM subscription_items WHERE subscription = ? ORDER BY x_seq DESC",
+            row["parent_subscription"],
+        )
+        inputs.extend(build_item_lines(ctx, items, currency=row["currency"]))
+    return inputs
+
+
+def _invoice_discount_specs(ctx: seahaven.Ctx, row: Mapping[str, Any]) -> list[DiscountSpec]:
+    """The invoice's stored inline discount objects resolved into specs
+    (the same re-resolution `_persisted_discount_specs` applies to a
+    subscription's, coupon rows the authority)."""
+    from stripeapi.billing import subscription_lifecycle
+
+    specs: list[DiscountSpec] = []
+    for discount in _load_list(row["discounts"]):
+        source = discount.get("source") if isinstance(discount, dict) else None
+        if isinstance(source, dict) and source.get("coupon") is not None:
+            specs.extend(
+                subscription_lifecycle._persisted_discount_specs(
+                    ctx, {"discounts": _json.dumps([dict(discount)])}
+                )
+            )
+    return specs
+
+
+def _invoice_tax_specs(ctx: seahaven.Ctx, row: Mapping[str, Any]) -> list[TaxRateSpec]:
+    from stripeapi.billing import subscription_lifecycle
+
+    return subscription_lifecycle._tax_specs(ctx, _load_list(row["default_tax_rates"]))
+
+
+def rebuild_invoice_lines(ctx: seahaven.Ctx, invoice_id: str) -> dict[str, Any]:
+    """Recompute a draft's lines and totals from scratch — nothing is
+    incremental (billing_engine §2) — while PRESERVING each line's `il_` id
+    across the rebuild: a line is keyed by its source (the backing
+    invoiceitem, or the subscription item plus its period), and a draft
+    edit must answer the same ids it was given (recorded, cassette 13 step
+    33 — the updated line keeps its id). A draft's `amount_due` mirrors the
+    recomputed total; finalization applies the customer balance over it."""
+    row = _lookup.require_row(ctx, "invoices", "invoice", invoice_id, param="invoice")
+    if row["status"] != "draft":
+        raise seahaven.WorldBug(f"rebuild_invoice_lines on a {row['status']!r} invoice")
+    totals = compute_totals(
+        _line_inputs_for(ctx, row),
+        currency=row["currency"],
+        invoice_discounts=_invoice_discount_specs(ctx, row),
+        tax_rates=_invoice_tax_specs(ctx, row),
+        invoice_id=invoice_id,
+    )
+    previous_ids: dict[tuple[str, ...], str] = {}
+    for line in _load_list(row["lines"]):
+        if not isinstance(line, dict):
+            continue
+        parent = line.get("parent") or {}
+        item_details = parent.get("invoice_item_details")
+        sub_details = parent.get("subscription_item_details")
+        if isinstance(item_details, dict) and item_details.get("invoice_item"):
+            previous_ids[("ii", str(item_details["invoice_item"]))] = str(line["id"])
+        elif isinstance(sub_details, dict) and sub_details.get("subscription_item"):
+            previous_ids[
+                ("si", str(sub_details["subscription_item"]), str(line["period"]["start"]))
+            ] = str(line["id"])
+    lines = []
+    for line in totals.lines:
+        parent = line["parent"]
+        item_details = parent["invoice_item_details"]
+        if item_details is not None:
+            key = ("ii", str(item_details["invoice_item"]))
+        else:
+            key = (
+                "si",
+                str(parent["subscription_item_details"]["subscription_item"]),
+                str(line["period"]["start"]),
+            )
+        line = {
+            **line,
+            "id": previous_ids.get(key) or _ids.stripe_id(ctx, "il_"),
+        }
+        lines.append(line)
+    # A draft's amount fields mirror the new total (recorded: the swept
+    # draft carries 3500). Bound from Python: an UPDATE's expressions read
+    # the pre-update row, so `max(total, 0)` in SQL would see the OLD total.
+    ctx.db.execute(
+        "UPDATE invoices SET lines = ?, subtotal = ?, subtotal_excluding_tax = ?,"
+        " total = ?, total_discount_amounts = ?, total_excluding_tax = ?,"
+        " total_pretax_credit_amounts = ?, total_taxes = ?,"
+        " amount_due = ?, amount_remaining = ? WHERE id = ?",
+        _json.dumps(lines),
+        totals.subtotal,
+        totals.subtotal_excluding_tax,
+        totals.total,
+        _json.dumps(totals.total_discount_amounts),
+        totals.total_excluding_tax,
+        _json.dumps(totals.total_pretax_credit_amounts),
+        _json.dumps(totals.total_taxes),
+        max(totals.total, 0),
+        max(totals.total, 0),
+        invoice_id,
+    )
+    return _lookup.require_row(ctx, "invoices", "invoice", invoice_id, param="invoice")
+
+
+def delete_draft_invoice(ctx: seahaven.Ctx, invoice_id: str) -> dict[str, Any]:
+    """Remove a draft row. The swept items are NOT released back to pending
+    — recorded (cassette 13 steps 23-24, 62-63): they stay attached to the
+    dead invoice, refuse later deletes, and read as deleted on update."""
+    row = _lookup.require_row(ctx, "invoices", "invoice", invoice_id, param="invoice")
+    if row["status"] != "draft":
+        raise seahaven.WorldBug(f"delete_draft_invoice on a {row['status']!r} invoice")
+    emit_invoice_event(ctx, "invoice.deleted", row)
+    ctx.db.execute("DELETE FROM invoices WHERE id = ?", invoice_id)
+    return row
+
+
+def emit_invoice_event(
+    ctx: seahaven.Ctx,
+    type: str,
+    row: Mapping[str, Any],
+    *,
+    previous: Mapping[str, Any] | None = None,
+) -> str:
+    """One `invoice.*` event with the verbatim serialized body. The
+    serializer lives in `resources/invoices.py` (this module writes rows,
+    that one shapes them), so the import is function-level — the same
+    cycle-break `pay_invoice`'s recovery hook uses."""
+    from stripeapi.resources import invoices
+
+    return events.emit_event(ctx, type=type, obj=invoices.serialize(ctx, row), previous=previous)
 
 
 def finalize_invoice(ctx: seahaven.Ctx, invoice_id: str) -> dict[str, Any]:
     """draft -> open: the number (per-customer prefix + sequence,
     `data_model.md` §3.13), the customer-balance settlement and its
-    `customer_balance_transactions` row, the frozen monetary fields."""
+    `customer_balance_transactions` row, the frozen monetary fields, and
+    `effective_at` (the finalize moment — recorded: drafts carry null).
+    Emits `invoice.finalized` plus `invoice.sent` for `send_invoice` (the
+    machine table's §2 pairing).
+
+    A $0 settlement does NOT pay here — `finalize_and_settle` (the routes'
+    helper) owns the recorded `$0 finalize pays` step, so internal callers
+    that drive their own pay keep explicit control."""
     row = _lookup.require_row(ctx, "invoices", "invoice", invoice_id, param="invoice")
     if row["status"] != "draft":
-        # billing_engine's Public Interface declares this the routed 400
-        # `invoice_not_editable`; Phase 13's /finalize route replaces this
-        # guard, and no Phase 12 caller can reach it (every invoice here is
-        # born draft into this flow).
+        # The routed /finalize refusal is the recorded no-code spelling
+        # (cassette 13 step 36); this guard is the internal-contract backstop
+        # and no routed caller can reach it.
         raise seahaven.WorldBug(f"finalize_invoice on a {row['status']!r} invoice")
     now = ctx.clock.iso()
     customer = _lookup.require_row(ctx, "customers", "customer", row["customer"], param="customer")
@@ -601,16 +883,45 @@ def finalize_invoice(ctx: seahaven.Ctx, invoice_id: str) -> dict[str, Any]:
     ctx.db.execute(
         "UPDATE invoices SET number = ?, status = 'open', starting_balance = ?,"
         " amount_due = ?, amount_remaining = ?, ending_balance = ?,"
-        " automatically_finalizes_at = NULL, status_transitions = ? WHERE id = ?",
+        " effective_at = ?, automatically_finalizes_at = NULL,"
+        " next_payment_attempt = NULL, status_transitions = ? WHERE id = ?",
         number,
         starting_balance,
         amount_due,
         amount_due,
         ending_balance,
+        now,
         _json.dumps(transitions),
         invoice_id,
     )
-    return _lookup.require_row(ctx, "invoices", "invoice", invoice_id, param="invoice")
+    fresh = _lookup.require_row(ctx, "invoices", "invoice", invoice_id, param="invoice")
+    emit_invoice_event(ctx, "invoice.finalized", fresh)
+    if row["collection_method"] == "send_invoice":
+        emit_invoice_event(ctx, "invoice.sent", fresh)
+    return fresh
+
+
+def finalize_and_settle(
+    ctx: seahaven.Ctx, invoice_id: str, *, auto_advance: bool | None = None
+) -> dict[str, Any]:
+    """The routed finalize family's shared step: optionally set
+    `auto_advance` (the /finalize parameter), finalize, and settle a
+    zero-`amount_due` result to `paid` inside the same call (recorded,
+    cassette 13 steps 43/49/56: a $0 finalize answers `paid` with
+    `attempted: true, attempt_count: 0`)."""
+    if auto_advance is not None:
+        # Set before finalizing so the collection machinery reads it; the
+        # window fields are moot on a row about to leave `draft`.
+        ctx.db.execute(
+            "UPDATE invoices SET auto_advance = ? WHERE id = ?",
+            int(auto_advance),
+            invoice_id,
+        )
+    row = finalize_invoice(ctx, invoice_id)
+    if row["amount_due"] == 0:
+        _mark_paid(ctx, row, charge_free=True)
+        return _re_read(ctx, invoice_id)
+    return row
 
 
 def _resolve_pm(
@@ -649,8 +960,8 @@ def pay_invoice(
     with `attempt_count` advanced (the raise-loses rule)."""
     row = _lookup.require_row(ctx, "invoices", "invoice", invoice_id, param="invoice")
     if row["status"] != "open":
-        # Phase 13's /pay route owns the `status_transition_invalid` 400;
-        # unreachable from Phase 12's callers (see finalize_invoice).
+        # Phase 13's /pay route owns the recorded isn't-open 400; this
+        # internal guard stays unreachable from routed callers.
         raise seahaven.WorldBug(f"pay_invoice on a {row['status']!r} invoice")
     if row["amount_due"] == 0:
         return _mark_paid(ctx, row, charge_free=True)
@@ -663,6 +974,7 @@ def pay_invoice(
     tags = payment_intents._behavior_tags(pm_row)
     if tags.get("three_d_secure") == "required":
         _attempted_without_count(ctx, invoice_id)
+        emit_invoice_event(ctx, "invoice.payment_action_required", _re_read(ctx, invoice_id))
         return {"outcome": "requires_action"}
     if "charge_declined" in tags:
         code = tags["charge_declined"]
@@ -694,6 +1006,7 @@ def pay_invoice(
         )
         _count_attempt(ctx, invoice_id)
         events.emit_event(ctx, type="charge.failed", obj=charges.serialize(ctx, charge))
+        emit_invoice_event(ctx, "invoice.payment_failed", _re_read(ctx, invoice_id))
         error = declined_body(
             code=code,
             decline_code=decline_code,
@@ -745,22 +1058,36 @@ def _mark_paid(
     charge_free: bool = False,
     charge_id: str | None = None,
     counted: bool = False,
+    out_of_band: bool = False,
 ) -> dict[str, Any]:
     now = ctx.clock.iso()
     transitions = _load_dict(row["status_transitions"])
     transitions["paid_at"] = _time.to_unix(now)
     ctx.db.execute(
-        "UPDATE invoices SET status = 'paid', attempted = 1,"
+        "UPDATE invoices SET status = 'paid', attempted = ?,"
         # A charge-free payment ($0 or negative-total settlement) attempts
         # nothing: `attempted` flips but the counter stays (probed on the
         # trial-conversion invoice, Phase 12 CR round 3: attempt_count 0).
+        # An out-of-band payment attempts nothing at all — `attempted`
+        # itself stays false (recorded, cassette 13 step 61). Paying also
+        # ends automatic advancement: `auto_advance` flips false (recorded,
+        # step 62 — the out-of-band pay of an advancing draft).
+        " auto_advance = 0,"
         " attempt_count = CASE WHEN ? THEN attempt_count + 1 ELSE attempt_count END,"
         " amount_paid = ?, amount_remaining = 0, status_transitions = ? WHERE id = ?",
+        0 if out_of_band else 1,
         int(counted),
         row["amount_due"],
         _json.dumps(transitions),
         row["id"],
     )
+    fresh = _re_read(ctx, row["id"])
+    if charge_id is not None:
+        # A real collection attempt succeeded: the payment event pair
+        # (billing_engine §1's creation rows). Charge-free and out-of-band
+        # settlements emit `invoice.paid` alone.
+        emit_invoice_event(ctx, "invoice.payment_succeeded", fresh)
+    emit_invoice_event(ctx, "invoice.paid", fresh)
     # The single recovery hook (billing_engine §1): incomplete/past_due/unpaid
     # -> active when their latest invoice reaches paid. Function-level import
     # because subscription_lifecycle imports this module for its own flows.
@@ -773,8 +1100,8 @@ def _mark_paid(
 def mark_uncollectible_invoice(ctx: seahaven.Ctx, invoice_id: str) -> dict[str, Any]:
     """open -> uncollectible, stamping `status_transitions
     .marked_uncollectible_at` (§2's transition; the sibling of
-    `void_invoice`). Phase 13's /mark_uncollectible route replaces the
-    guard with the routed `status_transition_invalid` 400."""
+    `void_invoice`). The routed /mark_uncollectible refusal family is the
+    caller's (recorded, cassette 13)."""
     row = _lookup.require_row(ctx, "invoices", "invoice", invoice_id, param="invoice")
     if row["status"] != "open":
         raise seahaven.WorldBug(f"mark_uncollectible_invoice on a {row['status']!r} invoice")
@@ -786,14 +1113,16 @@ def mark_uncollectible_invoice(ctx: seahaven.Ctx, invoice_id: str) -> dict[str, 
         _json.dumps(transitions),
         invoice_id,
     )
-    return _re_read(ctx, invoice_id)
+    fresh = _re_read(ctx, invoice_id)
+    emit_invoice_event(ctx, "invoice.marked_uncollectible", fresh)
+    return fresh
 
 
 def void_invoice(ctx: seahaven.Ctx, invoice_id: str) -> dict[str, Any]:
+    """open -> void with the amounts left as they were (recorded, cassette
+    13 step 45: `amount_due`/`amount_remaining` keep their open values)."""
     row = _lookup.require_row(ctx, "invoices", "invoice", invoice_id, param="invoice")
     if row["status"] != "open":
-        # Phase 13's /void route owns the `status_transition_invalid` 400;
-        # unreachable from Phase 12's callers (see finalize_invoice).
         raise seahaven.WorldBug(f"void_invoice on a {row['status']!r} invoice")
     now = ctx.clock.iso()
     transitions = _load_dict(row["status_transitions"])
@@ -803,4 +1132,6 @@ def void_invoice(ctx: seahaven.Ctx, invoice_id: str) -> dict[str, Any]:
         _json.dumps(transitions),
         invoice_id,
     )
-    return _re_read(ctx, invoice_id)
+    fresh = _re_read(ctx, invoice_id)
+    emit_invoice_event(ctx, "invoice.voided", fresh)
+    return fresh

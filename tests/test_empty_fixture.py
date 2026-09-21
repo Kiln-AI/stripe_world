@@ -38,6 +38,7 @@ def test_an_instance_of_empty_has_the_schema_and_no_rows(instance: seahaven.Inst
         "disputes",
         "events",
         "idempotency_keys",
+        "invoiceitems",
         "invoices",
         "payment_intents",
         "payment_methods",

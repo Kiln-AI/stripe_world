@@ -262,7 +262,12 @@ def _both_client_secrets(recorded: Any, replayed: Any) -> bool:
 def _recorded_placeholder_or_same(recorded: Any, replayed: Any) -> bool:
     """The recorded value was normalized to a redaction placeholder (or the
     two sides agree); the replayed value is this world's own derivation."""
-    return recorded in ("<redacted:receipt_url>", replayed)
+    return recorded in (
+        "<redacted:receipt_url>",
+        "<redacted:invoice_pdf>",
+        "<redacted:hosted_invoice_url>",
+        replayed,
+    )
 
 
 #: The confirm-missing-method message names the customer id — the same
@@ -499,6 +504,33 @@ def _dup_price_modulo_id(recorded: Any, replayed: Any) -> bool:
     if not isinstance(recorded, str) or not isinstance(replayed, str):
         return False
     return bool(_DUP_PRICE.fullmatch(recorded) and _DUP_PRICE.fullmatch(replayed))
+
+
+#: An invoice number: `<8-char prefix>-<4-digit sequence>` per side (the
+#: prefix is the customer's own minted `invoice_prefix`, Phase 13).
+_INVOICE_NUMBER = re.compile(r"^[A-Z0-9]{8}-\d{4}$")
+
+
+def _invoice_number_pair(recorded: Any, replayed: Any) -> bool:
+    return (
+        isinstance(recorded, str)
+        and isinstance(replayed, str)
+        and bool(_INVOICE_NUMBER.fullmatch(recorded))
+        and bool(_INVOICE_NUMBER.fullmatch(replayed))
+    )
+
+
+#: The Invoice Item 404: `No such Invoice Item: 'ii_…'(livemode=false)` —
+#: the id-only rule in Stripe's own odd spelling (recorded, cassette 13).
+_NO_SUCH_INVOICE_ITEM = re.compile(r"^No such Invoice Item: 'ii_[A-Za-z0-9]+'\(livemode=false\)$")
+
+
+def _no_such_invoice_item_modulo_id(recorded: Any, replayed: Any) -> bool:
+    if not isinstance(recorded, str) or not isinstance(replayed, str):
+        return False
+    return bool(
+        _NO_SUCH_INVOICE_ITEM.fullmatch(recorded) and _NO_SUCH_INVOICE_ITEM.fullmatch(replayed)
+    )
 
 
 #: The dispute settle collapse (Phase 9): live test mode resolves the magic
@@ -1529,6 +1561,167 @@ ALLOWED_DIFFERENCES: list[AllowedDifference] = [
         "the recorded form.",
         predicate=_dup_price_modulo_id,
     ),
+    # --- the invoices slice (Phase 13) ---
+    AllowedDifference(
+        "**.invoice",
+        "The id rule on the invoice reference a line, an invoiceitem or a "
+        "payment carries, predicated to `in_`-shaped string pairs.",
+        predicate=_both_prefixed_ids("in_"),
+    ),
+    AllowedDifference(
+        "**.invoice_item",
+        "The id rule on the invoiceitem reference a line's "
+        "`parent.invoice_item_details` names, predicated to `ii_`-shaped "
+        "pairs.",
+        predicate=_both_prefixed_ids("ii_"),
+    ),
+    AllowedDifference(
+        "**.pricing.price_details.price",
+        "An `amount`+`currency` invoice item mints a one-off price per "
+        "instance (the recorded mechanism, cassette 13) — the `**.id` rule "
+        "on the minted price a `pricing` block names, predicated to "
+        "`price_`-shaped pairs.",
+        predicate=_both_prefixed_ids("price_"),
+    ),
+    AllowedDifference(
+        "**.number",
+        "An invoice's number is `<customer prefix>-<sequence>`, and both "
+        "halves are per-instance mints (the prefix from `ctx.ids`, data_model "
+        "§3.13) — the `**.id` rule on the compound. Predicated to the "
+        "`AAAAAAAA-0000` shape on both sides so a real numbering regression "
+        "still fails.",
+        predicate=_invoice_number_pair,
+    ),
+    AllowedDifference(
+        "**.hosted_invoice_url",
+        "The hosted-invoice page URL embeds the recording account id and a "
+        "signed payload (normalized to a placeholder at record time); this "
+        "world derives a deterministic id-shaped URL the way credit_note.pdf "
+        "and receipt_url do.",
+        predicate=_recorded_placeholder_or_same,
+    ),
+    AllowedDifference(
+        "**.invoice_pdf",
+        "The invoice PDF URL — the same account-signed shape as "
+        "hosted_invoice_url, derived id-shaped here.",
+        predicate=_recorded_placeholder_or_same,
+    ),
+    AllowedDifference(
+        "**.period_start",
+        "A draft's zero-width period opens at the creation clock — the "
+        "`**.created` reasoning on the period pair, which carries no `_at` "
+        "suffix for the blanket rule to catch.",
+        predicate=lambda recorded, replayed: (
+            isinstance(recorded, int) and isinstance(replayed, int)
+        ),
+    ),
+    AllowedDifference(
+        "**.period_end",
+        "The period pair's closing half — the same clock reasoning.",
+        predicate=lambda recorded, replayed: (
+            isinstance(recorded, int) and isinstance(replayed, int)
+        ),
+    ),
+    AllowedDifference(
+        "**.period.start",
+        "A line's period opens at its source's clock (the invoice item's "
+        "`date`, the subscription item's period) — the `**.created` "
+        "reasoning inside the frozen `lines` JSON, where the field is a "
+        "nested key rather than a column.",
+        predicate=lambda recorded, replayed: (
+            isinstance(recorded, int) and isinstance(replayed, int)
+        ),
+    ),
+    AllowedDifference(
+        "**.period.end",
+        "A line's period closes at its source's clock — the same reasoning as its opening half.",
+        predicate=lambda recorded, replayed: (
+            isinstance(recorded, int) and isinstance(replayed, int)
+        ),
+    ),
+    AllowedDifference(
+        "**.date",
+        "`invoiceitem` has no `created`; `date` is the creation clock — "
+        "`**.created` under the field name the suffix rule cannot catch.",
+        predicate=lambda recorded, replayed: (
+            isinstance(recorded, int) and isinstance(replayed, int)
+        ),
+    ),
+    AllowedDifference(
+        "**.due_date",
+        "A send_invoice draft's due date is `created + days_until_due` — the "
+        "clock reasoning again (a caller-supplied absolute `due_date` compares "
+        "equal; only the derived pairs reach this entry's predicate).",
+        predicate=lambda recorded, replayed: (
+            isinstance(recorded, int) and isinstance(replayed, int)
+        ),
+    ),
+    AllowedDifference(
+        "**.next_payment_attempt",
+        "The scheduled first attempt on an auto-advancing draft is "
+        "`created + 3600s` (recorded, cassette 13) — the clock reasoning on "
+        "the one scheduled field the `*_at` suffix rule cannot catch.",
+        predicate=lambda recorded, replayed: (
+            isinstance(recorded, int) and isinstance(replayed, int)
+        ),
+    ),
+    AllowedDifference(
+        "**.account_country",
+        "The account-echo country is recording-account state ('CA'); this "
+        "world's static account defaults to 'US' until an account object "
+        "exists (Phase 21) — the same ruling as `**.billing_mode.type`.",
+        predicate=lambda recorded, replayed: (
+            isinstance(recorded, str) and isinstance(replayed, str)
+        ),
+    ),
+    AllowedDifference(
+        "**.account_name",
+        "The account-echo name is the recording account's own ('Seahaven "
+        "Sandbox'); this world's static account has none to source one from "
+        "and answers null.",
+        predicate=lambda recorded, replayed: (
+            (recorded is None or isinstance(recorded, str)) and replayed is None
+        ),
+    ),
+    AllowedDifference(
+        "**.rendering",
+        "The recording account's Dashboard fills `rendering` with its PDF "
+        "default on every manual invoice (recorded; null on its subscription "
+        "invoices); no dashboard exists here and the spec-legal null is "
+        "emitted — the `**.billing_mode.flexible` ruling.",
+        predicate=lambda recorded, replayed: (
+            (isinstance(recorded, dict) or recorded is None) and replayed is None
+        ),
+    ),
+    AllowedDifference(
+        "**.lines.total_count",
+        "The live `lines` envelope carries `total_count`, which the pinned "
+        "spec's nested list schema does not declare — the `items.total_count` "
+        "ruling (Phase 12), omitted here and allow-listed.",
+        predicate=lambda recorded, replayed: isinstance(recorded, int) and replayed is None,
+    ),
+    AllowedDifference(
+        "**.invoicing_rules",
+        "The live invoiceitem body carries `invoicing_rules: []`, a field the "
+        "pinned spec does not declare; omitted here like every other "
+        "undeclared live echo.",
+        predicate=lambda recorded, replayed: recorded == [] and replayed is None,
+    ),
+    AllowedDifference(
+        "**.amount_paid_off_stripe",
+        "The spec marks this field required and the live API omits it from "
+        "every recorded body (cassette 13); the spec's property set is the "
+        "authority for shape here, so this world emits the required 0 and the "
+        "pair is declared — the inverse of the usual live-only-echo entry.",
+        predicate=lambda recorded, replayed: recorded is None and replayed == 0,
+    ),
+    AllowedDifference(
+        "**.error.message",
+        "The Invoice Item 404 names the id it could not find inside Stripe's "
+        "own odd `(livemode=false)` spelling — the `**.id` rule where the id "
+        "is the message's whole variable content (recorded, cassette 13).",
+        predicate=_no_such_invoice_item_modulo_id,
+    ),
 ]
 
 # --- Structural differences ------------------------------------------------------
@@ -1744,6 +1937,112 @@ STRUCTURAL_DIFFERENCES: list[str] = [
     "`unchanged` to the stored anchor — where the cassette parks null. The "
     "predicated `**.pending_update.billing_cycle_anchor` entry carries the "
     "pair the replay diff sees.",
+    "`/v1/invoices/create_preview` and `/v1/invoices/{id}/attach_payment` "
+    "stay unwired (Phase 13's declared scope cuts): the preview surface is a "
+    "never-stored sub-API of its own (and `billing_reason: upcoming` is "
+    "never stored, as ever), and attach_payment was not recorded this "
+    "round. Dispatching either is an honest WorldBug naming the op_id, the "
+    "same mid-build honesty every unwired route answers with.",
+    "The invoiceitem create surface is narrowed to `amount`+`currency` "
+    "(plus description/discountable/period/quantity/tax_rates/metadata/ "
+    "invoice): `price_data`, `pricing`, `discounts`, `tax_code`, "
+    "`tax_behavior`, `unit_amount_decimal`, `quantity_decimal`, "
+    "`subscription` and `customer_account` are cut at the parameter layer "
+    "(cassette 13 records the amount+currency mechanism, whose one-off "
+    "price mint is reproduced). The invoice create/update surface likewise "
+    "cuts the Connect/shipping/rendering/custom-fields/`from_invoice`/"
+    "`automatically_finalizes_at`-parameter family, and `/pay` cuts "
+    "`mandate`/`off_session`/`source`/`payment_method` — this world's pay "
+    "resolves the recorded default-method chain (subscription default, "
+    "then the customer's `invoice_settings`).",
+    "`invoice_payment.paid` is not emitted: the `invoice_payment` object is "
+    "out of scope (no payments sub-resource exists here), and the pair "
+    "`invoice.payment_succeeded` + `invoice.paid` carries the payment the "
+    "machine table names. `invoiceitem.updated` is not emitted either — "
+    "it is absent from the closed 266-entry event set, so Stripe's own "
+    "catalog emits none.",
+    "The wrong-state invoice refusals are the recorded no-`code` spellings "
+    "(cassette 13), correcting billing_engine's table: re-finalize answers "
+    "\"This invoice is already finalized, you can't re-finalize a non-draft "
+    'invoice.", delete non-draft "You can only delete draft invoices.", '
+    'void/mark-uncollectible "You can only pass in open invoices. This '
+    'invoice isn\'t open." (and re-mark "This invoice has already been '
+    'marked uncollectible."), void-paid "Invoices with `paid` payments '
+    'cannot be voided.", re-pay "Invoice is already paid", and the '
+    "field-update-on-finalized family \"Finalized invoices can't be updated "
+    'in this way" — `invoice_not_editable` survives only on the line '
+    "endpoints' refusal, and `status_transition_invalid` nowhere. "
+    "`metadata` updates succeed on any status (recorded on paid).",
+    "Deleting a draft invoice does NOT release its swept invoice items "
+    "back to pending (recorded, cassette 13 steps 23-24 and 62-63 — "
+    "correcting billing_engine §2): they stay attached to the dead "
+    "invoice id, refuse later deletes (\"Can't delete an invoice item that "
+    'is attached to an invoice that is no longer editable"), read as '
+    'deleted on update ("This invoice item has been deleted."), and '
+    "`pending=true` no longer lists them. The `invoiceitems.invoice` FK "
+    "was therefore dropped to a bare column — the recorded state outlives "
+    "its parent row.",
+    "The draft window's exact offsets are recorded facts, not the "
+    "documented 'about an hour': `automatically_finalizes_at = created + "
+    "3601s` (the ceil of the un-floored creation instant) and "
+    "`next_payment_attempt = created + 3600s` (its floor) — one second "
+    "apart on the wire (cassette 13, recorded twice). Recomputed from "
+    "`created`, never from the update moment, when `auto_advance` is "
+    "cleared and re-set on a draft.",
+    "An unparameterized manual create excludes pending invoice items "
+    "(recorded, cassette 13 step 11 — the API's `include` default is a "
+    "dashboard concept); `include` sweeps the customer's pending items "
+    "matching the invoice's currency, regardless of period — the invoice's "
+    "own zero-width period bounds nothing (correcting billing_engine "
+    "§3.1.1's period-bounded sweep), and one currency per invoice is "
+    "Stripe's own invariant, so mismatched items stay pending for a later "
+    "invoice of their own (the currency bound is unprobed and declared; "
+    "the unparameterized currency follows the newest pending item). The "
+    "swept order is newest-first, and a later `add_lines` line is simply "
+    "the newest pending item — the spec's three-bucket line order collapses "
+    "to two (invoice items newest-first, then subscription items "
+    "newest-first).",
+    "Line `quantity` is a multiplier, not a no-op (CR round's ruling): a "
+    "line bills its row's unit amount x quantity, so a quantity-only edit "
+    "on `update_lines`/`lines/{id}` recomputes the line and an "
+    "invoiceitem create's quantity multiplies through the sweep. On "
+    "`add_lines` quantity can never multiply — beside `amount` it is the "
+    "recorded XOR refusal and alone it has no unit amount (live pairs it "
+    "with `price_data`, which this surface cuts), so the binder's "
+    "missing-parameter refusal answers a quantity-only add. The one-off "
+    "price/product mint behind an `amount`+`currency` item emits the "
+    "catalog's own `product.created`/`price.created` pair (the rows are "
+    "ordinary catalog rows, product-first per cassette 07); an amount "
+    "edit's re-mint writes only the price against the SAME product "
+    "(recorded, cassette 13 step 33) and emits `price.created` alone.",
+    "Every draft-mutating path rebuilds the lines and emits "
+    "`invoice.updated` on change — `add_lines`, `update_lines`, "
+    "`remove_lines`, the single-line `lines/{id}` update, and an "
+    "invoiceitem create with `invoice=`. The family's invoice-level "
+    "emission is consistent-with-siblings-unprobed: the cassette pins the "
+    "bodies, not the events, and `invoice.updated` fires only when the "
+    "serialized body actually changed (a no-op edit answers 200 and "
+    "writes no event row).",
+    "`/pay` on a draft finalizes and collects inside the one call "
+    "(recorded, cassette 13 step 25), and `paid_out_of_band: true` settles "
+    "without an attempt at all — `attempted` stays false (step 61). A $0 "
+    "finalization settles to `paid` with `attempted: true, attempt_count: "
+    "0` inside the finalizing call (steps 36/43/49/57); a nonzero plain "
+    "finalize attempts nothing (`attempted` stays false, step 45) — "
+    "collection is the auto-advance machinery's business, which a frozen "
+    "clock never runs. Paying flips `auto_advance` false (step 62); "
+    "finalizing preserves it (step 60).",
+    "The invoice body's account echoes and PDF artifacts: `rendering` is "
+    "null here (the recording account's dashboard default object is "
+    "account state), `account_country`/`account_name` come from the "
+    "instance's static account config ('US'/null by default — Phase 21 "
+    "may make them configurable), `webhooks_delivered_at` mirrors "
+    "`created`, `hosted_invoice_url`/`invoice_pdf` are deterministic "
+    "id-shaped URLs from finalization on, and `payments`/`threshold_reason`/"
+    "`confirmation_secret` are omitted (none is ever non-empty here). "
+    "`parent.subscription_details.metadata` is the subscription's own "
+    "metadata, not a separately stored finalization snapshot (no second "
+    "copy exists; `{}` when the subscription carries none).",
 ]
 
 # --- Matching --------------------------------------------------------------------

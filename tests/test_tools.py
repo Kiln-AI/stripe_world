@@ -85,11 +85,13 @@ def test_the_wired_surface_is_small_and_named() -> None:
     phase's seventeen (five /v1/refunds, five charge-scoped refund routes,
     four /v1/disputes, three charge-scoped dispute routes), the
     setup-intents phase's seven, the ledger-and-payouts phase's nine
-    (one balance, two balance_transactions, six payouts), and the
+    (one balance, two balance_transactions, six payouts), the
     subscriptions phase's eleven (six subscriptions including `/resume`,
-    five subscription_items). The rest are routed data awaiting their
-    resource phases, and calling one is an honest `INTERNAL` naming the op
-    (see `test_dispatch.py`)."""
+    five subscription_items), and the invoices phase's twenty (fifteen
+    invoices — `create_preview` and `attach_payment` stay unwired — plus
+    five invoiceitems). The rest are routed data awaiting their resource
+    phases, and calling one is an honest `INTERNAL` naming the op (see
+    `test_dispatch.py`)."""
     wired = [route.op_id for route in _all_routes() if route.params is not None]
     assert wired == [
         "GetBalance",
@@ -124,6 +126,26 @@ def test_the_wired_surface_is_small_and_named() -> None:
         "GetDisputesDispute",
         "PostDisputesDispute",
         "PostDisputesDisputeClose",
+        "GetInvoiceitems",
+        "PostInvoiceitems",
+        "GetInvoiceitemsInvoiceitem",
+        "PostInvoiceitemsInvoiceitem",
+        "DeleteInvoiceitemsInvoiceitem",
+        "GetInvoices",
+        "PostInvoices",
+        "GetInvoicesInvoice",
+        "PostInvoicesInvoice",
+        "DeleteInvoicesInvoice",
+        "PostInvoicesInvoiceAddLines",
+        "PostInvoicesInvoiceFinalize",
+        "GetInvoicesInvoiceLines",
+        "PostInvoicesInvoiceLinesLineItemId",
+        "PostInvoicesInvoiceMarkUncollectible",
+        "PostInvoicesInvoicePay",
+        "PostInvoicesInvoiceRemoveLines",
+        "PostInvoicesInvoiceSend",
+        "PostInvoicesInvoiceUpdateLines",
+        "PostInvoicesInvoiceVoid",
         "GetPaymentIntents",
         "PostPaymentIntents",
         "GetPaymentIntentsIntent",

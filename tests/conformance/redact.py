@@ -42,6 +42,8 @@ KEY_PLACEHOLDER = "<redacted:api_key>"
 ACCOUNT_PLACEHOLDER = "<redacted:account_id>"
 REQUEST_LOG_PLACEHOLDER = "<redacted:request_log_url>"
 RECEIPT_URL_PLACEHOLDER = "<redacted:receipt_url>"
+INVOICE_PDF_PLACEHOLDER = "<redacted:invoice_pdf>"
+HOSTED_INVOICE_URL_PLACEHOLDER = "<redacted:hosted_invoice_url>"
 
 
 class RedactionError(Exception):
@@ -99,6 +101,15 @@ def _scrub_string(text: str, where: str, findings: list[str]) -> str:
         # its signature segment (probed, Phase 8), which no regex in here can
         # see through — normalized like request_log_url rather than trusted.
         return RECEIPT_URL_PLACEHOLDER
+    if where.endswith(".invoice_pdf") or where.endswith(".hosted_invoice_url"):
+        # An invoice's PDF and hosted-invoice URLs path-embed the dashboard
+        # account id and a base64 payload naming it (recorded, Phase 13);
+        # normalized like receipt_url. Both fields are declared
+        # AllowedDifferences against this world's derived URLs, so the
+        # placeholder is compared, never the live bytes.
+        if where.endswith(".invoice_pdf"):
+            return INVOICE_PDF_PLACEHOLDER
+        return HOSTED_INVOICE_URL_PLACEHOLDER
     for pattern, placeholder, label in (
         (_API_KEY, KEY_PLACEHOLDER, "an API key"),
         (_ACCOUNT_ID, ACCOUNT_PLACEHOLDER, "an account id"),

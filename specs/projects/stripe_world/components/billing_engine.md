@@ -261,7 +261,7 @@ def finalize_invoice(ctx, invoice_id: str, *, auto_advance: bool | None = None) 
 def pay_invoice(ctx, invoice_id: str, *, sub_row: Mapping | None = None,
                 pm_row: Mapping | None = None) -> dict
     """One collection attempt on an open invoice (open only — Phase 13's /pay
-    route owns the status_transition_invalid 400). Returns the outcome dict:
+    route owns the recorded isn't-open 400). Returns the outcome dict:
     `outcome` ∈ paid | failed | requires_action | no_payment_method. A decline
     is an outcome, not an exception — the invoice's rows survive with
     attempt_count advanced (the raise-loses rule)."""
@@ -362,11 +362,16 @@ nothing here invents one.
 
 | Situation | HTTP | `type` | `code` |
 |---|---|---|---|
-| Finalize / edit an invoice that is not `draft` | 400 | `invalid_request_error` | `invoice_not_editable` |
-| Void or mark-uncollectible an invoice that is not `open` | 400 | `invalid_request_error` | `status_transition_invalid` |
-| Delete an invoice that is not `draft` | 400 | `invalid_request_error` | `invoice_not_editable` |
-| Finalize a subscription invoice with no lines | 400 | `invalid_request_error` | `invoice_no_subscription_line_items` |
-| Finalize a manual invoice with no lines | 400 | `invalid_request_error` | `invoice_no_customer_line_items` |
+| Finalize a non-draft invoice | 400 | `invalid_request_error` | *(none)* — "This invoice is already finalized, you can't re-finalize a non-draft invoice." (recorded, Phase 13, cassette 13) |
+| Delete an invoice that is not `draft` | 400 | `invalid_request_error` | *(none)* — "You can only delete draft invoices." (recorded, Phase 13) |
+| Void or mark-uncollectible an invoice that is not `open` | 400 | `invalid_request_error` | *(none)* — "You can only pass in open invoices. This invoice isn't open." (recorded, Phase 13) |
+| Re-mark an `uncollectible` invoice | 400 | `invalid_request_error` | *(none)* — "This invoice has already been marked uncollectible." (recorded, Phase 13) |
+| Void a `paid` invoice | 400 | `invalid_request_error` | *(none)* — "Invoices with \`paid\` payments cannot be voided." (recorded, Phase 13) |
+| Pay an already-`paid` invoice | 400 | `invalid_request_error` | *(none)* — "Invoice is already paid" (recorded, Phase 13) |
+| Update a field (beyond `metadata`) on a non-draft invoice | 400 | `invalid_request_error` | *(none)* — "Finalized invoices can't be updated in this way", `param: <field>`; `metadata` itself succeeds on any status (recorded, Phase 13) |
+| `add_lines` / line edits on a non-draft invoice | 400 | `invalid_request_error` | `invoice_not_editable` — "Invalid invoice: This invoice is no longer editable" |
+| An invoiceitem whose invoice is finalized or deleted: DELETE | 400 | `invalid_request_error` | *(none)* — "Can't delete an invoice item that is attached to an invoice that is no longer editable" (recorded, Phase 13) |
+| An invoiceitem whose invoice is finalized or deleted: update | 400 | `invalid_request_error` | *(none)* — "This invoice item has been deleted." (recorded, Phase 13) |
 | Pay an invoice whose charge declines | 402 | `card_error` | `card_declined` (+ `decline_code`) |
 | Pay an invoice needing 3DS off-session | 400 | `invalid_request_error` | `invoice_payment_intent_requires_action` |
 | `payment_behavior=pending_if_incomplete` on create | 400 | `invalid_request_error` | *(none)* — message "Setting \`payment_behavior\` to \`pending_if_incomplete\` has no effect when creating a subscription.", `param="payment_behavior"` (recorded, Phase 12; corrects this row's earlier `parameter_unknown`) |
@@ -539,18 +544,23 @@ a removed row returned in Stripe's `{id, object, deleted: true}` shape.
 
 | From | Trigger | → | Side effects | Events |
 |---|---|---|---|---|
-| — | `create_invoice` | `draft` | `number = NULL`; lines assembled from pending items but **not frozen**; `automatically_finalizes_at` computed; `attempt_count = 0`; `attempted = 0` | `invoice.created` |
-| `draft` | line/discount/tax change | `draft` | Totals recomputed from scratch. Nothing is incremental | `invoice.updated` |
-| `draft` | `POST /finalize`, or the last step of a paid-on-creation flow | `open` | Assign `number`; **freeze** `lines` JSON and every monetary field; read `customer.balance` → `starting_balance`; apply it → `amount_due`, `ending_balance`; write the `customer_balance_transactions` row; set `status_transitions.finalized_at`; set `confirmation_secret`; **set `automatically_finalizes_at = NULL`**; create the PaymentIntent for `charge_automatically` | `invoice.finalized` (+ `invoice.sent` for `send_invoice`) |
-| `draft` | `DELETE /v1/invoices/{id}` | *(row gone)* | Only from `draft`. Pending invoice items are released back to unbilled | `invoice.deleted` |
-| `open` | `POST /pay` succeeds, or `paid_out_of_band=true` | `paid` | `amount_paid = amount_due`, `amount_remaining = 0`, `status_transitions.paid_at`; charge + `balance_transaction`; **calls `on_invoice_paid`** | `invoice.payment_succeeded`, `invoice.paid`, `invoice_payment.paid` |
+| — | `create_invoice` | `draft` | `number = NULL`; `effective_at = NULL` (stamped at finalization, recorded Phase 13); lines assembled from pending items but **not frozen**; `automatically_finalizes_at` computed; `attempt_count = 0`; `attempted = 0`; `amount_due`/`amount_remaining` mirror the draft's total (recorded, Phase 13) | `invoice.created` |
+| `draft` | line/discount/tax change | `draft` | Totals recomputed from scratch. Nothing is incremental. Each line's `il_` id is preserved across the rebuild, keyed by its source (recorded, Phase 13: an updated line answers the same id) | `invoice.updated` |
+| `draft` | `POST /finalize`, `paid_out_of_band`, `/send`, or the last step of a paid-on-creation flow | `open` | Assign `number`; **freeze** `lines` JSON and every monetary field; read `customer.balance` → `starting_balance`; apply it → `amount_due`, `ending_balance`; write the `customer_balance_transactions` row; set `status_transitions.finalized_at`; set `effective_at`; clear `automatically_finalizes_at` and `next_payment_attempt`; **create no PaymentIntent and attempt nothing** (recorded, Phase 13: plain finalize leaves `attempted` false even with a default card) | `invoice.finalized` (+ `invoice.sent` for `send_invoice`) |
+| `draft` or `open` | a **$0 `amount_due`** at finalization (or at any settle point) | `paid` | Inside the same call: `attempted: true, attempt_count: 0`, `paid_at` stamped (recorded, Phase 13) | `invoice.finalized`, `invoice.paid` |
+| `draft` | `POST /pay` | `paid` | **Finalizes and collects inside the one call** (recorded, Phase 13): number assigned, `finalized_at == paid_at`, then the open-payment path below | `invoice.finalized`, `invoice.payment_succeeded`, `invoice.paid` |
+| `draft` | `DELETE /v1/invoices/{id}` | *(row gone)* | Only from `draft`. The swept invoice items are **NOT released** — they stay attached to the dead invoice id, refuse later deletes, and read as deleted on update (recorded, Phase 13, correcting this row's earlier "released back to unbilled") | `invoice.deleted` |
+| `open` | `POST /pay` succeeds | `paid` | `amount_paid = amount_due`, `amount_remaining = 0`, `status_transitions.paid_at`; `auto_advance` flips false (recorded, Phase 13); charge + `balance_transaction`; **calls `on_invoice_paid`** | `invoice.payment_succeeded`, `invoice.paid` |
+| `open` | `POST /pay` with `paid_out_of_band=true` | `paid` | Settles with **no attempt at all**: `attempted` stays false, the counter untouched (recorded, Phase 13) | `invoice.paid` |
 | `open` | `POST /pay` declines | `open` | `attempted = 1`; `attempt_count` per §5; `next_payment_attempt` set or cleared; `last_finalization_error` untouched (that field is for finalization, not payment) | `invoice.payment_failed` |
 | `open` | payment requires 3DS off-session | `open` | `confirmation_secret` exposed | `invoice.payment_action_required` |
 | `open` | overpayment (`amount_paid > amount_due`) | `paid` | `amount_overpaid` set; excess credited to `customer.balance` via a `customer_balance_transactions` row with `type = invoice_overpaid` | `invoice.overpaid`, `invoice.paid` |
-| `open` | `POST /void` | `void` | `status_transitions.voided_at`; `amount_due` and `amount_remaining` left as they were; dead end | `invoice.voided` |
+| `open` | `POST /void` | `void` | `status_transitions.voided_at`; `amount_due` and `amount_remaining` left as they were (recorded, Phase 13); dead end | `invoice.voided` |
 | `open` | `POST /mark_uncollectible` | `uncollectible` | `status_transitions.marked_uncollectible_at` | `invoice.marked_uncollectible` |
-| `paid` | anything | — | `status_transition_invalid`. A paid invoice is settled only through a credit note | — |
-| `void` / `uncollectible` | anything | — | `status_transition_invalid` | — |
+| `draft` | `POST /send` | `open`/`paid` | Finalizes first (a $0 result settles, recorded Phase 13); the number and URLs land with it | `invoice.finalized` (+ `invoice.sent` for `send_invoice`) |
+| `open` + `send_invoice` | `POST /send` | `open` | Body unchanged (recorded, Phase 13); email delivery is the harness's business | `invoice.sent` |
+| `paid` | anything | — | The recorded refusals above (`Invoice is already paid`, the void and mark spellings). A paid invoice is settled only through a credit note | — |
+| `void` / `uncollectible` | anything | — | The isn't-open refusal; a re-mark answers its own spelling | — |
 
 #### `automatically_finalizes_at` under a frozen clock
 
@@ -560,13 +570,16 @@ This is the field the fidelity claim is most easily faked on, so it is stated bl
 def compute_automatically_finalizes_at(created_iso, *, auto_advance, collection_method):
     if not auto_advance:
         return None                      # spec3.json: state "doesn't automatically advance"
-    return iso_plus(created_iso, hours=1)
+    return created_iso + 3601            # recorded, Phase 13: the CEIL of the un-floored
+                                         # creation instant; next_payment_attempt_at is its
+                                         # FLOOR (created + 3600), one second earlier
 ```
 
 - The field is **populated and honest**: for any `draft` invoice with `auto_advance = 1`, it holds
-  `created + 1 hour`, which is the real window Stripe documents and which `invoice.attempted`'s own
-  description corroborates from inside `spec3.json` ("not attempted until 1 hour after the
-  `invoice.created` webhook").
+  `created + 3601 seconds` and `next_payment_attempt = created + 3600 seconds` (both collection
+  methods get the finalize window; only `charge_automatically` additionally gets the payment
+  attempt — recorded twice, cassette 13 steps 20 and 59). Both are recomputed from `created` —
+  never from the update moment — when `auto_advance` is cleared and re-set on a draft.
 - **Nothing fires on its own.** `ctx.clock` is static for the life of the instance
   (capability map: "no method to change it mid-instance"; `clock.py` registers deterministic
   overrides against one instant and exposes nothing else). There is no scheduler, no background
@@ -623,23 +636,28 @@ two discount scopes with different timing, and the arithmetic must keep them apa
 
 #### 3.1 Where lines come from
 
-A draft invoice's lines are the concatenation of three sources, in `spec3.json`'s documented
-`invoice.lines` order:
+A draft invoice's lines come from two sources, in this order (recorded, Phase 13 — the spec's
+three-bucket description collapses: a later-added item is simply the newest pending item, so the
+third bucket folds into the first):
 
-1. **Pending invoice items**, including prorations, in **reverse chronological** order. Every row in
-   `invoiceitems` with `invoice IS NULL`, `customer = this customer` and `period` inside the
-   invoice's `[period_start, period_end]`. Proration lines created by `proration_lines` are exactly
-   these.
+1. **Invoice items attached to the invoice**, in **reverse chronological** order. The manual
+   create's `pending_invoice_items_behavior` controls the sweep: absent means **exclude** (the
+   unparameterized API create answers an empty-lines draft even with pending items — recorded,
+   Phase 13; the documented `include` default is a Dashboard concept) and `include` attaches
+   **every** pending `invoiceitems` row for the customer, **regardless of period** — the invoice's
+   own period is zero-width and bounds nothing (correcting this section's earlier period-bounded
+   sweep). Proration lines created by `proration_lines` ride the same bucket once attached.
 2. **Subscription items**, in reverse chronological order — one line per row in
    `subscription_items` for the invoice's subscription, with
    `period = [item.current_period_start, item.current_period_end)` and
    `subtotal = price.unit_amount × quantity`.
-3. **Invoice items added after invoice creation**, in **chronological** order.
 
 Each becomes a `LineInput`; nothing else contributes. The list is assembled fresh on every draft
 mutation and frozen at finalization, when it is written once into `invoices.lines` through
 `_json.py`'s single canonical dump (`sort_keys=True`, tight separators) so bytes are reproducible.
-`line_item` is a nested JSON object on the parent, never a table (functional spec §3.4).
+Each line's `il_` id is **preserved across draft rebuilds**, keyed by its source — a line edit
+answers the id it was given (recorded, Phase 13). `line_item` is a nested JSON object on the
+parent, never a table (functional spec §3.4).
 
 #### 3.2 One line's arithmetic
 
@@ -1348,7 +1366,7 @@ Customer balance: `test_credit_applied_reduces_amount_due`,
 `test_past_due_finalize_time_does_not_self_fire` — **the honest-clock test**: a draft whose
 `automatically_finalizes_at` is before `now`, asserted still `draft` after unrelated calls, then
 `open` only after `/finalize`.
-`test_finalize_non_draft_is_invoice_not_editable`, `test_void_from_paid_is_status_transition_invalid`,
+`test_finalize_non_draft_is_invoice_not_editable`, `test_the_wrong_state_refusals`,
 `test_delete_only_from_draft`, `test_mark_uncollectible_only_from_open`,
 `test_pay_failure_leaves_invoice_open`, `test_billing_reason_never_legacy_subscription`,
 `test_upcoming_billing_reason_never_stored`,

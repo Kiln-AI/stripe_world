@@ -1593,6 +1593,7 @@ def resume_subscription(
     line_inputs = invoicing.build_item_lines(ctx, _items_of(ctx, sub_id), currency=row["currency"])
     rolled: list[invoicing.ItemLine] = []
     for line in line_inputs:
+        assert line.price_id is not None  # subscription-item lines always carry one
         price_row = _price_of(ctx, line.price_id)
         interval, interval_count = _interval_of(price_row)
         rolled.append(

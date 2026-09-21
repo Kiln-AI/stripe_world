@@ -1,12 +1,13 @@
--- The billing tables (Phase 12; DDL verbatim from components/data_model.md §5).
+-- The billing tables (Phases 12–13; DDL verbatim from components/data_model.md §5).
 --
--- `subscription_schedules`, `invoiceitems` and `credit_notes` join this file
--- in their own phases (16, 13 and 15). `subscriptions.schedule` is therefore
--- a bare column until Phase 16 joins its REFERENCES clause — the Phase 8→11
--- deferral precedent. `invoices` and `customer_balance_transactions` land
--- here because this phase's subscription create writes both: the first
+-- `subscription_schedules` and `credit_notes` join this file in their own
+-- phases (16 and 15). `subscriptions.schedule` is therefore a bare column
+-- until Phase 16 joins its REFERENCES clause — the Phase 8→11 deferral
+-- precedent. `invoices` and `customer_balance_transactions` landed with
+-- Phase 12 because that phase's subscription create writes both: the first
 -- invoice is inseparable from the subscription that mints it, and
--- finalization applies the customer balance. Their ROUTES are Phase 13/15.
+-- finalization applies the customer balance. `invoiceitems` (Phase 13) is
+-- the pending-item store the invoice sweep reads.
 
 CREATE TABLE subscriptions (
     id                          TEXT PRIMARY KEY,
@@ -162,6 +163,44 @@ CREATE INDEX invoices_by_collection_method ON invoices (collection_method, x_seq
 -- No top-level `subscription` column and no `days_until_due`: neither field exists on
 -- `invoice` at 2026-08-26.dahlia. Functional spec §4 is right and the widely-documented
 -- older shape is wrong for this version.
+
+CREATE TABLE invoiceitems (
+    id               TEXT PRIMARY KEY,
+    x_seq            INTEGER NOT NULL,
+    -- `invoiceitem` has NO `created` field; its creation timestamp is `date`. See §3.11.
+    date             TEXT NOT NULL,
+    amount           INTEGER NOT NULL,
+    currency         TEXT NOT NULL,
+    customer         TEXT NOT NULL REFERENCES customers (id),
+    description      TEXT,
+    discountable     INTEGER NOT NULL DEFAULT 1 CHECK (discountable IN (0, 1)),
+    discounts        TEXT CHECK (discounts IS NULL OR (json_valid(discounts) AND json_type(discounts) = 'array')),
+    frozen_fields    TEXT CHECK (frozen_fields IS NULL OR (json_valid(frozen_fields) AND json_type(frozen_fields) = 'array')),
+    -- Bare, deliberately: deleting a draft invoice does NOT release its
+    -- swept items (recorded, cassette 13) — they stay attached to the dead
+    -- invoice, refuse later deletes, and read as deleted on update. A
+    -- REFERENCES clause would refuse exactly that. The parent lookup is
+    -- the writer's job (`resources/invoiceitems.py`), like
+    -- `customer_balance_transactions.credit_note` below.
+    invoice          TEXT,
+    metadata         TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata) AND json_type(metadata) = 'object'),
+    net_amount       INTEGER,
+    parent           TEXT CHECK (parent IS NULL OR (json_valid(parent) AND json_type(parent) = 'object')),
+    period_end       TEXT NOT NULL,
+    period_start     TEXT NOT NULL,
+    pricing          TEXT CHECK (pricing IS NULL OR (json_valid(pricing) AND json_type(pricing) = 'object')),
+    proration        INTEGER NOT NULL DEFAULT 0 CHECK (proration IN (0, 1)),
+    proration_details TEXT CHECK (proration_details IS NULL OR (json_valid(proration_details) AND json_type(proration_details) = 'object')),
+    quantity         INTEGER NOT NULL DEFAULT 1,
+    quantity_decimal TEXT NOT NULL DEFAULT '1',
+    tax_rates        TEXT CHECK (tax_rates IS NULL OR (json_valid(tax_rates) AND json_type(tax_rates) = 'array'))
+) STRICT;
+
+CREATE UNIQUE INDEX invoiceitems_by_seq     ON invoiceitems (x_seq DESC);
+CREATE INDEX invoiceitems_by_customer ON invoiceitems (customer, x_seq DESC);
+CREATE INDEX invoiceitems_by_invoice  ON invoiceitems (invoice, x_seq DESC);
+-- GET /v1/invoiceitems?pending=true is exactly "not yet swept onto an invoice"
+CREATE INDEX invoiceitems_pending     ON invoiceitems (x_seq DESC) WHERE invoice IS NULL;
 
 CREATE TABLE customer_balance_transactions (
     id             TEXT PRIMARY KEY,
