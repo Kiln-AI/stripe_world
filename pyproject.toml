@@ -35,8 +35,7 @@ dev = ["pytest>=8", "ruff>=0.14", "ty>=0.0.1a21", "stripe>=13"]
 # re-running `uv lock`, in a commit of its own. The repository is private: a
 # checkout that cannot already read it over HTTPS has to give git a credential
 # before the sync, or `uv sync` fails as a git auth error that reads like a bad
-# lock. There is no workflow in this repo yet; whatever runs these checks
-# unattended needs that step.
+# lock. CI does that in its own guarded step (`.github/workflows/ci.yml`).
 [tool.uv.sources]
 seahaven = { git = "https://github.com/Kiln-AI/Seahaven.git", rev = "48dad1f01df5ff15bb6c5a152d1b49251235eda8" }
 
