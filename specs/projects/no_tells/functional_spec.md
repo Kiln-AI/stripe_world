@@ -82,6 +82,13 @@ and several things `stripe_world` works hard on — the status code, the `type`/
 because the raw surface and the conformance cassettes still use them; they are simply not what this
 project is measured on.
 
+**The bar is per-tool, not per-tool-set.** This world defines tools; a harness decides which of them
+an agent receives, alongside tools from other worlds and from real servers. So the unit of fidelity
+is the individual tool — every one this world exposes must be indistinguishable from its real
+counterpart — and the *size and membership* of the agent's tool set is upstream of us. §4.1.3 makes
+that decision explicit, and it is the reason the tool-count difference in §4.1 is not carried as a
+tell.
+
 ## 3. The tell register is the requirements list
 
 The research phase probed the live server across five lanes and produced
@@ -129,6 +136,10 @@ The world registers exactly the real server's ten tools, with its names:
 **Eight tools are registered**: four rebuilt, three new, one kept. Of the live server's ten, seven
 are reproduced, three are not built (§4.1.2), and one tool exists here that the live server does not
 have (§4.1.1).
+
+Neither of those last two counts is a fidelity problem, and §4.1.3 says why: which tools reach an
+agent is the harness's decision. The obligation is that every tool this world exposes matches its
+real counterpart exactly — not that the set is the same size.
 
 The two account tools are **one implementation with two faces**. `get_stripe_account_info` returns
 the account object; `list_available_accounts_or_orgs` returns a one-element list carrying that same
@@ -182,8 +193,8 @@ movement in either direction is caught by a drift run rather than by someone not
 #### 4.1.2 Three tools are deliberately not built
 
 `search_stripe_documentation`, `stripe_implementation_planner` and `send_stripe_mcp_feedback` are
-not implemented here. All three are exceptions to §4.1's "register the real server's tools", and for
-three different reasons.
+not implemented here, for three different reasons. These are scoping choices, not exceptions to a
+rule — §4.1.3 explains why there is no rule here to break.
 
 **`search_stripe_documentation` is better served by the real one.** A harness can compose tools from
 more than one source, and this tool touches no account state: it searches Stripe's public
@@ -209,16 +220,43 @@ to Stripe. In a synthetic world there is no recipient, nothing to do with the pa
 account state involved. It also takes no `stripe_context`, so the permission-refusal route of §6 is
 not available to it — a permission error from an unauthenticated tool would itself be a tell.
 
-**The cost, stated plainly.** The live server offers ten tools and this world registers eight, seven
-of which the live server has. **An agent that compares tool lists sees the difference immediately**,
-which is a blatant tell by this project's own standard, accepted deliberately.
+#### 4.1.3 Which tools reach an agent is the harness's decision, not the world's
 
-Composition recovers **one** of the three: a harness that supplies `search_stripe_documentation`
-from the real MCP closes that gap, and closes it better than we could. The planner cannot be
-recovered the same way without a harness feature that rewrites `stripe_context` to a real account,
-and the feedback tool has nothing to recover. So composition is a requirement of faithful use rather
-than an optional extra, and it belongs in the world's own documentation — nobody should stand this
-up alone and assume the surface is complete.
+**This decision is final, and it is the reason §4.1.2 carries no cost.**
+
+This world is **not an MCP server**. It is a world that exposes tools. A harness composes the set an
+agent actually receives — from this world, from other worlds, and from real servers — and decides
+per rollout what that set is. **Handing an agent every tool a world defines is a scenario that never
+happens.**
+
+So "our tool list is shorter than the live server's" is not a fidelity question, because there is no
+canonical list to be short against. An agent never sees "the world's tools"; it sees the set its
+harness assembled. Filtering is upstream of us.
+
+What the world owes is narrower and absolute:
+
+> **Every tool it exposes must be indistinguishable from its real counterpart.** Name, schema,
+> description, inputs, outputs, errors.
+
+That obligation is unaffected by how many tools exist, and it is the only thing §4.1's list is
+really about. A tool we do not build cannot be wrong; a tool we build badly always is.
+
+Two consequences worth stating, so nobody re-opens this later:
+
+- **Not building a tool needs no justification beyond "nothing needs it".** The three reasons in
+  §4.1.2 explain the choices; they are not a defence against a fidelity charge, because there is no
+  charge to answer.
+- **Nor does exposing one the live server lacks** (§4.1.1). A harness that does not want
+  `get_stripe_account_info` in an agent's set simply does not include it.
+
+This is scoped to this world. A project whose deliverable genuinely *is* a drop-in MCP server would
+have to answer the tool-list question directly — this one does not, and no part of this spec should
+be read as though it does.
+
+**Register disposition:** `TS-01` — "tool count: real MCP has 10 tools, ours has 5" — is therefore
+**not a tell** under §3, and is the third entry to take that disposition. The rows beneath it that
+concern the *shape* of individual tools (`TS-04` through `TS-09`, `TS-24` through `TS-26`) are
+unaffected and remain in scope.
 
 The three new tools are not equally deep. §6 says what each one must actually do.
 
@@ -438,8 +476,51 @@ wrong verb, and a legacy sub-resource are all indistinguishable to the agent. We
 model why an operation is missing — only that it is.
 
 Bucket B is your known case, and the probe confirms it is the right instinct: an operation Stripe
-really has, which our world does not implement, must look like **a key without access** — never
-like an unimplemented mock.
+really has, which our world does not implement, must look like **an account that cannot do that** —
+never like an unimplemented mock.
+
+#### 5.1.1 Bucket B has two real shapes, and only one of them is measurable here
+
+Probing on 2026-09-22 established that bucket B is not one thing. A catalogued operation this
+account cannot perform answers in one of two ways, and they are not interchangeable:
+
+**B1 — the product is not activated.** Measured, verbatim, and the shape to copy:
+
+> `Stripe API error: Your account is not set up to use Issuing. Please visit
+> https://dashboard.stripe.com/issuing/overview to get started.`
+> …followed by the guidance suffix naming `stripe_api_details` and the operation id.
+
+It names the product, points at a dashboard URL, and arrives on the Stripe-API channel (§4.5.1). It
+is what an agent actually meets for Issuing, and by extension for any Stripe product an account has
+not turned on.
+
+**B2 — the key lacks permission.** Documented but **not reachable on this session**, for a
+structural reason worth recording: **the MCP session authenticates by OAuth consent, not by a
+restricted API key.** Permissions are granted per resource at consent time and, on this session, the
+grant is broad. Every attempt to provoke a permission refusal failed — reads across Issuing, Tax,
+Connect, Checkout and Financial Connections either succeeded or answered B1; the writes that might
+have been denied (`PostAccounts`, `PostPayouts`) turn out not to be catalogued at all; and four
+attempts to exercise a deliberately revoked analytics grant never propagated to the live session.
+
+Stripe's own documentation gives the B2 shape without the exact words: a restricted key that lacks a
+permission gets **HTTP 403**, wire type **`invalid_request_error`**, and "the response body includes
+an error message explaining which permissions to add". That is sourced, not guessed, but it is not
+verbatim.
+
+**Which shape our unrouted operations use:**
+
+- An operation belonging to a **Stripe product** that an account activates — Issuing, Terminal,
+  Treasury, Climate, Tax — answers **B1**, with the product name and dashboard URL substituted. This
+  is the measured path and should be preferred wherever it applies.
+- An operation on **ordinary API surface** that any account simply has — Checkout Sessions, Payment
+  Links, Connect account reads — has no B1 form, because on real Stripe those just work. These
+  answer **B2**, which is the best available fiction and the one place in the refusal model that
+  rests on documentation rather than measurement.
+
+**A consequence worth stating:** if the real MCP is always OAuth-scoped, an agent on the real server
+may never see a restricted-key 403 at all, and B2 may be unreachable there too. That would make B2
+rare rather than wrong — but it is the reason this is the least certain part of §5, and the reason
+the declared list carries it.
 
 ### 5.2 `"Unrecognized request URL"` must never reach an agent
 
@@ -533,8 +614,9 @@ not by how useful it is. Two of the live server's tools are deliberately not bui
   so there is no "this account has no Sigma" dodge to hide behind. The refusal is the dodge, and it
   is an honest one.
 
-  The message is **best effort** and shares its text with §5.1 bucket B, so the restricted-key probe
-  of §14.1 improves all of them at once.
+  The message shares its text with §5.1 bucket B. Sigma is a Stripe product an account turns on, so
+  the **B1** shape applies — the measured product-activation form, naming the product and its
+  dashboard URL — rather than the inferred B2 permission wording.
 
   A generalisation worth noting but not yet applied: any account-scoped tool whose substance we
   cannot reproduce can take this route. It is only available to tools that *are* account-scoped —
@@ -796,12 +878,11 @@ the way `stripe_world`'s conformance allow-list is.
 |---|---|---|
 | **Frozen clock.** Objects created in one session share a `created`; real timestamps advance. Format B ids embed a constant timestamp for the same reason | `ctx.clock` is static for an instance's whole life and SQL time functions are overridden to match, so advancing time needs a world-managed offset over the framework. Out of scope by decision | Seahaven. A `SEAHAVEN_FINDINGS.md` entry, and a candidate framework capability |
 | **`2026-08-26.preview` vs `.dahlia`** | Unresolvable without Stripe-internal knowledge; may be two labels for one version. We pin to `spec3.json`'s `info.version` | This project — declared, not closed |
-| **The 403 permission message is inferred** | The sandbox key has full access, so no probe could produce a real restricted-key refusal. Status and wire type are documented; the verbatim text is not | Open (§14) — closes with a restricted key |
+| **The B2 permission message is inferred** | The MCP authenticates by OAuth consent, not a restricted key, so no probe on this session could produce one (§5.1.1). Status and wire type are documented; the wording is not. B1, the product-activation shape, is measured and covers the product-shaped cases | This project — declared, and possibly unreachable on the real server too |
 | **Live-mode-specific strings** | Live mode is modelled (§4.7) but only a sandbox was probed. The live-side `livemode` refusal, and any mode-dependent URL such as a receipt or hosted-invoice link, are sourced from documentation or inferred | This project — declared, and marked inferred rather than measured |
 | **`llm_context` on search results** | Stripe-authored prose in no public artifact. Reproduced where the probe captured it, absent elsewhere | This project — declared |
 | **`stripe_analytics` answers a permission refusal** | Sigma is not reproducible, and a key without the analytics permission is a realistic account state. Closed by the §5 refusal mechanism rather than left as a gap (§6). The cost: an agent that would have got analytics on a real permissioned account gets a refusal here | This project — declared |
-| **The tool list is short by three** | `search_stripe_documentation`, `stripe_implementation_planner` and `send_stripe_mcp_feedback` are not built (§4.1.2) — eight registered against the live server's ten. A blatant tell to anyone comparing tool lists, accepted deliberately. Composition recovers one of the three | This project — declared, and a condition on faithful use |
-| **`get_stripe_account_info` exists here and not on the live server** | Documented by Stripe and carries no preview label (§4.1.1). A deliberate exception to live-beats-documentation | This project — declared |
+| **`get_stripe_account_info` exists here and not on the live server** | Documented by Stripe and carries no preview label (§4.1.1). Kept deliberately; a harness that does not want it does not include it | This project — declared |
 | **`SH206` lint violation** | Real tool descriptions name other tools. Fidelity wins; the world becomes unsafe under a prefixing host | This project — declared, and a `SEAHAVEN_FINDINGS.md` entry |
 | **`product.attributes`, `product.type`, `product.tax_details`** | Returned by the live API, documented in neither the full nor the pinned spec. Ruled on in §11.2: the published schema wins and we expect the wire to catch up. Three probable-severity tells stay open on every product read | This project — declared, revisit if the wire has not caught up |
 | **Search freshness** | Real Stripe search lags writes; this world is exact. Inherited from `stripe_world` | `stripe_world` |
@@ -810,14 +891,18 @@ the way `stripe_world`'s conformance allow-list is.
 
 Each blocks something specific, and each has a defined way to close.
 
-1. **The verbatim 403 permission message.** The **highest-value** open item, because one string now
-   serves three places: §5.1 bucket B, §6's `stripe_analytics` refusal, and any future tool that
-   takes the same route. Everything about the refusal model is measured except its exact words.
-   Closes by creating a restricted key with a permission deliberately withheld and probing one
-   operation. **Needs you** — a Dashboard action, and the key must reach the probing environment.
-   Revoking the MCP session's analytics grant was attempted on 2026-09-22 and did not propagate to
-   the live session within three calls, so that route did not work; a restricted key is the
-   remaining one.
+1. **The verbatim B2 permission message** (§5.1.1). Probed hard on 2026-09-22 and **not obtainable
+   from this session**: the MCP authenticates by OAuth consent rather than by a restricted key, and
+   this session's grant is broad. Reads across five product areas either succeeded or returned the
+   B1 product-activation error; the writes that might have been denied are not catalogued; a
+   deliberately revoked analytics grant never propagated across four calls; and Stripe's own
+   documentation search confirms the status and wire type but not the wording.
+
+   **Largely defused rather than open.** B1 is measured and covers every product-shaped case, and
+   `stripe_analytics` can use B1's shape too. What still rests on documentation is B2 alone — 403,
+   `invalid_request_error`, a message naming the missing permission — and §5.1.1 records that it may
+   be unreachable on the real MCP as well, which would make it rare rather than wrong. Closes fully
+   only against a real restricted key outside the MCP; not worth blocking on.
 2. ~~`stripe_context` mismatch and `livemode: true`~~ — **closed** 2026-09-22, verbatim in §4.3.
    It also uncovered the third error channel of §4.5.1.
 3. ~~`stripe_analytics` without Sigma~~ — **closed** 2026-09-22, and the assumption behind the
