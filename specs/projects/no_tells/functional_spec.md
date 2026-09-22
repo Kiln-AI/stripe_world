@@ -118,19 +118,109 @@ The world registers exactly the real server's ten tools, with its names:
 | `stripe_api_write` | Rebuilt (§4.2–4.5) |
 | `stripe_api_search` | Rebuilt (§7) |
 | `stripe_api_details` | Rebuilt (§7) |
-| `list_available_accounts_or_orgs` | New. Bootstraps every other tool |
+| `list_available_accounts_or_orgs` | New. Bootstraps every other tool. Shares the account configuration below |
+| `get_stripe_account_info` | **Kept.** Documented by Stripe, and the two coexist (§4.1.1) |
 | `manage_stripe_accounts` | New |
-| `search_stripe_documentation` | New |
-| `stripe_analytics` | New |
-| `stripe_implementation_planner` | New |
-| `send_stripe_mcp_feedback` | New |
+| `stripe_analytics` | New — answers a permission refusal (§6) |
+| `search_stripe_documentation` | **Not built** — served by the real MCP in a composed harness (§4.1.2) |
+| `stripe_implementation_planner` | **Not built** (§4.1.2) |
+| `send_stripe_mcp_feedback` | **Not built** (§4.1.2) |
 
-`get_stripe_account_info` is **removed**. It does not exist on the real server, and an agent
-familiar with the real server will never call it. Phase 21 of `stripe_world` built it; that work is
-superseded, and the account object it returned is reachable the way the real server reaches it —
-see §4.6 and §10.
+**Eight tools are registered**: four rebuilt, three new, one kept. Of the live server's ten, seven
+are reproduced, three are not built (§4.1.2), and one tool exists here that the live server does not
+have (§4.1.1).
 
-The six new tools are not equally deep. §6 says what each one must actually do.
+The two account tools are **one implementation with two faces**. `get_stripe_account_info` returns
+the account object; `list_available_accounts_or_orgs` returns a one-element list carrying that same
+account's id, mode and name. Both read the same fixture-defined account configuration (§10.2), so
+the second tool is a projection of the first rather than new state — and the two can never disagree
+about what account this instance is.
+
+#### 4.1.1 The documented tool list and the live one disagree
+
+Worth recording, because `get_stripe_account_info` **is** in Stripe's published documentation, and
+removing a documented tool is the kind of delta that should not pass silently.
+
+`docs.stripe.com/mcp`, read 2026-09-18, lists **11 tools**. The live session, probed 2026-09-22,
+exposes **10**. Eight are common to both, and the lists differ in *both* directions:
+
+| Only in the docs | Only on the live server |
+|---|---|
+| `get_stripe_account_info` | `list_available_accounts_or_orgs` |
+| `get_balance_summary` — marked *Treasury, Public preview* | `manage_stripe_accounts` |
+| `stripe_report` — marked *Private preview* | |
+
+Two different causes, and they should not be lumped together:
+
+- **`get_balance_summary` and `stripe_report` are preview-gated.** The docs label both as previews,
+  and this account is presumably not enrolled. Note that preview labels do not predict availability
+  in either direction: `stripe_analytics` is labelled *Private preview* in the docs and is live for
+  us.
+- **`get_stripe_account_info` looks superseded, not gated.** It carries no preview label, and the
+  two tools that appear in its place are both account-and-session tools. The live server has moved
+  from a single-account model — where "retrieve the account" is meaningful — to a multi-account
+  session model, where the agent first lists the accounts it can reach and then names one on every
+  call through `stripe_context`. The documented tool descriptions mention no `stripe_context` at
+  all, which dates them to before that change.
+
+**Ruling: keep `get_stripe_account_info`, and register both.** This is a deliberate exception to
+§2's live-beats-documentation rule, taken because the two sources are describing the same server at
+different times rather than contradicting each other about behavior. The tool is documented, carries
+no preview label, and may be present for other accounts, other clients or other versions. Carrying
+both costs one projection over state we already hold (§4.1), and an agent that finds either one
+behaves correctly.
+
+The residual risk, stated once: an agent trained here could call `get_stripe_account_info` against a
+live server that no longer has it, and meet a tool-not-found error it never saw in training. That is
+the transfer risk in this decision. It is small — the error is cheap, immediate and recoverable, and
+`list_available_accounts_or_orgs` is present as the obvious fallback — but it is the reason this is
+an exception rather than a precedent.
+
+§5.3's enumeration should record the **tool list** as well as the operation list, so any further
+movement in either direction is caught by a drift run rather than by someone noticing.
+
+#### 4.1.2 Three tools are deliberately not built
+
+`search_stripe_documentation`, `stripe_implementation_planner` and `send_stripe_mcp_feedback` are
+not implemented here. All three are exceptions to §4.1's "register the real server's tools", and for
+three different reasons.
+
+**`search_stripe_documentation` is better served by the real one.** A harness can compose tools from
+more than one source, and this tool touches no account state: it searches Stripe's public
+documentation. Pointing it at the real MCP gives the agent genuinely correct Stripe documentation
+rather than an imitation we could not keep current — which is *higher* fidelity than anything we
+would build, not lower. It takes no `stripe_context`, so there is no account identity to reconcile
+when it is composed in.
+
+**`stripe_implementation_planner` plans integrations, not billing work.** It is an interactive
+wizard for *building* a Stripe integration — choosing between Checkout, Elements, Payment Intents,
+Billing and Connect before writing code — and it is the only tool of the ten that is **stateful
+across calls**, carrying a `guide_id` through a decision tree. None of the available answers fit it:
+its value is entirely Stripe-authored prose, so a shape-stub with our content would be visibly wrong
+and actively misleading if followed; it is not gated on a product or permission in reality, so the
+§6 refusal route would be inventing an account state nobody has seen; and it cannot be cleanly
+proxied like `search_stripe_documentation`, because it **requires `stripe_context`** and our
+synthetic account id does not exist on the real server. It is also the tool furthest from the work
+this world models — an agent refunding a charge or rescuing a subscription has no reason to open an
+integration planner.
+
+**`send_stripe_mcp_feedback` has no meaning here.** It submits feedback about Stripe's MCP tooling
+to Stripe. In a synthetic world there is no recipient, nothing to do with the payload, and no
+account state involved. It also takes no `stripe_context`, so the permission-refusal route of §6 is
+not available to it — a permission error from an unauthenticated tool would itself be a tell.
+
+**The cost, stated plainly.** The live server offers ten tools and this world registers eight, seven
+of which the live server has. **An agent that compares tool lists sees the difference immediately**,
+which is a blatant tell by this project's own standard, accepted deliberately.
+
+Composition recovers **one** of the three: a harness that supplies `search_stripe_documentation`
+from the real MCP closes that gap, and closes it better than we could. The planner cannot be
+recovered the same way without a harness feature that rewrites `stripe_context` to a real account,
+and the feedback tool has nothing to recover. So composition is a requirement of faithful use rather
+than an optional extra, and it belongs in the world's own documentation — nobody should stand this
+up alone and assume the surface is complete.
+
+The three new tools are not equally deep. §6 says what each one must actually do.
 
 ### 4.2 Operations are addressed by operation id
 
@@ -418,19 +508,19 @@ Stripe does **not** validate id prefixes on path parameters — `GET /v1/custome
 `No such customer: 'ch_fake'`. Our prefix check produces the same message, so it stays: a
 performance shortcut with an indistinguishable result.
 
-## 6. The six new tools
+## 6. The new tools
 
 They are not equally deep, and the depth each needs is set by how an agent would notice it missing —
-not by how useful it is.
+not by how useful it is. Two of the live server's tools are deliberately not built at all (§4.1.2).
 
-- **`list_available_accounts_or_orgs`** — fully real. It gates every other call, returns
-  `{"accounts":[{"stripe_context":"acct_…","livemode":false,"name":"…"}]}`, and its values must be
-  the ones every other tool then accepts. This is the one new tool with real behavior behind it.
+- **`list_available_accounts_or_orgs`** — fully real, and cheap: it returns
+  `{"accounts":[{"stripe_context":"acct_…","livemode":<mode>,"name":"…"}]}` as a one-element list
+  projected from the same account configuration `get_stripe_account_info` serves (§4.1, §10.2). It
+  gates every other call, so its values must be exactly the ones every other tool then accepts.
+- **`get_stripe_account_info`** — kept, and unchanged in behavior. It is the fuller face on the same
+  configuration.
 - **`manage_stripe_accounts`** — returns a `{"reconsent_url": "…"}` of the right shape. The URL
   points nowhere; nothing in a rollout can follow it.
-- **`search_stripe_documentation`** — real Stripe documentation search cannot be reproduced. It
-  answers with the right envelope (`{"results":[{title,url,type,content}]}`) over whatever
-  documentation corpus we can assemble, and its thinness is declared in §13.
 - **`stripe_analytics`** — registered with the real schema and description, and **answers every
   intent with a permission refusal**: the key does not have access to analytics. It is not stubbed
   with fake data and it does not attempt Sigma.
@@ -450,13 +540,8 @@ not by how useful it is.
   cannot reproduce can take this route. It is only available to tools that *are* account-scoped —
   `search_stripe_documentation` and `send_stripe_mcp_feedback` take no `stripe_context` at all, so a
   permission refusal from them would itself be a tell.
-- **`stripe_implementation_planner`** — returns a decision-tree document of the observed shape,
-  stateful across calls via `guide_id`. Content is not reproducible in depth; declared.
-- **`send_stripe_mcp_feedback`** — accepts the call, validates its enums, discards the content,
-  returns the observed confirmation.
-
-The rule for all six: **schema and envelope fidelity is mandatory; content fidelity is
-best-effort and declared.** An agent that calls one of these in a billing rollout is off the path
+The rule for the tools that are built: **schema and envelope fidelity is mandatory; content fidelity
+is best-effort and declared.** An agent that calls one of these in a billing rollout is off the path
 the world exists to model, and the goal is that the call looks right rather than that it teaches the
 agent anything.
 
@@ -689,7 +774,7 @@ Section numbers in the first column are **`stripe_world`'s**, not this document'
 | §2 dropped tools | Lists `get_balance_summary` and `stripe_report` among tools dropped | Neither exists on the real server. `manage_stripe_accounts` and `list_available_accounts_or_orgs` do, and were not in the list |
 | §2.2 | `idempotency_key` promoted to a named parameter for visibility | No such parameter exists |
 | §2.3 | Every tool returns `{"status": int, "body": {...}}` | Bare body on success; MCP tool error on failure |
-| §2.6 | `get_stripe_account_info()` returns the account object | Tool does not exist |
+| §2.6 | `get_stripe_account_info()` returns the account object | Tool does not exist on the live server — but it **is** documented, and §4.1.1 rules to keep it. This row corrects the *reason* it is there, not its presence |
 | §2.7 | Discovery is keyword matching over a single `query` | `intent` + `resource`, semantically matched, wrapped envelope |
 | §2.7 | "Discovery serves exactly the operations this world actually implements" | Discovery covers the entire Stripe API, including operations the key cannot call |
 | §4 fidelity rules | "`livemode: false` on every object that *has* the field" | Mode is a property of the account. A world that is always `false` announces itself as a test environment — §4.7, P0 |
@@ -715,7 +800,8 @@ the way `stripe_world`'s conformance allow-list is.
 | **Live-mode-specific strings** | Live mode is modelled (§4.7) but only a sandbox was probed. The live-side `livemode` refusal, and any mode-dependent URL such as a receipt or hosted-invoice link, are sourced from documentation or inferred | This project — declared, and marked inferred rather than measured |
 | **`llm_context` on search results** | Stripe-authored prose in no public artifact. Reproduced where the probe captured it, absent elsewhere | This project — declared |
 | **`stripe_analytics` answers a permission refusal** | Sigma is not reproducible, and a key without the analytics permission is a realistic account state. Closed by the §5 refusal mechanism rather than left as a gap (§6). The cost: an agent that would have got analytics on a real permissioned account gets a refusal here | This project — declared |
-| **`search_stripe_documentation`, `stripe_implementation_planner` content** | Not reproducible. Envelope matches; substance does not | This project — declared |
+| **The tool list is short by three** | `search_stripe_documentation`, `stripe_implementation_planner` and `send_stripe_mcp_feedback` are not built (§4.1.2) — eight registered against the live server's ten. A blatant tell to anyone comparing tool lists, accepted deliberately. Composition recovers one of the three | This project — declared, and a condition on faithful use |
+| **`get_stripe_account_info` exists here and not on the live server** | Documented by Stripe and carries no preview label (§4.1.1). A deliberate exception to live-beats-documentation | This project — declared |
 | **`SH206` lint violation** | Real tool descriptions name other tools. Fidelity wins; the world becomes unsafe under a prefixing host | This project — declared, and a `SEAHAVEN_FINDINGS.md` entry |
 | **`product.attributes`, `product.type`, `product.tax_details`** | Returned by the live API, documented in neither the full nor the pinned spec. Ruled on in §11.2: the published schema wins and we expect the wire to catch up. Three probable-severity tells stay open on every product read | This project — declared, revisit if the wire has not caught up |
 | **Search freshness** | Real Stripe search lags writes; this world is exact. Inherited from `stripe_world` | `stripe_world` |
