@@ -147,6 +147,15 @@ def _price_lookup_conflict_modulo_id(recorded: Any, replayed: Any) -> bool:
 #: that differs in anything but the id still fails.
 _NO_SUCH_OBJECT = re.compile(r"^No such [a-zA-Z][a-zA-Z ]+: '[A-Za-z0-9_.\-']+'$")
 
+#: The two recorded proration description forms (cassette 01): the day is
+#: the only per-run variable — "Unused time on 3 x <name> after 21 Oct 2026",
+#: "Remaining time on <name> after 11 Oct 2026". The product name is a
+#: caller-chosen literal on both sides, so the forms are matched whole and
+#: only the date-bearing suffix is run-dependent.
+_PRORATION_DESCRIPTION = re.compile(
+    r"^(?:Unused|Remaining) time on (?:\d+ x )?.+ after \d{2} [A-Z][a-z]{2} \d{4}$"
+)
+
 
 def _no_such_object_modulo_id(recorded: Any, replayed: Any) -> bool:
     if not isinstance(recorded, str) or not isinstance(replayed, str):
@@ -260,13 +269,16 @@ def _both_client_secrets(recorded: Any, replayed: Any) -> bool:
 
 
 def _recorded_placeholder_or_same(recorded: Any, replayed: Any) -> bool:
-    """The recorded value was normalized to a redaction placeholder (or the
-    two sides agree); the replayed value is this world's own derivation."""
+    """The recorded value was normalized to a redaction placeholder, is the
+    same, or is null where this world derived one — the last pair is the
+    async-finalization window (a recorded draft whose replayed counterpart
+    has already finalized, the cancel collapse's draft among them)."""
     return recorded in (
         "<redacted:receipt_url>",
         "<redacted:invoice_pdf>",
         "<redacted:hosted_invoice_url>",
         replayed,
+        None,
     )
 
 
@@ -512,6 +524,11 @@ _INVOICE_NUMBER = re.compile(r"^[A-Z0-9]{8}-\d{4}$")
 
 
 def _invoice_number_pair(recorded: Any, replayed: Any) -> bool:
+    # Recorded null against a replayed number is the cancel collapse's
+    # un-numbered draft (below); everything else must be number-shaped both
+    # sides so a real numbering regression still fails.
+    if recorded is None:
+        return isinstance(replayed, str)
     return (
         isinstance(recorded, str)
         and isinstance(replayed, str)
@@ -1722,6 +1739,44 @@ ALLOWED_DIFFERENCES: list[AllowedDifference] = [
         "is the message's whole variable content (recorded, cassette 13).",
         predicate=_no_such_invoice_item_modulo_id,
     ),
+    # --- the proration block (Phase 14, cassette 01) ---
+    AllowedDifference(
+        "**.subscription_item",
+        "The id rule on the item reference a line's or an item's parent "
+        "carries, predicated to `si_`-shaped pairs.",
+        predicate=_both_prefixed_ids("si_"),
+    ),
+    AllowedDifference(
+        "**.invoice_line_items[*]",
+        "The id rule on the credited line-item back-links a proration credit "
+        "carries, predicated to `il_`-shaped pairs.",
+        predicate=_both_prefixed_ids("il_"),
+    ),
+    AllowedDifference(
+        "**.description",
+        "A proration description names the proration date's day — a "
+        "clock-derived date inside a string, so the frozen-clock replay "
+        "spells its own day where the recording spells record-time's. "
+        "Predicated to exactly the two recorded proration forms on both "
+        "sides, so every other description stays byte-exact.",
+        predicate=_message_modulo_id(_PRORATION_DESCRIPTION),
+    ),
+    # The cancel-flow uncollectible collapse, scoped to the scenario that
+    # records it: live answers the still-draft final invoice and marks it
+    # uncollectible seconds later (both probe rounds); a frozen clock cannot
+    # wait out the async mark, so the replayed body is already collapsed.
+    AllowedDifference(
+        "body.status",
+        "The invoice_now cancel collapse: live's credit-only final invoice "
+        "is a draft at read time and lands `uncollectible` asynchronously "
+        "(~5 s, recorded in both probe rounds); this world's frozen clock "
+        "collapses it inside the call — exactly one hop ahead, the "
+        "dispute-settle precedent.",
+        scenario="01_proration_half_cent",
+        predicate=lambda recorded, replayed: (
+            recorded in ("draft", "uncollectible") and replayed == "uncollectible"
+        ),
+    ),
 ]
 
 # --- Structural differences ------------------------------------------------------
@@ -2043,6 +2098,53 @@ STRUCTURAL_DIFFERENCES: list[str] = [
     "`parent.subscription_details.metadata` is the subscription's own "
     "metadata, not a separately stored finalization snapshot (no second "
     "copy exists; `{}` when the subscription carries none).",
+    # --- Phase 14 (cassette 01 and its probe trails) ---
+    "Proration lines round by FLOORING each line's exact rational "
+    "(recorded, cassette 01: -2.5 -> -3 and +4.5 -> +4 at a fraction of "
+    "exactly 1/400; the documented -666.67 -> -667 agrees) — correcting "
+    "billing_engine's original round-half-up assumption, which no "
+    "recording ever supported. The fee rule (half-up, documented) and the "
+    "coupon apportionment (floor-then-remainder, documented) are "
+    "untouched; three rules, three functions.",
+    "The minimum chargeable is 50 minor units, a declared world constant "
+    "for the two-decimal currencies this world bills (recorded EFFECT, "
+    "cassette 01: nets of 1 and 4 are never charged — they roll onto "
+    "customer.balance through `invoice_too_small` rows and settle "
+    "`attempted: true, attempt_count: 0`). The real API's by-currency "
+    "minimum table is out of scope. The roll also runs BEFORE payment-"
+    "method resolution: nothing is charged, so no method is needed — an "
+    "invoice of 30 cents settles paid on a customer with no card, where "
+    "the 50-and-up path would report no_payment_method. Every recording "
+    "of the roll carried a card, so the no-PM ordering is this "
+    "declaration, not a recording.",
+    "The invoice_now cancel's credit-only final invoice is marked "
+    "uncollectible asynchronously live (~5 s, both probe rounds) and "
+    "synchronously here — the dispute-settle precedent, one hop ahead. "
+    "The scenario-scoped `body.status` entry carries the replay pair. "
+    "`invoice_now=true` with nothing to bill (no `prorate`, or a zero "
+    "remainder) mints NO invoice at all — Stripe's final invoice bills "
+    "the outstanding amount, and an empty invoice marked uncollectible "
+    "would be a stretch of the credit-only recording, not an application "
+    "of it (unprobed; declared here).",
+    "The classic-mode `billing_cycle_anchor: now` update shape is "
+    "unrecordable: the recording account is dashboard-flexible and answers "
+    "a stub-debit shape instead (probe_proration_invoices.json carries it "
+    "for reference). This world serves the machine table's classic ruling "
+    "(truncate, prorate per proration_behavior, roll the periods and the "
+    "anchor); under the frozen clock the reset instant can even equal the "
+    "creation instant, making the restart a byte-identical no-op.",
+    "Dunning's retry SCHEDULE is unrecordable on this account (the "
+    "decline-card structural declaration above closes the only route to a "
+    "declining subscription charge): the counter semantics, the nine "
+    "hard-decline codes and the three end-of-schedule outcomes are "
+    "spec-derived and unit-tested, and `next_payment_attempt`'s spacing "
+    "is this world's declared even-spacing stand-in — never a guess at "
+    "Stripe's ML schedule, which no one outside Stripe has.",
+    "`highest_risk_level` is docs-listed among the nine hard-decline "
+    "codes but absent from the pinned spec's 50-value `decline_code` "
+    "enumeration — a real docs/spec divergence. The docs win for the "
+    "gating list and tests/billing/test_dunning.py pins the divergence "
+    "by name.",
 ]
 
 # --- Matching --------------------------------------------------------------------

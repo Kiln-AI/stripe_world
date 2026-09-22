@@ -411,11 +411,21 @@ per-behavior citations in
   −334; net-then-round would give −333). It was previously an assumption by analogy and is now a
   documented fact.
 
-  One narrow assumption remains: the tie-break at an exact half-cent (`x.xx5`) is genuinely
-  undocumented, so round-half-up stands there. It lives behind a single named function with the
-  assumption stated at the call site. The documented example is `billing_mode=classic`; whether
-  `flexible` rounds identically is unproven, because its analogous example nets to zero. Both go to
-  conformance (§12).
+  The former tie-break assumption is **closed by recording** (cassette
+  `01_proration_half_cent`, 2026-09-21): an engineered exact half cent on both lines
+  (fraction exactly 1/400: a −2.5 credit and a +4.5 debit) answered **−3 and +4** —
+  each line is the **floor** of its own exact rational, which no nearest-integer rule
+  reproduces. The same cassette reproduced the documented −667/+333/−334 invoice live,
+  settled the quantity-only shape (**whole-configuration reproration**: quantity 1→3
+  at the same fraction wrote −3 and +7, where a one-unit delta would be +5), and
+  pinned the settlement trails — a sub-minimum net rolls onto `customer.balance`
+  through an `invoice_too_small` row, a net-negative invoice credits through
+  `applied_to_invoice` (correcting the design's `adjustment` guess), and the
+  `invoice_now` cancel's credit-only final invoice lands uncollectible asynchronously
+  (~5 s live; collapsed synchronous here). Both proration recording modes ran on the
+  sandbox's dashboard-`flexible` account — the classic/flexible pair the scenario list
+  named collapses to what the account can produce, and a line's rounding is
+  mode-independent arithmetic.
 - **Dunning** — Smart Retries is ML-scheduled; there is no retry-day table to transcribe, and building
   one would be inventing behavior. The world models the configuration envelope (N attempts within a
   window) and the three end-of-schedule outcomes. `invoice.attempt_count` increments only on automatic
@@ -537,9 +547,10 @@ with egress to `api.stripe.com`.
 **Scenarios to record**, in priority order. The first three exist to settle rules the implementation
 currently assumes; the rest are fidelity coverage.
 
-1. **Proration half-cent tie-break** — a mid-cycle change whose line lands on an exact `x.xx5`, which
-   is the one part of proration rounding still undocumented (§7). Also record the same change under
-   `billing_mode=flexible`, which was never separately proven.
+1. **Proration half-cent tie-break** — a mid-cycle change whose line lands on an exact `x.xx5`,
+   which is the one part of proration rounding still undocumented (§7). Also record the same change
+   under `billing_mode=flexible`, which was never separately proven. **Recorded 2026-09-21 as
+   cassette `01_proration_half_cent`** — the tie floors, both questions closed (§7, §15).
 2. **`starting_after` / `ending_before` against a deleted object id** — a genuine documentation
    silence, not a gap in our reading.
 3. **A malformed `Stripe-Version`** — also undocumented.
@@ -591,11 +602,11 @@ reachable and a targeted pass re-read every previously-blocked page. What surviv
 
 | Gap | Status | How it closes |
 |---|---|---|
-| Proration half-cent tie-break | Round-half-up assumed; the independent-per-line rule is now documented fact | Conformance scenario 1 |
-| Proration under `billing_mode=flexible` | Unproven — the documented example nets to zero | Conformance scenario 1 |
+| Proration half-cent tie-break | **Closed** — cassette 01: each line floors its exact rational (−2.5→−3, +4.5→+4) | Recorded |
+| Proration under `billing_mode=flexible` | **Closed as unprovable here** — the recording account is dashboard-flexible, so both recordings ran flexible; line rounding is mode-independent arithmetic | Recorded (declared) |
 | `starting_after` / `ending_before` on a deleted id | **Closed** — cassette 02: a deleted id is a valid cursor, excluded from pages (§6.2) | Recorded |
 | Malformed `Stripe-Version` handling | **Closed** — cassette 03: 400 `invalid_request_error`, type and message only; this world's fixed-version answer is a declared scenario-scoped difference | Recorded |
-| Quantity-only reproration | Mechanism confirmed; no isolated worked example found | Conformance scenario 5 |
+| Quantity-only reproration | **Closed** — cassette 01: whole-configuration (−3/+7 at a 1/400 fraction, not the +5 delta) | Recorded |
 | Dunning `unpaid` invoice outcome | Implemented as `draft`; `spec3.json` prose says "closed", which was never a real status value | Declared difference |
 | Niche magic-card rows (mobile 3DS, captcha/PIN, Radar sub-variants, by-country) | Not needed by the eval set | Added when something needs one |
 | Whether every dispute-prevention path creates a Dispute object | Open | Conformance scenario 7 |

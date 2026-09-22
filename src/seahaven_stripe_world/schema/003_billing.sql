@@ -149,7 +149,10 @@ CREATE TABLE invoices (
     total_pretax_credit_amounts      TEXT CHECK (total_pretax_credit_amounts IS NULL OR (json_valid(total_pretax_credit_amounts) AND json_type(total_pretax_credit_amounts) = 'array')),
     total_taxes                      TEXT CHECK (total_taxes IS NULL OR (json_valid(total_taxes) AND json_type(total_taxes) = 'array')),
     CHECK (parent_subscription IS NULL OR parent_type = 'subscription_details'),
-    CHECK (number IS NOT NULL OR status = 'draft')
+    -- `uncollectible` joins `draft` in the un-numbered set (recorded, cassette
+    -- 01): the invoice_now cancel collapse marks its credit-only final invoice
+    -- uncollectible WITHOUT ever finalizing it, so no number exists to carry.
+    CHECK (number IS NOT NULL OR status IN ('draft', 'uncollectible'))
 ) STRICT;
 
 CREATE UNIQUE INDEX invoices_by_seq           ON invoices (x_seq DESC);

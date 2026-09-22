@@ -164,7 +164,9 @@ def test_item_writes_emit_the_subscription_event(instance: seahaven.Instance) ->
     before = {row["type"] for row in instance.inspect().rows("SELECT type FROM events")}
     call(instance, "POST", "/v1/subscription_items", {"subscription": sub, "price": price2})
     types = {row["type"] for row in instance.inspect().rows("SELECT type FROM events")}
-    assert types - before == {"customer.subscription.updated"}
+    # Phase 14: the default `create_prorations` adds the debit-only
+    # proration item beside the subscription event.
+    assert types - before == {"customer.subscription.updated", "invoiceitem.created"}
 
 
 def test_the_recorded_addition_guards(instance: seahaven.Instance) -> None:

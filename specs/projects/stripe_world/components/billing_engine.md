@@ -98,14 +98,14 @@ units) throughout. `Rat = fractions.Fraction`.
 ### `billing/_money.py` — shared primitives, no `ctx`, no I/O
 
 ```python
-def round_cents_half_up(x: Rat) -> int:
-    """Round a non-negative exact rational to the nearest integer cent, ties away from zero.
+def floor_cents(x: Rat) -> int:
+    """Floor of an exact rational, toward negative infinity — the proration rule.
 
-    ASSUMPTION (the only one in the money path): Stripe's tie-break at an exact x.xx5 is
-    undocumented for proration line items. See research gap-closure-2026-09-18.md item 1 and
-    conformance scenario 1 (functional spec §12). Callers pass a NON-NEGATIVE magnitude and
-    apply the sign themselves, so a tie always rounds away from zero.
-    Raises ValueError on a negative argument, so the convention cannot be violated silently.
+    RECORDED (Phase 14, cassette 01 + the probe trails, 2026-09-21): an
+    engineered half-cent tie floors on both sides — a credit of -2.5 lands
+    as -3 and a debit of +4.5 as +4 — which no nearest-integer rule
+    (half-up, half-even, truncation) reproduces. This closes what was the
+    money path's one open assumption; `round_half_up` stays fee-only.
     """
 
 def apportion(total: Money, weights: Sequence[Money]) -> list[Money]:
@@ -114,7 +114,7 @@ def apportion(total: Money, weights: Sequence[Money]) -> list[Money]:
     Floor every share, then give the entire remainder to the LAST non-zero-weight entry.
     This is Stripe's documented coupon-across-items rule, NOT independent rounding:
     a $5 coupon split 1:2 over a $10 and a $20 item yields [166, 334], not [167, 333].
-    (gap-closure-2026-09-18.md item 1, closing paragraph.) Never call round_cents_half_up here.
+    (gap-closure-2026-09-18.md item 1, closing paragraph.) Never call floor_cents here.
     """
 
 def stripe_fee(amount: Money, schedule: FeeSchedule) -> Money:
@@ -126,10 +126,10 @@ class FeeSchedule:
     fixed: Money = 30          # 30c
 ```
 
-`round_cents_half_up` and `stripe_fee` both round half up, for **different reasons**, and the
-codebase must not let the two blur: the fee rule is documented by Stripe
-(`support.stripe.com/questions/rounding-rules-for-stripe-fees`), the proration tie-break is not.
-Two functions, two comments, one conformance scenario attached to exactly one of them.
+`floor_cents` (proration, recorded — cassette 01) and `round_half_up` (fees, documented) are two
+different rules for two different authorities, and the codebase must not let the two blur: the fee
+rule is documented by Stripe (`support.stripe.com/questions/rounding-rules-for-stripe-fees`), the
+proration floor is a recording. Two functions, two comments, each citing its own source.
 
 ### `billing/proration.py`
 
@@ -138,6 +138,8 @@ Two functions, two comments, one conformance scenario attached to exactly one of
 class ItemConfig:
     subscription_item_id: str | None   # None for a brand-new item
     price_id: str
+    product_id: str                    # the recorded `pricing.price_details` block names both
+    product_name: str                  # the recorded descriptions name the product
     unit_amount: Money                 # integer minor units, per unit
     quantity: int
 
@@ -168,15 +170,16 @@ def proration_lines(
     period_start: int,
     period_end: int,
     proration_date: int,
-    currency: str,
-    now_iso: str,
     credited_line_ids_by_item: Mapping[str, tuple[str, ...]] = {},
 ) -> list[ProrationLine]:
     """The whole proration algorithm. Pure: no ctx, no db, no clock, no ids.
 
-    Returns credit lines first (matching Stripe's reverse-chronological pending-item
-    ordering), then debit lines. Returns [] when the fraction is 0 or when old_items and
-    new_items are configuration-identical.
+    Returns credit lines first (the display order), then debit lines — the WRITER
+    inserts the debit row first, so the newest-first pending list and the invoice's
+    line list both carry the credit on top (recorded, cassette 01). Returns [] when
+    the fraction is 0 or when old_items and new_items are configuration-identical.
+    Lines are emitted at any positive fraction, including a rounded amount of 0
+    (recorded: the anchor-reset stub item).
     """
 ```
 
@@ -385,8 +388,8 @@ nothing here invents one.
 | Refund a fully refunded charge | 400 | `invalid_request_error` | `charge_already_refunded` |
 
 `WorldBug` (not a Stripe error) is reserved for authoring faults the agent cannot cause: an unknown
-`balance_transaction.type`, an unknown event type, a zero-length billing period, a negative argument
-to `round_cents_half_up`.
+`balance_transaction.type`, an unknown event type, a zero-length billing period, an invalid
+`account.dunning` window or end behavior.
 
 ## Internal Design Approach
 
@@ -771,17 +774,16 @@ enum (verified against `spec3.json`):
 | Situation | `customer_balance_transaction.type` |
 |---|---|
 | Credit consumed at finalization | `applied_to_invoice` |
-| Pending debit drawn onto an invoice | `adjustment` |
-| A negative-`total` invoice creating credit | `adjustment` |
+| Pending debit drawn onto an invoice | `applied_to_invoice` (recorded, cassette 01: amount −1) |
+| A negative-`total` invoice creating credit | `applied_to_invoice` (recorded, cassette 01: amount −334 — **correcting this table's earlier `adjustment` guess**) |
+| A sub-minimum net rolling to the balance | `invoice_too_small` (recorded, cassette 01: amounts +1 and +4) |
 | Overpayment credited back | `invoice_overpaid` |
 | Credit note settling to the balance | `credit_note` |
 | Voiding an invoice that had consumed credit | `unapplied_from_invoice` |
 
-**Open, declared:** the negative-`total` row is the one mapping in this table not pinned by a
-primary source — Stripe's enum offers no better-named value, and `adjustment` is its documented
-catch-all. Conformance scenario 5 ("a subscription created, upgraded mid-cycle, cancelled") records
-a downgrade and reads the resulting `customer_balance_transaction.type`; until it does, the choice is
-in `allowed_differences.py`.
+A balance-moving settlement also stamps the customer's `currency` when it is
+still null (recorded, cassette 01: the balance-carrying customer answers the
+balance rows' currency).
 
 ### 4. `proration_lines(...)`
 
@@ -804,45 +806,40 @@ The fraction is a `fractions.Fraction`, which makes it exact. `Fraction(1, 3) * 
 
 ```python
 def proration_lines(old_items, new_items, *, period_start, period_end,
-                    proration_date, currency, now_iso, credited_line_ids_by_item={}):
+                    proration_date, credited_line_ids_by_item={}):
     f = proration_fraction(period_start, period_end, proration_date)
     if f == 0:
         return []
     lines = []
     # 1. Credits: the WHOLE old configuration, for the remainder of the period.
     for it in old_items:
-        gross = it.unit_amount * it.quantity              # int
-        cents = round_cents_half_up(f * gross)            # magnitude, then sign
-        if cents:
-            lines.append(ProrationLine(amount=-cents, ...))
+        gross = f * (it.unit_amount * it.quantity)   # exact Fraction
+        lines.append(ProrationLine(amount=floor_cents(-gross), ...))
     # 2. Debits: the WHOLE new configuration, for the same remainder.
     for it in new_items:
-        gross = it.unit_amount * it.quantity
-        cents = round_cents_half_up(f * gross)
-        if cents:
-            lines.append(ProrationLine(amount=+cents, ...))
+        gross = f * (it.unit_amount * it.quantity)
+        lines.append(ProrationLine(amount=floor_cents(gross), ...))
     return lines
 ```
 
 Three things this encodes deliberately:
 
 1. **Whole-configuration reproration, never a delta.** A `quantity: 2 → 3` change credits
-   `2 × old_price × f` and debits `3 × new_price × f`; it does not charge for one unit. Stripe's
-   prorations page states the mechanism generically — "the cost of the subscription **before and
-   after the change**" — with price and quantity changes listed in the same trigger table and no
-   separate formula for quantity. This is the strongest available statement short of a numeric
-   example, which no docs page provides. Flagged in the Test Plan; conformance scenario 5 covers it.
-2. **Independent per-line rounding, then summing.** Each credit and each debit is rounded to the
-   nearest cent on its own, and the invoice total is the sum of the rounded lines. The total is
-   **never** computed at higher precision and rounded once. This is settled by a worked example in
-   Stripe's own documentation (see the test below), and a net-then-round implementation is off by a
-   cent in exactly the cases that matter.
-3. **The sign is applied after rounding a magnitude**, so a hypothetical tie rounds away from zero on
-   both sides symmetrically. `round_cents_half_up` refuses a negative argument, so this cannot be
-   circumvented by accident.
+   `2 × old_price × f` and debits `3 × new_price × f`; it does not charge for one unit. RECORDED
+   (cassette 01): a 1→3 change at a fraction of exactly 1/400 wrote −3 and +7, where the
+   one-added-unit delta would be +5 — the open question is closed, not inferred.
+2. **Independent per-line rounding, then summing.** Each credit and each debit is rounded on its
+   own, and the invoice total is the sum of the rounded lines. The total is **never** computed at
+   higher precision and rounded once. Settled by the documented worked example, where
+   net-then-round is off by a cent in exactly the cases that matter.
+3. **Each line floors its own signed exact rational** (`floor_cents`, RECORDED — cassette 01's
+   engineered tie floors on both sides: −2.5 → −3 and +4.5 → +4). Floor is not sign-symmetric
+   (`floor(−x)` is one below `−floor(x)` on any non-integer), which is exactly the asymmetry the
+   totals carry; the earlier magnitude-then-sign draft is superseded.
 
-Lines are emitted credits-first, matching `invoice.lines`' documented reverse-chronological ordering
-of pending items, and each credit line carries
+Lines are returned credits-first (the display order), and the writer inserts the debit row first so
+both the newest-first pending list and the invoice's line list carry the credit on top (recorded).
+Each credit line carries
 `parent.subscription_item_details.proration_details.credited_items = {invoice, invoice_line_items}`
 pointing at the original debit lines it reverses — a first-class structure in `spec3.json`, not an
 embellishment.
@@ -850,42 +847,85 @@ embellishment.
 #### The worked example, as a test
 
 Reproducing the documented case exactly (`billing_mode=classic`, a 30-day period, the change landing
-with one third of the period remaining, old price 20.00, new price 10.00):
+with one third of the period remaining, old price 20.00, new price 10.00) — RECORDED live as
+cassette 01's third-remainder case:
 
 ```python
 def test_proration_documented_667_333_334():
-    period_start, period_end = 1_764_547_200, 1_764_547_200 + 30 * 86_400
+    period_start, period_end = 1_788_271_200, 1_788_271_200 + 30 * 86_400
     proration_date = period_end - (30 * 86_400) // 3          # exactly 1/3 remaining
     lines = proration_lines(
-        old_items=[ItemConfig("si_1", "price_20_monthly", 2000, 1)],
-        new_items=[ItemConfig("si_1", "price_10_monthly", 1000, 1)],
+        old_items=[ItemConfig("si_1", "price_20_monthly", "prod_x", "widget", 2000, 1)],
+        new_items=[ItemConfig("si_1", "price_10_monthly", "prod_x", "widget", 1000, 1)],
         period_start=period_start, period_end=period_end,
-        proration_date=proration_date, currency="usd", now_iso=NOW,
+        proration_date=proration_date,
     )
     assert [l.amount for l in lines] == [-667, 333]
     assert sum(l.amount for l in lines) == -334      # net-then-round would give -333
 ```
 
-`20/3 = 666.66…¢ → −667`; `10/3 = 333.33…¢ → +333`; `−667 + 333 = −334`, matching the
-`latest_invoice.total` of `-334` in the docs' own JSON response. A net-then-round implementation
-computes `−10/3 = −333.33…¢ → −333` and fails this test. It is the single most load-bearing test in
-the component and carries a comment saying so.
+`−2000/3 = −666.67¢ → −667`; `+1000/3 = +333.33¢ → +333`; `−667 + 333 = −334`, matching the
+`latest_invoice.total` of `-334` in the docs' own JSON response and the live recording. A
+net-then-round implementation computes `−1000/3 → −333` and fails this test. It is the single most
+load-bearing test in the component and carries a comment saying so.
 
-#### The one assumption, isolated
+#### The one assumption — CLOSED by the recording
 
-`round_cents_half_up` is the **only** assumption in this module and it is confined to one named
-function with the comment quoted in the Public Interface above. Both values in the documented example
-round unambiguously under every standard convention (666.667 up, 333.333 down), so the example cannot
-distinguish half-up from half-even, and no Stripe page found in two research passes states a
-tie-break for proration. The fee-rounding support page documents half-up for **Stripe's own
-processing fee**, which is a different computation and is treated as an analogy, not evidence.
+The module's one open assumption was the tie-break, and conformance scenario 1
+(cassette `01_proration_half_cent`, recorded 2026-09-21) closed it the other way:
+**proration lines round by FLOORING the exact rational** (`_money.floor_cents`), not
+round-half-up. A fraction engineered to exactly 1/400 put the 10.00 credit on −2.5 and
+the 18.00 debit on +4.5, and live answered **−3 and +4** — floor on both sides, which
+half-up (+5), half-even (−2) and truncation (−2) each contradict. The documented
+−667/+333 case agrees (floor(−666.67) = −667; truncation would give −666), and the same
+cassette reproduced that documented invoice live: lines `[−667, +333]`, total **−334**.
 
-**Conformance scenario 1** (functional spec §12) closes it: a mid-cycle change engineered to land on
-an exact `x.xx5`, recorded against real test mode. The same scenario also records the change under
-`billing_mode=flexible`, because the documented example is explicitly `classic` and the `flexible`
-variant of the same scenario happens to net to zero, exposing nothing. Until scenario 1 is recorded,
-`allowed_differences.py` carries both as declared, named assumptions. Nothing else in `proration.py`
-is unproven.
+The same recording closed the quantity question: a 1→3 change at the same fraction
+wrote **−3 and +7** — the whole configuration reprorated (the delta reading would
+debit +5 exactly), with the debit line carrying `quantity: 3` and the description
+`Remaining time on 3 × <product> after <date>`.
+
+Also recorded, beside the arithmetic: the description's date is the **proration
+moment's** day (an 11 Oct proration date against a 21 Oct period end says
+"after 11 Oct 2026"); a line whose rounded amount is 0 is still emitted (the
+anchor-reset stub item); the pending items are written **debit row first**, so both
+the newest-first pending list and the invoice's line list carry the credit on top; and
+the recording account is dashboard-`flexible`, so the classic/flexible pair scenario 1
+named collapses to what the account can produce — the rounding of a line is
+mode-independent arithmetic, declared in `allowed_differences.py`.
+
+#### Settlement of the proration invoice (recorded, cassette 01)
+
+- `always_invoice` mints a `billing_reason: subscription_update` invoice carrying
+  **only the swept proration items** (the subscription's next-period line belongs to
+  the next cycle invoice), with `period_start` = the item period's start and
+  `period_end` = the update moment; it finalizes and **pays inside the call** — a
+  collectable net charges at `attempt_count: 1`.
+- **A net below the minimum chargeable is never charged** (recorded: totals of 1¢ and
+  4¢): the invoice settles `paid` with `attempted: true, attempt_count: 0`,
+  `amount_due` zeroed, and the amount rolls onto `customer.balance` as owed through a
+  `customer_balance_transactions` row of type **`invoice_too_small`** — the enum's own
+  name. The next invoice draws it (`starting_balance`). `MINIMUM_CHARGEABLE = 50`
+  minor units is this world's declared constant for the two-decimal currencies (the
+  real API's by-currency table is out of scope).
+- **A net-negative invoice credits whole** (the documented −334): `amount_due: 0`,
+  `attempted: true, attempt_count: 0`, `ending_balance: −334`, and the balance row's
+  type is **`applied_to_invoice`** with a negative amount — correcting §3.5's
+  `adjustment` guess (recorded via `GET /v1/customers/{id}/balance_transactions` in
+  the probe trail; the route itself is Phase 15's). A pending owed balance drawn onto
+  the next invoice is an `applied_to_invoice` row too (recorded: amount −1).
+- **`DELETE … prorate=true`** (no `invoice_now`) mints one PENDING credit-only item at
+  the **billed** configuration (a `none`-switched item still credits the price that
+  was paid — recorded), with a plainer body than an update's pair: `parent: null`,
+  no `proration_details` key. The line it later sweeps onto re-acquires the full
+  subscription identity and back-links (recorded).
+- **`DELETE … prorate=true&invoice_now=true`** additionally mints a
+  `billing_reason: subscription_cycle` invoice carrying only that credit; a
+  negative-total final invoice is created un-numbered (`auto_advance: true`) and
+  **automatically marked uncollectible ~5 s later** (async live — both probe rounds),
+  the credit never reaching the customer balance. A frozen clock cannot wait out the
+  async mark, so this world collapses it inside the call — the dispute-settle
+  precedent, declared in `allowed_differences.py`.
 
 #### `proration_behavior`
 
@@ -1040,7 +1080,7 @@ default and is declared.
 
 ```python
 def stripe_fee(amount, schedule):
-    return round_cents_half_up(Fraction(amount * schedule.percent_bps, 10_000)) + schedule.fixed
+    return round_half_up(Fraction(amount * schedule.percent_bps, 10_000)) + schedule.fixed
 ```
 
 The rate is **not** discoverable from `spec3.json` — it is commercial pricing, not spec. It is a
@@ -1324,18 +1364,18 @@ through `instance.call(...)` so validation, middleware and the per-call transact
 
 | Test | Verifies |
 |---|---|
-| `test_proration_documented_667_333_334` | **The load-bearing one.** Reproduces Stripe's documented example exactly: lines `[-667, +333]`, sum `-334`. Fails under net-then-round |
+| `test_proration_documented_667_333_334` | **The load-bearing one.** The documented example, RECORDED live (cassette 01's third-remainder case): lines `[-667, +333]`, sum `-334`. Fails under net-then-round |
 | `test_net_then_round_would_differ` | Asserts explicitly that `round(net)` is `-333` while the implementation returns `-334`, so the test's purpose survives a refactor |
 | `test_fraction_is_second_precision` | A change 1 second into a 30-day period produces a fraction of `2591999/2592000`, not `29/30`. Day-granularity fails |
 | `test_fraction_exact_rational_not_float` | `proration_fraction` returns a `Fraction`; a `float` anywhere in the chain fails |
 | `test_proration_date_honoured_and_clamped` | An explicit `proration_date` is used verbatim; one outside the period is clamped to the boundary |
 | `test_zero_fraction_returns_no_lines` | `proration_date == period_end` → `[]`, not two zero-amount lines |
-| `test_quantity_change_reprorates_whole_item` | `quantity 2 → 3` credits `2 × old × f` and debits `3 × new × f`, not one unit's worth. **Marked `xfail(strict=False)` against conformance scenario 5** until a recorded trace confirms the numeric case |
-| `test_upgrade_and_downgrade_are_symmetric` | The formula has no upgrade/downgrade branch; only the sign of the sum differs |
-| `test_half_cent_tie_breaks_away_from_zero` | Pins the assumption so a change to it is visible. Carries a comment naming conformance scenario 1 |
-| `test_round_cents_half_up_refuses_negative` | Raises, so the sign-after-magnitude convention cannot be bypassed |
+| `test_quantity_change_reprorates_the_whole_item` | RECORDED (cassette 01): `1 → 3` at `f = 1/400` writes `-3` and `+7`, where the one-unit delta would be `+5` |
+| `test_upgrade_and_downgrade_are_symmetric` | The formula has no upgrade/downgrade branch — the same code path both directions; independent floor rounding is not sign-symmetric, and the totals carry that |
+| `test_the_recorded_half_cent_tie_floors_both_sides` | RECORDED (cassette 01): the engineered `1/400` tie floors both lines (`-3`, `+4`), which no nearest-integer rule reproduces — the closed rule, pinned |
+| `test_floor_cents_on_negative_rationals` | Floor toward negative infinity on signed rationals (`-5/2 → -3`, `-10/3 → -4`) — not truncation, not magnitude-then-sign |
 | `test_apportion_is_floor_then_remainder` | `apportion(500, [1000, 2000]) == [166, 334]` — the documented coupon split, **not** `[167, 333]` |
-| `test_two_rounding_rules_are_not_interchangeable` | Swapping `apportion` and `round_cents_half_up` fails both the proration and the coupon test |
+| `test_two_rounding_rules_are_not_interchangeable` | Swapping `apportion` and `floor_cents` fails both the proration and the coupon computations |
 | `test_cancel_immediate_prorate_credits_only` | `DELETE` with `prorate=true` yields a credit line and no debit |
 | `test_cancel_at_period_end_produces_no_proration` | Zero lines |
 
@@ -1443,7 +1483,8 @@ covers the quantity-reproration inference and the `unpaid` → `active` path. Sc
 pay, partial refund, over-refund) covers the invoice machine and I7. Scenario 7 (a dispute to
 resolution) covers both fee behaviors and the two `adjustment` rows.
 
-**Until scenario 1 is recorded, `round_cents_half_up`'s tie-break and the `flexible`-mode assumption
-are the only two unproven statements in this component.** Everything else above is either taken from
-`spec3.json`, quoted from a directly-read documentation page, or a world constant declared in
-`allowed_differences.py` as a choice rather than a claim.
+**Scenario 1 is recorded (cassette `01_proration_half_cent`, 2026-09-21): the tie-break (floor),
+the quantity reproration shape, and the settlement trails are recording-backed facts, and no
+statement in this component rests on an unproven assumption.** Everything above is either taken
+from `spec3.json`, quoted from a directly-read documentation page, pinned by a recording, or a
+world constant declared in `allowed_differences.py` as a choice rather than a claim.

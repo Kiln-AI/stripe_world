@@ -48,6 +48,7 @@ __all__ = [
     "create",
     "delete",
     "insert_invoice_item",
+    "insert_proration_item",
     "list_",
     "serialize",
     "update",
@@ -345,6 +346,101 @@ def insert_invoice_item(
         quantity,
         str(quantity),
         _json.dumps(list(tax_rate_ids)),
+    )
+    row = _require_item(ctx, item_id)
+    events.emit_event(ctx, type="invoiceitem.created", obj=serialize(ctx, row))
+    return row
+
+
+def insert_proration_item(
+    ctx: seahaven.Ctx,
+    *,
+    customer_id: str,
+    subscription_id: str,
+    subscription_item_id: str | None,
+    amount: int,
+    currency: str,
+    description: str,
+    price_id: str,
+    product_id: str,
+    period_start: str,
+    period_end: str,
+    quantity: int,
+    credited_invoice: str | None = None,
+    credited_line_ids: Sequence[str] = (),
+) -> dict[str, Any]:
+    """Write one PENDING proration invoiceitem (Phase 14) — the recorded
+    wire body verbatim (cassette 01): `parent` names the subscription and
+    item, `pricing.price_details` names the side's real price with
+    `unit_amount_decimal: null` (nothing is minted), `frozen_fields` is
+    `["pricing", "quantity", "discounts"]`, `net_amount` mirrors the
+    amount, and a credit's `proration_details.credited_items` carries the
+    wrapped back-links (`{type: invoice_line_items,
+    invoice_line_item_details: {invoice, invoice_line_items}}` — the LINE
+    spells them flat; the item wraps them). Emits `invoiceitem.created`.
+
+    The CANCEL credit's plainer shape is recorded too (cassette 01, the
+    prorate-only DELETE): `parent: null` and no `proration_details` at all
+    — pass `subscription_item_id=None` and no credited ids to write it."""
+    now = ctx.clock.iso()
+    item_id = _ids.stripe_id(ctx, "ii_")
+    linked = subscription_item_id is not None
+    credited = (
+        {
+            "type": "invoice_line_items",
+            "invoice_line_item_details": {
+                "invoice": credited_invoice,
+                "invoice_line_items": list(credited_line_ids),
+            },
+        }
+        if credited_line_ids
+        else None
+    )
+    ctx.db.execute(
+        "INSERT INTO invoiceitems (id, x_seq, date, amount, currency, customer,"
+        " description, discountable, discounts, frozen_fields, invoice, metadata,"
+        " net_amount, parent, period_end, period_start, pricing, proration,"
+        " proration_details, quantity, quantity_decimal, tax_rates)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, 0, '[]', ?, NULL, '{}', ?, ?, ?, ?, ?, 1,"
+        " ?, ?, ?, '[]')",
+        item_id,
+        _seq.next_seq(ctx, "invoiceitems"),
+        now,
+        amount,
+        currency,
+        customer_id,
+        description,
+        _json.dumps(["pricing", "quantity", "discounts"]),
+        amount,
+        (
+            _json.dumps(
+                {
+                    "subscription_details": {
+                        "subscription": subscription_id,
+                        "subscription_item": subscription_item_id,
+                    },
+                    "type": "subscription_details",
+                }
+            )
+            if linked
+            else None
+        ),
+        period_end,
+        period_start,
+        _json.dumps(
+            {
+                "type": "price_details",
+                "price_details": {"price": price_id, "product": product_id},
+                "unit_amount_decimal": None,
+            }
+        ),
+        (
+            _json.dumps({"credited_items": credited, "discount_amounts": []})
+            if linked or credited is not None
+            else None
+        ),
+        quantity,
+        str(quantity),
     )
     row = _require_item(ctx, item_id)
     events.emit_event(ctx, type="invoiceitem.created", obj=serialize(ctx, row))

@@ -287,7 +287,8 @@ def create(ctx: seahaven.Ctx, req: Request) -> dict[str, Any]:
     """`POST /v1/subscription_items`: the new item spans `[now, the
     subscription's period end)` — the recorded period (probed: a new item's
     `current_period_start` is the creation instant, not the subscription's
-    anchor). Proration is Phase 14's; none is generated."""
+    anchor). The added configuration prorates per `proration_behavior`
+    (Phase 14): a debit-only pair for the remainder of the cycle."""
     now = ctx.clock.iso()
     params = dict(req.params)
     sub = _require_live_subscription(ctx, params["subscription"])
@@ -304,9 +305,12 @@ def create(ctx: seahaven.Ctx, req: Request) -> dict[str, Any]:
     if period_end is None:
         interval, interval_count = subscription_lifecycle._interval_of(price_row)
         period_end = add_interval(now, interval=interval, interval_count=interval_count)
+    old_items = ctx.db.rows(
+        "SELECT * FROM subscription_items WHERE subscription = ? ORDER BY x_seq ASC", sub["id"]
+    )
+    behavior = params.pop("proration_behavior", "create_prorations")
+    proration_date = params.pop("proration_date", None)
     params.pop("payment_behavior", None)
-    params.pop("proration_behavior", None)
-    params.pop("proration_date", None)
     cols: dict[str, Any] = {
         "id": _ids.stripe_id(ctx, "si_"),
         "x_seq": _seq.next_seq(ctx, "subscription_items"),
@@ -326,6 +330,17 @@ def create(ctx: seahaven.Ctx, req: Request) -> dict[str, Any]:
     ctx.db.execute(
         f"INSERT INTO subscription_items ({columns}) VALUES ({placeholders})", *cols.values()
     )
+    subscription_lifecycle.emit_proration_side_effects(
+        ctx,
+        sub["id"],
+        old_items,
+        ctx.db.rows(
+            "SELECT * FROM subscription_items WHERE subscription = ? ORDER BY x_seq ASC",
+            sub["id"],
+        ),
+        proration_behavior=behavior,
+        proration_date=proration_date,
+    )
     row = _require_item(ctx, cols["id"])
     _emit_sub_updated(ctx, sub["id"], old_body)
     return serialize(ctx, row)
@@ -342,16 +357,21 @@ def _store(value: Any) -> Any:
 def update(ctx: seahaven.Ctx, req: Request) -> dict[str, Any]:
     """`POST /v1/subscription_items/{item}`: price/quantity/tax changes; the
     item's periods never move on an update (recorded periods stay anchored
-    to the cycle)."""
+    to the cycle). The configuration diff prorates per `proration_behavior`
+    (Phase 14)."""
     row = _require_item(ctx, req.path_params["item"])
     sub = _require_live_subscription(ctx, row["subscription"])
     old_body = serialize_subscription(ctx, sub)
     params = dict(req.params)
     if "price" in params:
         _lookup.require_live_row(ctx, "prices", "price", params["price"], param="price")
+    behavior = params.pop("proration_behavior", "create_prorations")
+    proration_date = params.pop("proration_date", None)
     params.pop("payment_behavior", None)
-    params.pop("proration_behavior", None)
-    params.pop("proration_date", None)
+    old_items = ctx.db.rows(
+        "SELECT * FROM subscription_items WHERE subscription = ? ORDER BY x_seq ASC",
+        row["subscription"],
+    )
     sets = {key: _store(value) for key, value in params.items()}
     if req.metadata is not None:
         current = _json.loads(row.get("metadata"))
@@ -363,6 +383,17 @@ def update(ctx: seahaven.Ctx, req: Request) -> dict[str, Any]:
             *sets.values(),
             row["id"],
         )
+    subscription_lifecycle.emit_proration_side_effects(
+        ctx,
+        row["subscription"],
+        old_items,
+        ctx.db.rows(
+            "SELECT * FROM subscription_items WHERE subscription = ? ORDER BY x_seq ASC",
+            row["subscription"],
+        ),
+        proration_behavior=behavior,
+        proration_date=proration_date,
+    )
     fresh = _require_item(ctx, row["id"])
     _emit_sub_updated(ctx, row["subscription"], old_body)
     return serialize(ctx, fresh)
@@ -370,12 +401,29 @@ def update(ctx: seahaven.Ctx, req: Request) -> dict[str, Any]:
 
 def delete(ctx: seahaven.Ctx, req: Request) -> dict[str, Any]:
     """`DELETE /v1/subscription_items/{item}`: the row is removed (the
-    recorded three-key stub answer); the proration credit the real API can
-    emit here is Phase 14's span (declared)."""
+    recorded three-key stub answer) and the removed configuration's
+    credit-only proration lands per `proration_behavior` (Phase 14)."""
     row = _require_item(ctx, req.path_params["item"])
     sub = _require_live_subscription(ctx, row["subscription"])
     old_body = serialize_subscription(ctx, sub)
+    old_items = ctx.db.rows(
+        "SELECT * FROM subscription_items WHERE subscription = ? ORDER BY x_seq ASC",
+        row["subscription"],
+    )
+    behavior = req.params.get("proration_behavior", "create_prorations")
+    proration_date = req.params.get("proration_date")
     ctx.db.execute("DELETE FROM subscription_items WHERE id = ?", row["id"])
+    subscription_lifecycle.emit_proration_side_effects(
+        ctx,
+        row["subscription"],
+        old_items,
+        ctx.db.rows(
+            "SELECT * FROM subscription_items WHERE subscription = ? ORDER BY x_seq ASC",
+            row["subscription"],
+        ),
+        proration_behavior=behavior,
+        proration_date=proration_date,
+    )
     _emit_sub_updated(ctx, row["subscription"], old_body)
     return {"id": row["id"], "object": "subscription_item", "deleted": True}
 

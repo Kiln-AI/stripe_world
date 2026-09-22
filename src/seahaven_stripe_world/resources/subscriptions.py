@@ -252,6 +252,13 @@ SUB_UPDATE = ParamSpec(
         ),
         Param(name="payment_behavior", kind="literal", choices=PAYMENT_BEHAVIORS),
         _PAYMENT_SETTINGS,
+        Param(
+            name="billing_cycle_anchor",
+            kind="literal",
+            # Update accepts only the literals (spec3.json); the free
+            # timestamp form is create-only and stays cut (declared).
+            choices=("now", "unchanged"),
+        ),
         _PRORATION_BEHAVIOR,
         Param(name="proration_date", kind="timestamp"),
         Param(
@@ -486,12 +493,10 @@ def create(ctx: seahaven.Ctx, req: Request) -> dict[str, Any]:
 
 def update(ctx: seahaven.Ctx, req: Request) -> dict[str, Any]:
     """`POST /v1/subscriptions/{id}`: the lifecycle's update flow. The
-    proration family is accepted and consumed here (Phase 14's span);
-    `payment_behavior` is update-legal including `pending_if_incomplete`
-    and likewise consumed."""
+    proration family and `billing_cycle_anchor` drive the Phase 14 side
+    effects inside the lifecycle; `payment_behavior` is update-legal
+    including `pending_if_incomplete` and consumed here."""
     params = dict(req.params)
-    params.pop("proration_behavior", None)
-    params.pop("proration_date", None)
     params.pop("payment_behavior", None)
     if req.metadata is not None:
         row = _lookup.require_row(

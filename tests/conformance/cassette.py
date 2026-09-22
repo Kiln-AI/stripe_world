@@ -42,10 +42,18 @@ _DIGITS = re.compile(r"\[(\d+)\]")
 class Ref:
     """A placeholder: "use the value this replay run actually produced," not
     the literal recorded value. Only meaningful inside a `Step`'s `path`
-    placeholders (`path_refs`) or `params` values."""
+    placeholders (`path_refs`) or `params` values.
+
+    `offset` adds a constant to the referenced value — the proration
+    scenarios' tie engineering (`period_end - span//400`) needs arithmetic
+    a bare field read cannot express, and a computed LITERAL would fail the
+    script-vs-cassette drift check by design: the offset rides INSIDE the
+    ref, so record time and replay time each resolve it against their own
+    bodies and the cassette never stores an absolute."""
 
     step: str  # the `binds_as` name of an earlier step in the same scenario
     field: str = "id"  # dotted path into that step's response body
+    offset: int = 0  # added to the resolved value (int fields only)
 
     def resolve(self, bindings: dict[str, Any]) -> Any:
         """Walk `field` (`id`, `data[3].id`, …) through a bound response body."""
@@ -64,6 +72,13 @@ class Ref:
                 if not isinstance(value, list) or int(index) >= len(value):
                     raise KeyError(f"Ref field {self.field!r}: index {index} is out of range")
                 value = value[int(index)]
+        if self.offset:
+            if not isinstance(value, int) or isinstance(value, bool):
+                raise KeyError(
+                    f"Ref {self.step}.{self.field} carries offset {self.offset} "
+                    "but resolves to a non-integer"
+                )
+            value += self.offset
         return value
 
 
@@ -99,7 +114,10 @@ class Cassette:
 
 
 def _dump_ref(ref: Ref) -> dict[str, Any]:
-    return {_REF_KEY: {"step": ref.step, "field": ref.field}}
+    body: dict[str, Any] = {"step": ref.step, "field": ref.field}
+    if ref.offset:
+        body["offset"] = ref.offset
+    return {_REF_KEY: body}
 
 
 def _dump_value(value: Any) -> Any:
@@ -145,11 +163,18 @@ def dump(cassette: Cassette, path: Path) -> None:
 
 
 def _load_ref(value: Any, where: str) -> Ref:
-    if not isinstance(value, dict) or set(value) != {"step", "field"}:
-        raise ValueError(f"{where}: expected a {{step, field}} object, got {value!r}")
+    if not isinstance(value, dict) or not {"step", "field"} <= set(value) <= {
+        "step",
+        "field",
+        "offset",
+    }:
+        raise ValueError(f"{where}: expected a {{step, field[, offset]}} object, got {value!r}")
     if not isinstance(value["step"], str) or not isinstance(value["field"], str):
         raise ValueError(f"{where}: a ref's step and field must be strings")
-    return Ref(step=value["step"], field=value["field"])
+    offset = value.get("offset", 0)
+    if not isinstance(offset, int) or isinstance(offset, bool):
+        raise ValueError(f"{where}: a ref's offset must be an integer")
+    return Ref(step=value["step"], field=value["field"], offset=offset)
 
 
 def _load_value(value: Any, where: str) -> Any:

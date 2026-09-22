@@ -62,6 +62,45 @@ def test_ref_round_trips_through_the_file(tmp_path: Path) -> None:
     assert loaded.steps[0] == step
 
 
+def test_offset_ref_round_trips(tmp_path: Path) -> None:
+    """The proration scenarios' tie engineering: `period_end - span//400`
+    rides INSIDE the ref, so record time and replay time each resolve
+    their own instant and the cassette never stores an absolute."""
+    step = Step(
+        seq=0,
+        method="POST",
+        path="/v1/subscriptions/{subscription_exposed_id}",
+        path_refs={"subscription_exposed_id": Ref("sub", "id")},
+        params={"proration_date": Ref("sub", "items.data[0].current_period_end", offset=-6480)},
+        idempotency_key=None,
+        binds_as=None,
+        recorded_status=200,
+        recorded_body={"id": "sub_1", "object": "subscription"},
+        recorded_stripe_version="2026-08-26.dahlia",
+    )
+    path = tmp_path / "c.json"
+    dump(Cassette("x", "d", "2026-09-21T00:00:00+00:00", "2026-08-26.dahlia", (step,)), path)
+    raw = json.loads(path.read_text())
+    assert raw["steps"][0]["params"]["proration_date"] == {
+        "$ref": {"step": "sub", "field": "items.data[0].current_period_end", "offset": -6480}
+    }
+    loaded = load(path)
+    assert loaded.steps[0] == step
+    end = 1_793_318_400
+    resolved = (
+        loaded.steps[0]
+        .params["proration_date"]
+        .resolve({"sub": {"items": {"data": [{"current_period_end": end}]}}})
+    )
+    assert resolved == end - 6480
+
+
+def test_offset_ref_refuses_a_non_integer_field() -> None:
+    ref = Ref("sub", "id", offset=-1)
+    with pytest.raises(KeyError, match="non-integer"):
+        ref.resolve({"sub": {"id": "sub_1"}})
+
+
 def test_load_rejects_a_step_whose_seq_is_not_its_position(tmp_path: Path) -> None:
     document = {
         "scenario": "x",

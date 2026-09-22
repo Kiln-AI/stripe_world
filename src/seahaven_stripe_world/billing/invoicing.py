@@ -186,11 +186,15 @@ class ItemLine:
     `price_id`/`product_id` pointing at the one-off price the item's
     `pricing` block names (recorded, cassette 13).
 
-    `proration` marks a proration-shaped line (a conversion credit, later
-    the Phase 14 proration lines): never discountable, `proration: true`
-    under the line's `parent.subscription_item_details`, and no
-    `unit_amount_decimal` (`spec3.json`'s own rule; probed on the
-    conversion credit, round 4's trail)."""
+    `proration` marks a proration-shaped line (a conversion credit, and the
+    Phase 14 proration items): never discountable, `proration: true` under
+    the line's parent, and no `unit_amount_decimal` (`spec3.json`'s own
+    rule; probed on the conversion credit). A proration INVOICE ITEM
+    (recorded, cassette 01) takes it further: the row's `amount` is already
+    the whole line amount (never unit x quantity), the line's parent is the
+    `subscription_item_details` variant with the `ii_` inside it, and the
+    credit's `proration_details.credited_items` points at the invoice lines
+    it reverses."""
 
     subscription_item_id: str | None
     subscription_id: str | None
@@ -204,6 +208,8 @@ class ItemLine:
     proration: bool = False
     invoice_item_id: str | None = None
     discountable: bool = True
+    credited_invoice: str | None = None
+    credited_line_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -298,7 +304,15 @@ def compute_totals(
     `invoice_id` is threaded only so draft lines can name their invoice;
     pass "" while the invoice's id is still unminted.
     """
-    amounts = [line.unit_amount * line.quantity for line in line_inputs]
+    # A proration invoiceitem's row amount IS the line amount (recorded,
+    # cassette 01: the quantity-3 debit carries amount 7 and quantity 3 —
+    # floor of the whole gross, never unit x quantity).
+    amounts = [
+        line.unit_amount
+        if line.proration and line.invoice_item_id is not None
+        else line.unit_amount * line.quantity
+        for line in line_inputs
+    ]
     subtotal = sum(amounts)
 
     # Invoice-scope discounts, sequential, apportioned back per line. A
@@ -390,7 +404,7 @@ def compute_totals(
             {"amount": amount, "discount": discount_id, "type": "discount"}
             for discount_id, amount in per_line_discounts[index].items()
         ]
-        if line.invoice_item_id is not None:
+        if line.invoice_item_id is not None and not line.proration:
             parent = {
                 "invoice_item_details": {
                     "invoice_item": line.invoice_item_id,
@@ -400,6 +414,34 @@ def compute_totals(
                 },
                 "subscription_item_details": None,
                 "type": "invoice_item_details",
+            }
+        elif line.invoice_item_id is not None and (
+            line.subscription_id is not None or line.subscription_item_id is not None
+        ):
+            # A proration invoice item (recorded, cassette 01): the
+            # `subscription_item_details` variant carrying the `ii_` inside,
+            # with the credit's back-links in the FLAT line shape — the
+            # invoiceitem's own `proration_details` wraps them differently
+            # ({type, invoice_line_item_details}), and each object keeps its
+            # own recorded spelling.
+            credited = (
+                {
+                    "invoice": line.credited_invoice,
+                    "invoice_line_items": list(line.credited_line_ids),
+                }
+                if line.credited_line_ids
+                else None
+            )
+            parent = {
+                "invoice_item_details": None,
+                "subscription_item_details": {
+                    "invoice_item": line.invoice_item_id,
+                    "proration": True,
+                    "proration_details": {"credited_items": credited},
+                    "subscription": line.subscription_id,
+                    "subscription_item": line.subscription_item_id,
+                },
+                "type": "subscription_item_details",
             }
         else:
             parent = {
@@ -636,17 +678,87 @@ def create_invoice(
 # --- the pending-item path (Phase 13) -------------------------------------------------
 
 
+def _billed_line_for_credit(
+    ctx: seahaven.Ctx, item: Mapping[str, Any]
+) -> tuple[str | None, str | None, str | None, tuple[str, ...]] | None:
+    """The identity a plain cancel credit's line carries (recorded, cassette
+    01): the subscription, the item and the credited back-links of the
+    non-proration line whose period the credit reverses — matched on the
+    period end, newest invoice first. None when nothing billed that period."""
+    invoices = ctx.db.rows(
+        "SELECT id, lines FROM invoices WHERE customer = ? ORDER BY x_seq DESC",
+        item["customer"],
+    )
+    want_end = _time.to_unix(item["period_end"])
+    for invoice in invoices:
+        for line in _load_list(invoice["lines"]):
+            if not isinstance(line, dict):
+                continue
+            parent = line.get("parent") or {}
+            details = parent.get("subscription_item_details")
+            period = line.get("period") or {}
+            if (
+                isinstance(details, dict)
+                and details.get("proration") in (None, False, 0)
+                and period.get("end") == want_end
+                and details.get("subscription") is not None
+            ):
+                return (
+                    str(details.get("subscription")),
+                    details.get("subscription_item"),
+                    invoice["id"],
+                    (str(line["id"]),),
+                )
+    return None
+
+
 def invoice_item_line(ctx: seahaven.Ctx, item: Mapping[str, Any]) -> ItemLine:
     """One attached invoiceitem row as a line input: `pricing` names the
     one-off price behind the item (the recorded shape — an `amount+currency`
-    create mints a price and product live, and so does this world)."""
+    create mints a price and product live, and so does this world). A
+    proration row (recorded, cassette 01) additionally carries its
+    subscription parent, its side's quantity and its credited back-links,
+    and the row amount IS the line amount (see `compute_totals`)."""
     pricing = _load_dict(item["pricing"])
     price_details = pricing.get("price_details")
     if not isinstance(price_details, dict):
         raise seahaven.WorldBug(f"invoiceitem {item['id']} carries no price_details")
+    subscription_id: str | None = None
+    subscription_item_id: str | None = None
+    credited_invoice: str | None = None
+    credited_line_ids: tuple[str, ...] = ()
+    if item["proration"]:
+        parent = _load_dict(item["parent"])
+        details = parent.get("subscription_details")
+        if isinstance(details, dict):
+            subscription_id = details.get("subscription")
+            subscription_item_id = details.get("subscription_item")
+        loaded_details: object = _json.loads(item["proration_details"])
+        details_obj = loaded_details if isinstance(loaded_details, dict) else {}
+        credited = details_obj.get("credited_items")
+        if isinstance(credited, dict):
+            flat = credited.get("invoice_line_item_details")
+            if isinstance(flat, dict):
+                credited_invoice = flat.get("invoice")
+                ids = flat.get("invoice_line_items")
+                credited_line_ids = tuple(str(id_) for id_ in ids) if isinstance(ids, list) else ()
+        if subscription_id is None:
+            # The cancel credit's plain row (recorded: no parent, no
+            # proration_details) still sweeps onto a line that names the
+            # subscription, the item and the credited lines (recorded,
+            # cassette 01) — reconstruct them from the period the credit
+            # reverses: the non-proration line whose period ends with it.
+            enriched = _billed_line_for_credit(ctx, item)
+            if enriched is not None:
+                (
+                    subscription_id,
+                    subscription_item_id,
+                    credited_invoice,
+                    credited_line_ids,
+                ) = enriched
     return ItemLine(
-        subscription_item_id=None,
-        subscription_id=None,
+        subscription_item_id=subscription_item_id,
+        subscription_id=subscription_id,
         price_id=price_details.get("price"),
         product_id=price_details.get("product"),
         unit_amount=item["amount"],
@@ -655,7 +767,10 @@ def invoice_item_line(ctx: seahaven.Ctx, item: Mapping[str, Any]) -> ItemLine:
         period_end=item["period_end"],
         description=item["description"] or "",
         invoice_item_id=item["id"],
-        discountable=bool(item["discountable"]),
+        discountable=bool(item["discountable"]) and not bool(item["proration"]),
+        proration=bool(item["proration"]),
+        credited_invoice=credited_invoice,
+        credited_line_ids=credited_line_ids,
     )
 
 
@@ -690,19 +805,31 @@ def _line_inputs_for(ctx: seahaven.Ctx, row: Mapping[str, Any]) -> list[ItemLine
     """A draft's line inputs: its attached invoice items newest-first, then
     the subscription's items newest-first (the recorded collapse of the
     spec's three buckets into two — a later-added item is simply the newest
-    pending item, cassette 13 step 32)."""
+    pending item, cassette 13 step 32).
+
+    Two recorded exceptions (cassette 01): the `subscription_update`
+    proration invoice bills ONLY the swept items — the subscription's own
+    next-period line belongs to the cycle invoice at the boundary — and a
+    TERMINAL subscription's invoice bills no future period at all (the
+    invoice_now cancel credit is the final invoice's only line)."""
     inputs = [
         invoice_item_line(ctx, item)
         for item in ctx.db.rows(
             "SELECT * FROM invoiceitems WHERE invoice = ? ORDER BY x_seq DESC", row["id"]
         )
     ]
-    if row["parent_subscription"] is not None:
-        items = ctx.db.rows(
-            "SELECT * FROM subscription_items WHERE subscription = ? ORDER BY x_seq DESC",
-            row["parent_subscription"],
-        )
-        inputs.extend(build_item_lines(ctx, items, currency=row["currency"]))
+    if row["parent_subscription"] is None or row["billing_reason"] == "subscription_update":
+        return inputs
+    parent = ctx.db.one("SELECT status FROM subscriptions WHERE id = ?", row["parent_subscription"])
+    from seahaven_stripe_world.billing import subscription_lifecycle
+
+    if parent is not None and parent["status"] in subscription_lifecycle.TERMINAL_STATUSES:
+        return inputs
+    items = ctx.db.rows(
+        "SELECT * FROM subscription_items WHERE subscription = ? ORDER BY x_seq DESC",
+        row["parent_subscription"],
+    )
+    inputs.extend(build_item_lines(ctx, items, currency=row["currency"]))
     return inputs
 
 
@@ -856,27 +983,26 @@ def finalize_invoice(ctx: seahaven.Ctx, invoice_id: str) -> dict[str, Any]:
     starting_balance = customer["balance"]
     amount_due, ending_balance, delta = settle_customer_balance(row["total"], starting_balance)
     if delta:
+        # A balance-moving settlement also stamps the customer's `currency`
+        # when it is still null (recorded, cassette 01: the balance-carrying
+        # customer answers `currency: "usd"` — the balance rows' currency).
         ctx.db.execute(
-            "UPDATE customers SET balance = ? WHERE id = ?", ending_balance, customer["id"]
-        )
-        cbt_id = _ids.stripe_id(ctx, "cbtxn_")
-        ctx.db.execute(
-            "INSERT INTO customer_balance_transactions"
-            " (id, x_seq, created, amount, currency, customer, ending_balance,"
-            " invoice, type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            cbt_id,
-            _seq.next_seq(ctx, "customer_balance_transactions"),
-            now,
-            delta,
+            "UPDATE customers SET balance = ?, currency = COALESCE(currency, ?) WHERE id = ?",
+            ending_balance,
             row["currency"],
             customer["id"],
-            ending_balance,
-            invoice_id,
-            # Credit consumed at finalization (a positive delta: the balance
-            # grows toward zero); `adjustment` covers the debit-drawn and
-            # negative-total directions (§3.5's table; Phase 15 records the
-            # wire).
-            "applied_to_invoice" if delta > 0 else "adjustment",
+        )
+        # `applied_to_invoice` for every settlement direction — RECORDED
+        # (cassette 01's probe trail): the net-negative proration invoice
+        # writes an `applied_to_invoice` row of amount -334, correcting the
+        # earlier `adjustment` guess for the negative-total row
+        # (billing_engine §3.5's open mapping, closed).
+        _write_settlement_cbt(
+            ctx,
+            invoice=row,
+            customer_id=customer["id"],
+            amount=delta,
+            ending_balance=ending_balance,
         )
     transitions = _load_dict(row["status_transitions"])
     transitions["finalized_at"] = _time.to_unix(now)
@@ -945,6 +1071,50 @@ def _resolve_pm(
     )
 
 
+#: The smallest amount a charge can carry, minor units — a declared world
+#: constant for the two-decimal currencies this world bills (the real
+#: API's by-currency minimum table is out of scope). RECORDED effect
+#: (cassette 01's probe trail): an invoice whose `amount_due` is positive
+#: but under the minimum is never charged — it settles `paid` with
+#: `attempted: true, attempt_count: 0` and the amount rolls onto
+#: `customer.balance` as owed.
+MINIMUM_CHARGEABLE = 50
+
+
+def _write_settlement_cbt(
+    ctx: seahaven.Ctx,
+    *,
+    invoice: Mapping[str, Any],
+    customer_id: str,
+    amount: int,
+    ending_balance: int,
+    type_: str = "applied_to_invoice",
+) -> None:
+    """One `customer_balance_transactions` row. `applied_to_invoice` for
+    every at-finalization direction — RECORDED (cassette 01, via
+    /v1/customers/{id}/balance_transactions): a net-negative proration
+    invoice credits with an `applied_to_invoice` row of -334, and a pending
+    owed balance drawn onto the next invoice is an `applied_to_invoice` row
+    of -1 — correcting §3.5's `adjustment` guess for both. A sub-minimum
+    roll is `invoice_too_small` (the enum's own name for it, recorded on
+    the +1 and +4 rolls)."""
+    cbt_id = _ids.stripe_id(ctx, "cbtxn_")
+    ctx.db.execute(
+        "INSERT INTO customer_balance_transactions"
+        " (id, x_seq, created, amount, currency, customer, ending_balance,"
+        " invoice, type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        cbt_id,
+        _seq.next_seq(ctx, "customer_balance_transactions"),
+        ctx.clock.iso(),
+        amount,
+        invoice["currency"],
+        customer_id,
+        ending_balance,
+        invoice["id"],
+        type_,
+    )
+
+
 def pay_invoice(
     ctx: seahaven.Ctx,
     invoice_id: str,
@@ -958,6 +1128,7 @@ def pay_invoice(
 
     A decline is an outcome, not an exception — the invoice's rows survive
     with `attempt_count` advanced (the raise-loses rule)."""
+
     row = _lookup.require_row(ctx, "invoices", "invoice", invoice_id, param="invoice")
     if row["status"] != "open":
         # Phase 13's /pay route owns the recorded isn't-open 400; this
@@ -965,6 +1136,13 @@ def pay_invoice(
         raise seahaven.WorldBug(f"pay_invoice on a {row['status']!r} invoice")
     if row["amount_due"] == 0:
         return _mark_paid(ctx, row, charge_free=True)
+    if 0 < row["amount_due"] < MINIMUM_CHARGEABLE:
+        # RECORDED (cassette 01's probe trail): an invoice whose due is
+        # positive but under the minimum chargeable is never charged — it
+        # settles `paid` with `attempted: true, attempt_count: 0`,
+        # `amount_due` zeroed, and the amount rolls onto the customer
+        # balance as owed (the next invoice's `starting_balance`).
+        return _roll_below_minimum(ctx, row)
     if pm_row is None:
         pm_row = _resolve_pm(ctx, row, sub_row)
     if pm_row is None:
@@ -1004,7 +1182,8 @@ def pay_invoice(
             failure_message=message,
             outcome=charges.outcome_declined(decline_code or "generic_decline"),
         )
-        _count_attempt(ctx, invoice_id)
+        _count_attempt(ctx, invoice_id, automatic=False)
+        _schedule_next_attempt(ctx, invoice_id)
         events.emit_event(ctx, type="charge.failed", obj=charges.serialize(ctx, charge))
         emit_invoice_event(ctx, "invoice.payment_failed", _re_read(ctx, invoice_id))
         error = declined_body(
@@ -1038,11 +1217,73 @@ def _re_read(ctx: seahaven.Ctx, invoice_id: str) -> dict[str, Any]:
     return _lookup.require_row(ctx, "invoices", "invoice", invoice_id, param="invoice")
 
 
-def _count_attempt(ctx: seahaven.Ctx, invoice_id: str) -> None:
+def _count_attempt(ctx: seahaven.Ctx, invoice_id: str, *, automatic: bool) -> None:
+    """`spec3.json`'s counter rules via `dunning.next_attempt_number`: any
+    first attempt sets 1; after that, only an automatic retry moves the
+    counter — the manual `/pay` this module serves never does."""
+    from seahaven_stripe_world.billing import dunning
+
+    row = _re_read(ctx, invoice_id)
+    count = dunning.next_attempt_number(row["attempt_count"], automatic=automatic)
     ctx.db.execute(
-        "UPDATE invoices SET attempted = 1, attempt_count = attempt_count + 1 WHERE id = ?",
+        "UPDATE invoices SET attempted = 1, attempt_count = ? WHERE id = ?",
+        count,
         invoice_id,
     )
+
+
+def _schedule_next_attempt(ctx: seahaven.Ctx, invoice_id: str) -> None:
+    """After a failed attempt, the honest scheduled retry (populated, never
+    self-firing — the frozen-clock contract) or its clearing at schedule
+    exhaustion, per `dunning`'s declared even-spacing stand-in."""
+    from seahaven_stripe_world.billing import dunning
+
+    row = _re_read(ctx, invoice_id)
+    ctx.db.execute(
+        "UPDATE invoices SET next_payment_attempt = ? WHERE id = ?",
+        dunning.next_attempt_at(ctx.clock.iso(), row["attempt_count"], dunning.policy(ctx)),
+        invoice_id,
+    )
+
+
+def _roll_below_minimum(ctx: seahaven.Ctx, row: Mapping[str, Any]) -> dict[str, Any]:
+    """The recorded sub-minimum settlement (cassette 01): the due amount
+    moves onto `customer.balance` as owed through an `invoice_too_small`
+    row (the enum's own name, recorded on the +1 and +4 rolls), the invoice
+    settles `paid` with no charge, `attempted: true, attempt_count: 0`."""
+    now = ctx.clock.iso()
+    customer = _lookup.require_row(ctx, "customers", "customer", row["customer"], param="customer")
+    ending = customer["balance"] + row["amount_due"]
+    ctx.db.execute(
+        "UPDATE customers SET balance = ?, currency = COALESCE(currency, ?) WHERE id = ?",
+        ending,
+        row["currency"],
+        customer["id"],
+    )
+    _write_settlement_cbt(
+        ctx,
+        invoice=row,
+        customer_id=customer["id"],
+        amount=row["amount_due"],
+        ending_balance=ending,
+        type_="invoice_too_small",
+    )
+    transitions = _load_dict(row["status_transitions"])
+    transitions["paid_at"] = _time.to_unix(now)
+    ctx.db.execute(
+        "UPDATE invoices SET status = 'paid', attempted = 1, auto_advance = 0,"
+        " amount_due = 0, amount_remaining = 0, ending_balance = ?,"
+        " status_transitions = ? WHERE id = ?",
+        ending,
+        _json.dumps(transitions),
+        row["id"],
+    )
+    fresh = _re_read(ctx, row["id"])
+    emit_invoice_event(ctx, "invoice.paid", fresh)
+    from seahaven_stripe_world.billing import subscription_lifecycle
+
+    subscription_lifecycle.on_invoice_paid(ctx, row["id"])
+    return {"outcome": "paid", "charge": None}
 
 
 def _attempted_without_count(ctx: seahaven.Ctx, invoice_id: str) -> None:
@@ -1105,17 +1346,34 @@ def mark_uncollectible_invoice(ctx: seahaven.Ctx, invoice_id: str) -> dict[str, 
     row = _lookup.require_row(ctx, "invoices", "invoice", invoice_id, param="invoice")
     if row["status"] != "open":
         raise seahaven.WorldBug(f"mark_uncollectible_invoice on a {row['status']!r} invoice")
+    return _mark_uncollectible_row(ctx, row)
+
+
+def _mark_uncollectible_row(ctx: seahaven.Ctx, row: Mapping[str, Any]) -> dict[str, Any]:
     now = ctx.clock.iso()
     transitions = _load_dict(row["status_transitions"])
     transitions["marked_uncollectible_at"] = _time.to_unix(now)
     ctx.db.execute(
         "UPDATE invoices SET status = 'uncollectible', status_transitions = ? WHERE id = ?",
         _json.dumps(transitions),
-        invoice_id,
+        row["id"],
     )
-    fresh = _re_read(ctx, invoice_id)
+    fresh = _re_read(ctx, row["id"])
     emit_invoice_event(ctx, "invoice.marked_uncollectible", fresh)
     return fresh
+
+
+def mark_uncollectible_invoice_draft(ctx: seahaven.Ctx, invoice_id: str) -> dict[str, Any]:
+    """The cancel-flow collapse (Phase 14, RECORDED in both probe rounds):
+    the `invoice_now` final invoice with a credit-only total is created
+    un-numbered and never finalized — live marks it uncollectible seconds
+    later (async), which a frozen clock cannot wait out, so the mark lands
+    inside the call. Internal: the routed /mark_uncollectible keeps its
+    recorded open-only refusal."""
+    row = _lookup.require_row(ctx, "invoices", "invoice", invoice_id, param="invoice")
+    if row["status"] != "draft":
+        raise seahaven.WorldBug(f"mark_uncollectible_invoice_draft on a {row['status']!r} invoice")
+    return _mark_uncollectible_row(ctx, row)
 
 
 def void_invoice(ctx: seahaven.Ctx, invoice_id: str) -> dict[str, Any]:

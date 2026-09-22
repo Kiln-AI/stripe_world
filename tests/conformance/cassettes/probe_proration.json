@@ -1,0 +1,3447 @@
+{
+  "scenario": "probe_proration",
+  "description": "Proration probes: the half-cent tie on both lines, quantity-only reproration, pending proration items, cancel credits, and the anchor reset.",
+  "recorded_at": "2026-09-21T19:39:02+00:00",
+  "stripe_version_pin": "2026-08-26.dahlia",
+  "steps": [
+    {
+      "seq": 0,
+      "method": "POST",
+      "path": "/v1/customers",
+      "path_refs": {},
+      "params": {
+        "email": "probe-proration@conformance.stripeapi.invalid",
+        "description": "proration probe"
+      },
+      "idempotency_key": null,
+      "binds_as": "customer",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "cus_VIogy4r4tz3DQ9",
+        "object": "customer",
+        "address": null,
+        "balance": 0,
+        "created": 1790019517,
+        "currency": null,
+        "customer_account": null,
+        "default_source": null,
+        "delinquent": false,
+        "description": "proration probe",
+        "discount": null,
+        "email": "probe-proration@conformance.stripeapi.invalid",
+        "invoice_prefix": "4GJURCKN",
+        "invoice_settings": {
+          "custom_fields": null,
+          "default_payment_method": null,
+          "footer": null,
+          "rendering_options": null
+        },
+        "livemode": false,
+        "metadata": {},
+        "name": null,
+        "next_invoice_sequence": 1,
+        "phone": null,
+        "preferred_locales": [],
+        "shipping": null,
+        "tax_exempt": "none",
+        "test_clock": null
+      }
+    },
+    {
+      "seq": 1,
+      "method": "POST",
+      "path": "/v1/payment_methods",
+      "path_refs": {},
+      "params": {
+        "type": "card",
+        "card": {
+          "token": "tok_visa"
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": "visa",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "pm_1UID2vHIBYZYyePrSIlyvy2p",
+        "object": "payment_method",
+        "allow_redisplay": "unspecified",
+        "billing_details": {
+          "address": {
+            "city": null,
+            "country": null,
+            "line1": null,
+            "line2": null,
+            "postal_code": null,
+            "state": null
+          },
+          "email": null,
+          "name": null,
+          "phone": null,
+          "tax_id": null
+        },
+        "card": {
+          "brand": "visa",
+          "checks": {
+            "address_line1_check": null,
+            "address_postal_code_check": null,
+            "cvc_check": "unchecked"
+          },
+          "country": "US",
+          "display_brand": "visa",
+          "exp_month": 9,
+          "exp_year": 2027,
+          "fingerprint": "OiMHMa3aYsyDbc1P",
+          "funding": "credit",
+          "generated_from": null,
+          "last4": "4242",
+          "networks": {
+            "available": [
+              "visa"
+            ],
+            "preferred": null
+          },
+          "regulated_status": "unregulated",
+          "three_d_secure_usage": {
+            "supported": true
+          },
+          "wallet": null
+        },
+        "created": 1790019517,
+        "customer": null,
+        "customer_account": null,
+        "livemode": false,
+        "metadata": {},
+        "shared_payment_granted_token": null,
+        "type": "card"
+      }
+    },
+    {
+      "seq": 2,
+      "method": "POST",
+      "path": "/v1/payment_methods/{payment_method}/attach",
+      "path_refs": {
+        "payment_method": {
+          "step": "visa",
+          "field": "id"
+        }
+      },
+      "params": {
+        "customer": {
+          "$ref": {
+            "step": "customer",
+            "field": "id"
+          }
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "pm_1UID2vHIBYZYyePrSIlyvy2p",
+        "object": "payment_method",
+        "allow_redisplay": "unspecified",
+        "billing_details": {
+          "address": {
+            "city": null,
+            "country": null,
+            "line1": null,
+            "line2": null,
+            "postal_code": null,
+            "state": null
+          },
+          "email": null,
+          "name": null,
+          "phone": null,
+          "tax_id": null
+        },
+        "card": {
+          "brand": "visa",
+          "checks": {
+            "address_line1_check": null,
+            "address_postal_code_check": null,
+            "cvc_check": "pass"
+          },
+          "country": "US",
+          "display_brand": "visa",
+          "exp_month": 9,
+          "exp_year": 2027,
+          "fingerprint": "OiMHMa3aYsyDbc1P",
+          "funding": "credit",
+          "generated_from": null,
+          "last4": "4242",
+          "networks": {
+            "available": [
+              "visa"
+            ],
+            "preferred": null
+          },
+          "regulated_status": "unregulated",
+          "three_d_secure_usage": {
+            "supported": true
+          },
+          "wallet": null
+        },
+        "created": 1790019517,
+        "customer": "cus_VIogy4r4tz3DQ9",
+        "customer_account": null,
+        "livemode": false,
+        "metadata": {},
+        "shared_payment_granted_token": null,
+        "type": "card"
+      }
+    },
+    {
+      "seq": 3,
+      "method": "POST",
+      "path": "/v1/customers/{customer}",
+      "path_refs": {
+        "customer": {
+          "step": "customer",
+          "field": "id"
+        }
+      },
+      "params": {
+        "invoice_settings": {
+          "default_payment_method": {
+            "$ref": {
+              "step": "visa",
+              "field": "id"
+            }
+          }
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "cus_VIogy4r4tz3DQ9",
+        "object": "customer",
+        "address": null,
+        "balance": 0,
+        "created": 1790019517,
+        "currency": null,
+        "customer_account": null,
+        "default_source": null,
+        "delinquent": false,
+        "description": "proration probe",
+        "discount": null,
+        "email": "probe-proration@conformance.stripeapi.invalid",
+        "invoice_prefix": "4GJURCKN",
+        "invoice_settings": {
+          "custom_fields": null,
+          "default_payment_method": "pm_1UID2vHIBYZYyePrSIlyvy2p",
+          "footer": null,
+          "rendering_options": null
+        },
+        "livemode": false,
+        "metadata": {},
+        "name": null,
+        "next_invoice_sequence": 1,
+        "phone": null,
+        "preferred_locales": [],
+        "shipping": null,
+        "tax_exempt": "none",
+        "test_clock": null
+      }
+    },
+    {
+      "seq": 4,
+      "method": "POST",
+      "path": "/v1/products",
+      "path_refs": {},
+      "params": {
+        "name": "probe proration"
+      },
+      "idempotency_key": null,
+      "binds_as": "product",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "prod_VIogLBoApE3DO0",
+        "object": "product",
+        "active": true,
+        "attributes": [],
+        "created": 1790019518,
+        "default_price": null,
+        "description": null,
+        "images": [],
+        "livemode": false,
+        "marketing_features": [],
+        "metadata": {},
+        "name": "probe proration",
+        "package_dimensions": null,
+        "shippable": null,
+        "statement_descriptor": null,
+        "tax_code": null,
+        "tax_details": null,
+        "type": "service",
+        "unit_label": null,
+        "updated": 1790019518,
+        "url": null
+      }
+    },
+    {
+      "seq": 5,
+      "method": "POST",
+      "path": "/v1/prices",
+      "path_refs": {},
+      "params": {
+        "product": {
+          "$ref": {
+            "step": "product",
+            "field": "id"
+          }
+        },
+        "unit_amount": 1000,
+        "currency": "usd",
+        "recurring": {
+          "interval": "month"
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": "p10",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "price_1UID2wHIBYZYyePrmvDNmBvj",
+        "object": "price",
+        "active": true,
+        "billing_scheme": "per_unit",
+        "created": 1790019518,
+        "currency": "usd",
+        "custom_unit_amount": null,
+        "livemode": false,
+        "lookup_key": null,
+        "metadata": {},
+        "nickname": null,
+        "product": "prod_VIogLBoApE3DO0",
+        "recurring": {
+          "interval": "month",
+          "interval_count": 1,
+          "meter": null,
+          "trial_period_days": null,
+          "usage_type": "licensed"
+        },
+        "tax_behavior": "unspecified",
+        "tiers_mode": null,
+        "transform_quantity": null,
+        "type": "recurring",
+        "unit_amount": 1000,
+        "unit_amount_decimal": "1000"
+      }
+    },
+    {
+      "seq": 6,
+      "method": "POST",
+      "path": "/v1/prices",
+      "path_refs": {},
+      "params": {
+        "product": {
+          "$ref": {
+            "step": "product",
+            "field": "id"
+          }
+        },
+        "unit_amount": 1800,
+        "currency": "usd",
+        "recurring": {
+          "interval": "month"
+        }
+      },
+      "idempotency_key": null,
+      "binds_as": "p18",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "price_1UID2wHIBYZYyePr9DffXNyh",
+        "object": "price",
+        "active": true,
+        "billing_scheme": "per_unit",
+        "created": 1790019518,
+        "currency": "usd",
+        "custom_unit_amount": null,
+        "livemode": false,
+        "lookup_key": null,
+        "metadata": {},
+        "nickname": null,
+        "product": "prod_VIogLBoApE3DO0",
+        "recurring": {
+          "interval": "month",
+          "interval_count": 1,
+          "meter": null,
+          "trial_period_days": null,
+          "usage_type": "licensed"
+        },
+        "tax_behavior": "unspecified",
+        "tiers_mode": null,
+        "transform_quantity": null,
+        "type": "recurring",
+        "unit_amount": 1800,
+        "unit_amount_decimal": "1800"
+      }
+    },
+    {
+      "seq": 7,
+      "method": "POST",
+      "path": "/v1/subscriptions",
+      "path_refs": {},
+      "params": {
+        "customer": {
+          "$ref": {
+            "step": "customer",
+            "field": "id"
+          }
+        },
+        "items": [
+          {
+            "price": {
+              "$ref": {
+                "step": "p10",
+                "field": "id"
+              }
+            }
+          }
+        ]
+      },
+      "idempotency_key": null,
+      "binds_as": "tie",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "sub_1UID2wHIBYZYyePrNsLn1cyF",
+        "object": "subscription",
+        "application": null,
+        "application_fee_percent": null,
+        "automatic_tax": {
+          "disabled_reason": null,
+          "enabled": false,
+          "liability": null
+        },
+        "billing_cycle_anchor": 1790019518,
+        "billing_cycle_anchor_config": null,
+        "billing_mode": {
+          "flexible": {
+            "proration_discounts": "included"
+          },
+          "type": "flexible",
+          "updated_at": 1790019518
+        },
+        "billing_schedules": [],
+        "billing_thresholds": null,
+        "cancel_at": null,
+        "cancel_at_period_end": false,
+        "canceled_at": null,
+        "cancellation_details": {
+          "comment": null,
+          "feedback": null,
+          "feedback_option": null,
+          "reason": null
+        },
+        "collection_method": "charge_automatically",
+        "created": 1790019518,
+        "currency": "usd",
+        "customer": "cus_VIogy4r4tz3DQ9",
+        "customer_account": null,
+        "days_until_due": null,
+        "default_payment_method": null,
+        "default_source": null,
+        "default_tax_rates": [],
+        "description": null,
+        "discounts": [],
+        "ended_at": null,
+        "invoice_settings": {
+          "account_tax_ids": null,
+          "custom_fields": null,
+          "description": null,
+          "footer": null,
+          "issuer": {
+            "type": "self"
+          }
+        },
+        "items": {
+          "object": "list",
+          "data": [
+            {
+              "id": "si_VIogM71XI7DBnH",
+              "object": "subscription_item",
+              "billing_thresholds": null,
+              "created": 1790019519,
+              "current_period_end": 1792611518,
+              "current_period_start": 1790019518,
+              "current_trial": null,
+              "discounts": [],
+              "metadata": {},
+              "plan": {
+                "id": "price_1UID2wHIBYZYyePrmvDNmBvj",
+                "object": "plan",
+                "active": true,
+                "amount": 1000,
+                "amount_decimal": "1000",
+                "billing_scheme": "per_unit",
+                "created": 1790019518,
+                "currency": "usd",
+                "interval": "month",
+                "interval_count": 1,
+                "livemode": false,
+                "metadata": {},
+                "meter": null,
+                "nickname": null,
+                "product": "prod_VIogLBoApE3DO0",
+                "tiers_mode": null,
+                "transform_usage": null,
+                "trial_period_days": null,
+                "usage_type": "licensed"
+              },
+              "price": {
+                "id": "price_1UID2wHIBYZYyePrmvDNmBvj",
+                "object": "price",
+                "active": true,
+                "billing_scheme": "per_unit",
+                "created": 1790019518,
+                "currency": "usd",
+                "custom_unit_amount": null,
+                "livemode": false,
+                "lookup_key": null,
+                "metadata": {},
+                "nickname": null,
+                "product": "prod_VIogLBoApE3DO0",
+                "recurring": {
+                  "interval": "month",
+                  "interval_count": 1,
+                  "meter": null,
+                  "trial_period_days": null,
+                  "usage_type": "licensed"
+                },
+                "tax_behavior": "unspecified",
+                "tiers_mode": null,
+                "transform_quantity": null,
+                "type": "recurring",
+                "unit_amount": 1000,
+                "unit_amount_decimal": "1000"
+              },
+              "quantity": 1,
+              "subscription": "sub_1UID2wHIBYZYyePrNsLn1cyF",
+              "tax_rates": []
+            }
+          ],
+          "has_more": false,
+          "total_count": 1,
+          "url": "/v1/subscription_items?subscription=sub_1UID2wHIBYZYyePrNsLn1cyF"
+        },
+        "latest_invoice": "in_1UID2wHIBYZYyePrZBslxl7m",
+        "livemode": false,
+        "managed_payments": {
+          "enabled": false
+        },
+        "metadata": {},
+        "next_pending_invoice_item_invoice": null,
+        "on_behalf_of": null,
+        "pause_collection": null,
+        "payment_settings": {
+          "payment_method_options": null,
+          "payment_method_types": null,
+          "save_default_payment_method": "off"
+        },
+        "pending_invoice_item_interval": null,
+        "pending_setup_intent": null,
+        "pending_update": null,
+        "plan": {
+          "id": "price_1UID2wHIBYZYyePrmvDNmBvj",
+          "object": "plan",
+          "active": true,
+          "amount": 1000,
+          "amount_decimal": "1000",
+          "billing_scheme": "per_unit",
+          "created": 1790019518,
+          "currency": "usd",
+          "interval": "month",
+          "interval_count": 1,
+          "livemode": false,
+          "metadata": {},
+          "meter": null,
+          "nickname": null,
+          "product": "prod_VIogLBoApE3DO0",
+          "tiers_mode": null,
+          "transform_usage": null,
+          "trial_period_days": null,
+          "usage_type": "licensed"
+        },
+        "quantity": 1,
+        "schedule": null,
+        "start_date": 1790019518,
+        "status": "active",
+        "test_clock": null,
+        "transfer_data": null,
+        "trial_end": null,
+        "trial_settings": {
+          "end_behavior": {
+            "billing_cycle_anchor": "now",
+            "missing_payment_method": "create_invoice"
+          }
+        },
+        "trial_start": null
+      }
+    },
+    {
+      "seq": 8,
+      "method": "POST",
+      "path": "/v1/subscriptions/{subscription_exposed_id}",
+      "path_refs": {
+        "subscription_exposed_id": {
+          "step": "tie",
+          "field": "id"
+        }
+      },
+      "params": {
+        "items": [
+          {
+            "id": "si_VIogM71XI7DBnH",
+            "price": {
+              "$ref": {
+                "step": "p18",
+                "field": "id"
+              }
+            }
+          }
+        ],
+        "proration_behavior": "always_invoice",
+        "proration_date": 1792605038
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "sub_1UID2wHIBYZYyePrNsLn1cyF",
+        "object": "subscription",
+        "application": null,
+        "application_fee_percent": null,
+        "automatic_tax": {
+          "disabled_reason": null,
+          "enabled": false,
+          "liability": null
+        },
+        "billing_cycle_anchor": 1790019518,
+        "billing_cycle_anchor_config": null,
+        "billing_mode": {
+          "flexible": {
+            "proration_discounts": "included"
+          },
+          "type": "flexible",
+          "updated_at": 1790019518
+        },
+        "billing_schedules": [],
+        "billing_thresholds": null,
+        "cancel_at": null,
+        "cancel_at_period_end": false,
+        "canceled_at": null,
+        "cancellation_details": {
+          "comment": null,
+          "feedback": null,
+          "feedback_option": null,
+          "reason": null
+        },
+        "collection_method": "charge_automatically",
+        "created": 1790019518,
+        "currency": "usd",
+        "customer": "cus_VIogy4r4tz3DQ9",
+        "customer_account": null,
+        "days_until_due": null,
+        "default_payment_method": null,
+        "default_source": null,
+        "default_tax_rates": [],
+        "description": null,
+        "discounts": [],
+        "ended_at": null,
+        "invoice_settings": {
+          "account_tax_ids": null,
+          "custom_fields": null,
+          "description": null,
+          "footer": null,
+          "issuer": {
+            "type": "self"
+          }
+        },
+        "items": {
+          "object": "list",
+          "data": [
+            {
+              "id": "si_VIogM71XI7DBnH",
+              "object": "subscription_item",
+              "billing_thresholds": null,
+              "created": 1790019519,
+              "current_period_end": 1792611518,
+              "current_period_start": 1790019518,
+              "current_trial": null,
+              "discounts": [],
+              "metadata": {},
+              "plan": {
+                "id": "price_1UID2wHIBYZYyePr9DffXNyh",
+                "object": "plan",
+                "active": true,
+                "amount": 1800,
+                "amount_decimal": "1800",
+                "billing_scheme": "per_unit",
+                "created": 1790019518,
+                "currency": "usd",
+                "interval": "month",
+                "interval_count": 1,
+                "livemode": false,
+                "metadata": {},
+                "meter": null,
+                "nickname": null,
+                "product": "prod_VIogLBoApE3DO0",
+                "tiers_mode": null,
+                "transform_usage": null,
+                "trial_period_days": null,
+                "usage_type": "licensed"
+              },
+              "price": {
+                "id": "price_1UID2wHIBYZYyePr9DffXNyh",
+                "object": "price",
+                "active": true,
+                "billing_scheme": "per_unit",
+                "created": 1790019518,
+                "currency": "usd",
+                "custom_unit_amount": null,
+                "livemode": false,
+                "lookup_key": null,
+                "metadata": {},
+                "nickname": null,
+                "product": "prod_VIogLBoApE3DO0",
+                "recurring": {
+                  "interval": "month",
+                  "interval_count": 1,
+                  "meter": null,
+                  "trial_period_days": null,
+                  "usage_type": "licensed"
+                },
+                "tax_behavior": "unspecified",
+                "tiers_mode": null,
+                "transform_quantity": null,
+                "type": "recurring",
+                "unit_amount": 1800,
+                "unit_amount_decimal": "1800"
+              },
+              "quantity": 1,
+              "subscription": "sub_1UID2wHIBYZYyePrNsLn1cyF",
+              "tax_rates": []
+            }
+          ],
+          "has_more": false,
+          "total_count": 1,
+          "url": "/v1/subscription_items?subscription=sub_1UID2wHIBYZYyePrNsLn1cyF"
+        },
+        "latest_invoice": "in_1UID2zHIBYZYyePrNdAihzfU",
+        "livemode": false,
+        "managed_payments": {
+          "enabled": false
+        },
+        "metadata": {},
+        "next_pending_invoice_item_invoice": null,
+        "on_behalf_of": null,
+        "pause_collection": null,
+        "payment_settings": {
+          "payment_method_options": null,
+          "payment_method_types": null,
+          "save_default_payment_method": "off"
+        },
+        "pending_invoice_item_interval": null,
+        "pending_setup_intent": null,
+        "pending_update": null,
+        "plan": {
+          "id": "price_1UID2wHIBYZYyePr9DffXNyh",
+          "object": "plan",
+          "active": true,
+          "amount": 1800,
+          "amount_decimal": "1800",
+          "billing_scheme": "per_unit",
+          "created": 1790019518,
+          "currency": "usd",
+          "interval": "month",
+          "interval_count": 1,
+          "livemode": false,
+          "metadata": {},
+          "meter": null,
+          "nickname": null,
+          "product": "prod_VIogLBoApE3DO0",
+          "tiers_mode": null,
+          "transform_usage": null,
+          "trial_period_days": null,
+          "usage_type": "licensed"
+        },
+        "quantity": 1,
+        "schedule": null,
+        "start_date": 1790019518,
+        "status": "active",
+        "test_clock": null,
+        "transfer_data": null,
+        "trial_end": null,
+        "trial_settings": {
+          "end_behavior": {
+            "billing_cycle_anchor": "now",
+            "missing_payment_method": "create_invoice"
+          }
+        },
+        "trial_start": null
+      }
+    },
+    {
+      "seq": 9,
+      "method": "POST",
+      "path": "/v1/subscriptions",
+      "path_refs": {},
+      "params": {
+        "customer": {
+          "$ref": {
+            "step": "customer",
+            "field": "id"
+          }
+        },
+        "items": [
+          {
+            "price": {
+              "$ref": {
+                "step": "p10",
+                "field": "id"
+              }
+            }
+          }
+        ]
+      },
+      "idempotency_key": null,
+      "binds_as": "qty",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "sub_1UID32HIBYZYyePrDLdvxITe",
+        "object": "subscription",
+        "application": null,
+        "application_fee_percent": null,
+        "automatic_tax": {
+          "disabled_reason": null,
+          "enabled": false,
+          "liability": null
+        },
+        "billing_cycle_anchor": 1790019524,
+        "billing_cycle_anchor_config": null,
+        "billing_mode": {
+          "flexible": {
+            "proration_discounts": "included"
+          },
+          "type": "flexible",
+          "updated_at": 1790019524
+        },
+        "billing_schedules": [],
+        "billing_thresholds": null,
+        "cancel_at": null,
+        "cancel_at_period_end": false,
+        "canceled_at": null,
+        "cancellation_details": {
+          "comment": null,
+          "feedback": null,
+          "feedback_option": null,
+          "reason": null
+        },
+        "collection_method": "charge_automatically",
+        "created": 1790019524,
+        "currency": "usd",
+        "customer": "cus_VIogy4r4tz3DQ9",
+        "customer_account": null,
+        "days_until_due": null,
+        "default_payment_method": null,
+        "default_source": null,
+        "default_tax_rates": [],
+        "description": null,
+        "discounts": [],
+        "ended_at": null,
+        "invoice_settings": {
+          "account_tax_ids": null,
+          "custom_fields": null,
+          "description": null,
+          "footer": null,
+          "issuer": {
+            "type": "self"
+          }
+        },
+        "items": {
+          "object": "list",
+          "data": [
+            {
+              "id": "si_VIogq4mCKtcoW1",
+              "object": "subscription_item",
+              "billing_thresholds": null,
+              "created": 1790019524,
+              "current_period_end": 1792611524,
+              "current_period_start": 1790019524,
+              "current_trial": null,
+              "discounts": [],
+              "metadata": {},
+              "plan": {
+                "id": "price_1UID2wHIBYZYyePrmvDNmBvj",
+                "object": "plan",
+                "active": true,
+                "amount": 1000,
+                "amount_decimal": "1000",
+                "billing_scheme": "per_unit",
+                "created": 1790019518,
+                "currency": "usd",
+                "interval": "month",
+                "interval_count": 1,
+                "livemode": false,
+                "metadata": {},
+                "meter": null,
+                "nickname": null,
+                "product": "prod_VIogLBoApE3DO0",
+                "tiers_mode": null,
+                "transform_usage": null,
+                "trial_period_days": null,
+                "usage_type": "licensed"
+              },
+              "price": {
+                "id": "price_1UID2wHIBYZYyePrmvDNmBvj",
+                "object": "price",
+                "active": true,
+                "billing_scheme": "per_unit",
+                "created": 1790019518,
+                "currency": "usd",
+                "custom_unit_amount": null,
+                "livemode": false,
+                "lookup_key": null,
+                "metadata": {},
+                "nickname": null,
+                "product": "prod_VIogLBoApE3DO0",
+                "recurring": {
+                  "interval": "month",
+                  "interval_count": 1,
+                  "meter": null,
+                  "trial_period_days": null,
+                  "usage_type": "licensed"
+                },
+                "tax_behavior": "unspecified",
+                "tiers_mode": null,
+                "transform_quantity": null,
+                "type": "recurring",
+                "unit_amount": 1000,
+                "unit_amount_decimal": "1000"
+              },
+              "quantity": 1,
+              "subscription": "sub_1UID32HIBYZYyePrDLdvxITe",
+              "tax_rates": []
+            }
+          ],
+          "has_more": false,
+          "total_count": 1,
+          "url": "/v1/subscription_items?subscription=sub_1UID32HIBYZYyePrDLdvxITe"
+        },
+        "latest_invoice": "in_1UID32HIBYZYyePrzJ0fGRSO",
+        "livemode": false,
+        "managed_payments": {
+          "enabled": false
+        },
+        "metadata": {},
+        "next_pending_invoice_item_invoice": null,
+        "on_behalf_of": null,
+        "pause_collection": null,
+        "payment_settings": {
+          "payment_method_options": null,
+          "payment_method_types": null,
+          "save_default_payment_method": "off"
+        },
+        "pending_invoice_item_interval": null,
+        "pending_setup_intent": null,
+        "pending_update": null,
+        "plan": {
+          "id": "price_1UID2wHIBYZYyePrmvDNmBvj",
+          "object": "plan",
+          "active": true,
+          "amount": 1000,
+          "amount_decimal": "1000",
+          "billing_scheme": "per_unit",
+          "created": 1790019518,
+          "currency": "usd",
+          "interval": "month",
+          "interval_count": 1,
+          "livemode": false,
+          "metadata": {},
+          "meter": null,
+          "nickname": null,
+          "product": "prod_VIogLBoApE3DO0",
+          "tiers_mode": null,
+          "transform_usage": null,
+          "trial_period_days": null,
+          "usage_type": "licensed"
+        },
+        "quantity": 1,
+        "schedule": null,
+        "start_date": 1790019524,
+        "status": "active",
+        "test_clock": null,
+        "transfer_data": null,
+        "trial_end": null,
+        "trial_settings": {
+          "end_behavior": {
+            "billing_cycle_anchor": "now",
+            "missing_payment_method": "create_invoice"
+          }
+        },
+        "trial_start": null
+      }
+    },
+    {
+      "seq": 10,
+      "method": "POST",
+      "path": "/v1/subscriptions/{subscription_exposed_id}",
+      "path_refs": {
+        "subscription_exposed_id": {
+          "step": "qty",
+          "field": "id"
+        }
+      },
+      "params": {
+        "items": [
+          {
+            "id": "si_VIogq4mCKtcoW1",
+            "quantity": 3
+          }
+        ],
+        "proration_behavior": "always_invoice",
+        "proration_date": 1792605044
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "sub_1UID32HIBYZYyePrDLdvxITe",
+        "object": "subscription",
+        "application": null,
+        "application_fee_percent": null,
+        "automatic_tax": {
+          "disabled_reason": null,
+          "enabled": false,
+          "liability": null
+        },
+        "billing_cycle_anchor": 1790019524,
+        "billing_cycle_anchor_config": null,
+        "billing_mode": {
+          "flexible": {
+            "proration_discounts": "included"
+          },
+          "type": "flexible",
+          "updated_at": 1790019524
+        },
+        "billing_schedules": [],
+        "billing_thresholds": null,
+        "cancel_at": null,
+        "cancel_at_period_end": false,
+        "canceled_at": null,
+        "cancellation_details": {
+          "comment": null,
+          "feedback": null,
+          "feedback_option": null,
+          "reason": null
+        },
+        "collection_method": "charge_automatically",
+        "created": 1790019524,
+        "currency": "usd",
+        "customer": "cus_VIogy4r4tz3DQ9",
+        "customer_account": null,
+        "days_until_due": null,
+        "default_payment_method": null,
+        "default_source": null,
+        "default_tax_rates": [],
+        "description": null,
+        "discounts": [],
+        "ended_at": null,
+        "invoice_settings": {
+          "account_tax_ids": null,
+          "custom_fields": null,
+          "description": null,
+          "footer": null,
+          "issuer": {
+            "type": "self"
+          }
+        },
+        "items": {
+          "object": "list",
+          "data": [
+            {
+              "id": "si_VIogq4mCKtcoW1",
+              "object": "subscription_item",
+              "billing_thresholds": null,
+              "created": 1790019524,
+              "current_period_end": 1792611524,
+              "current_period_start": 1790019524,
+              "current_trial": null,
+              "discounts": [],
+              "metadata": {},
+              "plan": {
+                "id": "price_1UID2wHIBYZYyePrmvDNmBvj",
+                "object": "plan",
+                "active": true,
+                "amount": 1000,
+                "amount_decimal": "1000",
+                "billing_scheme": "per_unit",
+                "created": 1790019518,
+                "currency": "usd",
+                "interval": "month",
+                "interval_count": 1,
+                "livemode": false,
+                "metadata": {},
+                "meter": null,
+                "nickname": null,
+                "product": "prod_VIogLBoApE3DO0",
+                "tiers_mode": null,
+                "transform_usage": null,
+                "trial_period_days": null,
+                "usage_type": "licensed"
+              },
+              "price": {
+                "id": "price_1UID2wHIBYZYyePrmvDNmBvj",
+                "object": "price",
+                "active": true,
+                "billing_scheme": "per_unit",
+                "created": 1790019518,
+                "currency": "usd",
+                "custom_unit_amount": null,
+                "livemode": false,
+                "lookup_key": null,
+                "metadata": {},
+                "nickname": null,
+                "product": "prod_VIogLBoApE3DO0",
+                "recurring": {
+                  "interval": "month",
+                  "interval_count": 1,
+                  "meter": null,
+                  "trial_period_days": null,
+                  "usage_type": "licensed"
+                },
+                "tax_behavior": "unspecified",
+                "tiers_mode": null,
+                "transform_quantity": null,
+                "type": "recurring",
+                "unit_amount": 1000,
+                "unit_amount_decimal": "1000"
+              },
+              "quantity": 3,
+              "subscription": "sub_1UID32HIBYZYyePrDLdvxITe",
+              "tax_rates": []
+            }
+          ],
+          "has_more": false,
+          "total_count": 1,
+          "url": "/v1/subscription_items?subscription=sub_1UID32HIBYZYyePrDLdvxITe"
+        },
+        "latest_invoice": "in_1UID34HIBYZYyePrDa6Y43mA",
+        "livemode": false,
+        "managed_payments": {
+          "enabled": false
+        },
+        "metadata": {},
+        "next_pending_invoice_item_invoice": null,
+        "on_behalf_of": null,
+        "pause_collection": null,
+        "payment_settings": {
+          "payment_method_options": null,
+          "payment_method_types": null,
+          "save_default_payment_method": "off"
+        },
+        "pending_invoice_item_interval": null,
+        "pending_setup_intent": null,
+        "pending_update": null,
+        "plan": {
+          "id": "price_1UID2wHIBYZYyePrmvDNmBvj",
+          "object": "plan",
+          "active": true,
+          "amount": 1000,
+          "amount_decimal": "1000",
+          "billing_scheme": "per_unit",
+          "created": 1790019518,
+          "currency": "usd",
+          "interval": "month",
+          "interval_count": 1,
+          "livemode": false,
+          "metadata": {},
+          "meter": null,
+          "nickname": null,
+          "product": "prod_VIogLBoApE3DO0",
+          "tiers_mode": null,
+          "transform_usage": null,
+          "trial_period_days": null,
+          "usage_type": "licensed"
+        },
+        "quantity": 3,
+        "schedule": null,
+        "start_date": 1790019524,
+        "status": "active",
+        "test_clock": null,
+        "transfer_data": null,
+        "trial_end": null,
+        "trial_settings": {
+          "end_behavior": {
+            "billing_cycle_anchor": "now",
+            "missing_payment_method": "create_invoice"
+          }
+        },
+        "trial_start": null
+      }
+    },
+    {
+      "seq": 11,
+      "method": "POST",
+      "path": "/v1/subscriptions",
+      "path_refs": {},
+      "params": {
+        "customer": {
+          "$ref": {
+            "step": "customer",
+            "field": "id"
+          }
+        },
+        "items": [
+          {
+            "price": {
+              "$ref": {
+                "step": "p10",
+                "field": "id"
+              }
+            }
+          }
+        ]
+      },
+      "idempotency_key": null,
+      "binds_as": "pend",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "sub_1UID36HIBYZYyePrDcxlrGTb",
+        "object": "subscription",
+        "application": null,
+        "application_fee_percent": null,
+        "automatic_tax": {
+          "disabled_reason": null,
+          "enabled": false,
+          "liability": null
+        },
+        "billing_cycle_anchor": 1790019528,
+        "billing_cycle_anchor_config": null,
+        "billing_mode": {
+          "flexible": {
+            "proration_discounts": "included"
+          },
+          "type": "flexible",
+          "updated_at": 1790019528
+        },
+        "billing_schedules": [],
+        "billing_thresholds": null,
+        "cancel_at": null,
+        "cancel_at_period_end": false,
+        "canceled_at": null,
+        "cancellation_details": {
+          "comment": null,
+          "feedback": null,
+          "feedback_option": null,
+          "reason": null
+        },
+        "collection_method": "charge_automatically",
+        "created": 1790019528,
+        "currency": "usd",
+        "customer": "cus_VIogy4r4tz3DQ9",
+        "customer_account": null,
+        "days_until_due": null,
+        "default_payment_method": null,
+        "default_source": null,
+        "default_tax_rates": [],
+        "description": null,
+        "discounts": [],
+        "ended_at": null,
+        "invoice_settings": {
+          "account_tax_ids": null,
+          "custom_fields": null,
+          "description": null,
+          "footer": null,
+          "issuer": {
+            "type": "self"
+          }
+        },
+        "items": {
+          "object": "list",
+          "data": [
+            {
+              "id": "si_VIogBL4nbgDtdy",
+              "object": "subscription_item",
+              "billing_thresholds": null,
+              "created": 1790019528,
+              "current_period_end": 1792611528,
+              "current_period_start": 1790019528,
+              "current_trial": null,
+              "discounts": [],
+              "metadata": {},
+              "plan": {
+                "id": "price_1UID2wHIBYZYyePrmvDNmBvj",
+                "object": "plan",
+                "active": true,
+                "amount": 1000,
+                "amount_decimal": "1000",
+                "billing_scheme": "per_unit",
+                "created": 1790019518,
+                "currency": "usd",
+                "interval": "month",
+                "interval_count": 1,
+                "livemode": false,
+                "metadata": {},
+                "meter": null,
+                "nickname": null,
+                "product": "prod_VIogLBoApE3DO0",
+                "tiers_mode": null,
+                "transform_usage": null,
+                "trial_period_days": null,
+                "usage_type": "licensed"
+              },
+              "price": {
+                "id": "price_1UID2wHIBYZYyePrmvDNmBvj",
+                "object": "price",
+                "active": true,
+                "billing_scheme": "per_unit",
+                "created": 1790019518,
+                "currency": "usd",
+                "custom_unit_amount": null,
+                "livemode": false,
+                "lookup_key": null,
+                "metadata": {},
+                "nickname": null,
+                "product": "prod_VIogLBoApE3DO0",
+                "recurring": {
+                  "interval": "month",
+                  "interval_count": 1,
+                  "meter": null,
+                  "trial_period_days": null,
+                  "usage_type": "licensed"
+                },
+                "tax_behavior": "unspecified",
+                "tiers_mode": null,
+                "transform_quantity": null,
+                "type": "recurring",
+                "unit_amount": 1000,
+                "unit_amount_decimal": "1000"
+              },
+              "quantity": 1,
+              "subscription": "sub_1UID36HIBYZYyePrDcxlrGTb",
+              "tax_rates": []
+            }
+          ],
+          "has_more": false,
+          "total_count": 1,
+          "url": "/v1/subscription_items?subscription=sub_1UID36HIBYZYyePrDcxlrGTb"
+        },
+        "latest_invoice": "in_1UID36HIBYZYyePr0aCWUnn0",
+        "livemode": false,
+        "managed_payments": {
+          "enabled": false
+        },
+        "metadata": {},
+        "next_pending_invoice_item_invoice": null,
+        "on_behalf_of": null,
+        "pause_collection": null,
+        "payment_settings": {
+          "payment_method_options": null,
+          "payment_method_types": null,
+          "save_default_payment_method": "off"
+        },
+        "pending_invoice_item_interval": null,
+        "pending_setup_intent": null,
+        "pending_update": null,
+        "plan": {
+          "id": "price_1UID2wHIBYZYyePrmvDNmBvj",
+          "object": "plan",
+          "active": true,
+          "amount": 1000,
+          "amount_decimal": "1000",
+          "billing_scheme": "per_unit",
+          "created": 1790019518,
+          "currency": "usd",
+          "interval": "month",
+          "interval_count": 1,
+          "livemode": false,
+          "metadata": {},
+          "meter": null,
+          "nickname": null,
+          "product": "prod_VIogLBoApE3DO0",
+          "tiers_mode": null,
+          "transform_usage": null,
+          "trial_period_days": null,
+          "usage_type": "licensed"
+        },
+        "quantity": 1,
+        "schedule": null,
+        "start_date": 1790019528,
+        "status": "active",
+        "test_clock": null,
+        "transfer_data": null,
+        "trial_end": null,
+        "trial_settings": {
+          "end_behavior": {
+            "billing_cycle_anchor": "now",
+            "missing_payment_method": "create_invoice"
+          }
+        },
+        "trial_start": null
+      }
+    },
+    {
+      "seq": 12,
+      "method": "POST",
+      "path": "/v1/subscriptions/{subscription_exposed_id}",
+      "path_refs": {
+        "subscription_exposed_id": {
+          "step": "pend",
+          "field": "id"
+        }
+      },
+      "params": {
+        "items": [
+          {
+            "id": "si_VIogBL4nbgDtdy",
+            "price": {
+              "$ref": {
+                "step": "p18",
+                "field": "id"
+              }
+            }
+          }
+        ],
+        "proration_behavior": "create_prorations",
+        "proration_date": 1792605048
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "sub_1UID36HIBYZYyePrDcxlrGTb",
+        "object": "subscription",
+        "application": null,
+        "application_fee_percent": null,
+        "automatic_tax": {
+          "disabled_reason": null,
+          "enabled": false,
+          "liability": null
+        },
+        "billing_cycle_anchor": 1790019528,
+        "billing_cycle_anchor_config": null,
+        "billing_mode": {
+          "flexible": {
+            "proration_discounts": "included"
+          },
+          "type": "flexible",
+          "updated_at": 1790019528
+        },
+        "billing_schedules": [],
+        "billing_thresholds": null,
+        "cancel_at": null,
+        "cancel_at_period_end": false,
+        "canceled_at": null,
+        "cancellation_details": {
+          "comment": null,
+          "feedback": null,
+          "feedback_option": null,
+          "reason": null
+        },
+        "collection_method": "charge_automatically",
+        "created": 1790019528,
+        "currency": "usd",
+        "customer": "cus_VIogy4r4tz3DQ9",
+        "customer_account": null,
+        "days_until_due": null,
+        "default_payment_method": null,
+        "default_source": null,
+        "default_tax_rates": [],
+        "description": null,
+        "discounts": [],
+        "ended_at": null,
+        "invoice_settings": {
+          "account_tax_ids": null,
+          "custom_fields": null,
+          "description": null,
+          "footer": null,
+          "issuer": {
+            "type": "self"
+          }
+        },
+        "items": {
+          "object": "list",
+          "data": [
+            {
+              "id": "si_VIogBL4nbgDtdy",
+              "object": "subscription_item",
+              "billing_thresholds": null,
+              "created": 1790019528,
+              "current_period_end": 1792611528,
+              "current_period_start": 1790019528,
+              "current_trial": null,
+              "discounts": [],
+              "metadata": {},
+              "plan": {
+                "id": "price_1UID2wHIBYZYyePr9DffXNyh",
+                "object": "plan",
+                "active": true,
+                "amount": 1800,
+                "amount_decimal": "1800",
+                "billing_scheme": "per_unit",
+                "created": 1790019518,
+                "currency": "usd",
+                "interval": "month",
+                "interval_count": 1,
+                "livemode": false,
+                "metadata": {},
+                "meter": null,
+                "nickname": null,
+                "product": "prod_VIogLBoApE3DO0",
+                "tiers_mode": null,
+                "transform_usage": null,
+                "trial_period_days": null,
+                "usage_type": "licensed"
+              },
+              "price": {
+                "id": "price_1UID2wHIBYZYyePr9DffXNyh",
+                "object": "price",
+                "active": true,
+                "billing_scheme": "per_unit",
+                "created": 1790019518,
+                "currency": "usd",
+                "custom_unit_amount": null,
+                "livemode": false,
+                "lookup_key": null,
+                "metadata": {},
+                "nickname": null,
+                "product": "prod_VIogLBoApE3DO0",
+                "recurring": {
+                  "interval": "month",
+                  "interval_count": 1,
+                  "meter": null,
+                  "trial_period_days": null,
+                  "usage_type": "licensed"
+                },
+                "tax_behavior": "unspecified",
+                "tiers_mode": null,
+                "transform_quantity": null,
+                "type": "recurring",
+                "unit_amount": 1800,
+                "unit_amount_decimal": "1800"
+              },
+              "quantity": 1,
+              "subscription": "sub_1UID36HIBYZYyePrDcxlrGTb",
+              "tax_rates": []
+            }
+          ],
+          "has_more": false,
+          "total_count": 1,
+          "url": "/v1/subscription_items?subscription=sub_1UID36HIBYZYyePrDcxlrGTb"
+        },
+        "latest_invoice": "in_1UID36HIBYZYyePr0aCWUnn0",
+        "livemode": false,
+        "managed_payments": {
+          "enabled": false
+        },
+        "metadata": {},
+        "next_pending_invoice_item_invoice": null,
+        "on_behalf_of": null,
+        "pause_collection": null,
+        "payment_settings": {
+          "payment_method_options": null,
+          "payment_method_types": null,
+          "save_default_payment_method": "off"
+        },
+        "pending_invoice_item_interval": null,
+        "pending_setup_intent": null,
+        "pending_update": null,
+        "plan": {
+          "id": "price_1UID2wHIBYZYyePr9DffXNyh",
+          "object": "plan",
+          "active": true,
+          "amount": 1800,
+          "amount_decimal": "1800",
+          "billing_scheme": "per_unit",
+          "created": 1790019518,
+          "currency": "usd",
+          "interval": "month",
+          "interval_count": 1,
+          "livemode": false,
+          "metadata": {},
+          "meter": null,
+          "nickname": null,
+          "product": "prod_VIogLBoApE3DO0",
+          "tiers_mode": null,
+          "transform_usage": null,
+          "trial_period_days": null,
+          "usage_type": "licensed"
+        },
+        "quantity": 1,
+        "schedule": null,
+        "start_date": 1790019528,
+        "status": "active",
+        "test_clock": null,
+        "transfer_data": null,
+        "trial_end": null,
+        "trial_settings": {
+          "end_behavior": {
+            "billing_cycle_anchor": "now",
+            "missing_payment_method": "create_invoice"
+          }
+        },
+        "trial_start": null
+      }
+    },
+    {
+      "seq": 13,
+      "method": "GET",
+      "path": "/v1/invoiceitems",
+      "path_refs": {},
+      "params": {
+        "customer": {
+          "$ref": {
+            "step": "customer",
+            "field": "id"
+          }
+        },
+        "pending": true
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "object": "list",
+        "data": [
+          {
+            "id": "ii_1UID39HIBYZYyePrF5iZGFIE",
+            "object": "invoiceitem",
+            "amount": -3,
+            "currency": "usd",
+            "customer": "cus_VIogy4r4tz3DQ9",
+            "customer_account": null,
+            "date": 1790019531,
+            "description": "Unused time on probe proration after 21 Oct 2026",
+            "discountable": false,
+            "discounts": [],
+            "frozen_fields": [
+              "pricing",
+              "quantity",
+              "discounts"
+            ],
+            "invoice": null,
+            "invoicing_rules": [],
+            "livemode": false,
+            "metadata": {},
+            "net_amount": -3,
+            "parent": {
+              "subscription_details": {
+                "subscription": "sub_1UID36HIBYZYyePrDcxlrGTb",
+                "subscription_item": "si_VIogBL4nbgDtdy"
+              },
+              "type": "subscription_details"
+            },
+            "period": {
+              "end": 1792611528,
+              "start": 1792605048
+            },
+            "pricing": {
+              "price_details": {
+                "price": "price_1UID2wHIBYZYyePrmvDNmBvj",
+                "product": "prod_VIogLBoApE3DO0"
+              },
+              "type": "price_details",
+              "unit_amount_decimal": null
+            },
+            "proration": true,
+            "proration_details": {
+              "credited_items": {
+                "invoice_line_item_details": {
+                  "invoice": "in_1UID36HIBYZYyePr0aCWUnn0",
+                  "invoice_line_items": [
+                    "il_1UID36HIBYZYyePrgNFl3yvH"
+                  ]
+                },
+                "type": "invoice_line_items"
+              },
+              "discount_amounts": []
+            },
+            "quantity": 1,
+            "quantity_decimal": "1",
+            "tax_rates": [],
+            "test_clock": null
+          },
+          {
+            "id": "ii_1UID39HIBYZYyePrwCD2QoV9",
+            "object": "invoiceitem",
+            "amount": 4,
+            "currency": "usd",
+            "customer": "cus_VIogy4r4tz3DQ9",
+            "customer_account": null,
+            "date": 1790019531,
+            "description": "Remaining time on probe proration after 21 Oct 2026",
+            "discountable": false,
+            "discounts": [],
+            "frozen_fields": [
+              "pricing",
+              "quantity",
+              "discounts"
+            ],
+            "invoice": null,
+            "invoicing_rules": [],
+            "livemode": false,
+            "metadata": {},
+            "net_amount": 4,
+            "parent": {
+              "subscription_details": {
+                "subscription": "sub_1UID36HIBYZYyePrDcxlrGTb",
+                "subscription_item": "si_VIogBL4nbgDtdy"
+              },
+              "type": "subscription_details"
+            },
+            "period": {
+              "end": 1792611528,
+              "start": 1792605048
+            },
+            "pricing": {
+              "price_details": {
+                "price": "price_1UID2wHIBYZYyePr9DffXNyh",
+                "product": "prod_VIogLBoApE3DO0"
+              },
+              "type": "price_details",
+              "unit_amount_decimal": null
+            },
+            "proration": true,
+            "proration_details": {
+              "credited_items": null,
+              "discount_amounts": []
+            },
+            "quantity": 1,
+            "quantity_decimal": "1",
+            "tax_rates": [],
+            "test_clock": null
+          }
+        ],
+        "has_more": false,
+        "url": "/v1/invoiceitems"
+      }
+    },
+    {
+      "seq": 14,
+      "method": "POST",
+      "path": "/v1/subscriptions",
+      "path_refs": {},
+      "params": {
+        "customer": {
+          "$ref": {
+            "step": "customer",
+            "field": "id"
+          }
+        },
+        "items": [
+          {
+            "price": {
+              "$ref": {
+                "step": "p10",
+                "field": "id"
+              }
+            }
+          }
+        ]
+      },
+      "idempotency_key": null,
+      "binds_as": "none_sub",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "sub_1UID39HIBYZYyePrsJ2rO86E",
+        "object": "subscription",
+        "application": null,
+        "application_fee_percent": null,
+        "automatic_tax": {
+          "disabled_reason": null,
+          "enabled": false,
+          "liability": null
+        },
+        "billing_cycle_anchor": 1790019531,
+        "billing_cycle_anchor_config": null,
+        "billing_mode": {
+          "flexible": {
+            "proration_discounts": "included"
+          },
+          "type": "flexible",
+          "updated_at": 1790019531
+        },
+        "billing_schedules": [],
+        "billing_thresholds": null,
+        "cancel_at": null,
+        "cancel_at_period_end": false,
+        "canceled_at": null,
+        "cancellation_details": {
+          "comment": null,
+          "feedback": null,
+          "feedback_option": null,
+          "reason": null
+        },
+        "collection_method": "charge_automatically",
+        "created": 1790019531,
+        "currency": "usd",
+        "customer": "cus_VIogy4r4tz3DQ9",
+        "customer_account": null,
+        "days_until_due": null,
+        "default_payment_method": null,
+        "default_source": null,
+        "default_tax_rates": [],
+        "description": null,
+        "discounts": [],
+        "ended_at": null,
+        "invoice_settings": {
+          "account_tax_ids": null,
+          "custom_fields": null,
+          "description": null,
+          "footer": null,
+          "issuer": {
+            "type": "self"
+          }
+        },
+        "items": {
+          "object": "list",
+          "data": [
+            {
+              "id": "si_VIogn64kY07lCu",
+              "object": "subscription_item",
+              "billing_thresholds": null,
+              "created": 1790019532,
+              "current_period_end": 1792611531,
+              "current_period_start": 1790019531,
+              "current_trial": null,
+              "discounts": [],
+              "metadata": {},
+              "plan": {
+                "id": "price_1UID2wHIBYZYyePrmvDNmBvj",
+                "object": "plan",
+                "active": true,
+                "amount": 1000,
+                "amount_decimal": "1000",
+                "billing_scheme": "per_unit",
+                "created": 1790019518,
+                "currency": "usd",
+                "interval": "month",
+                "interval_count": 1,
+                "livemode": false,
+                "metadata": {},
+                "meter": null,
+                "nickname": null,
+                "product": "prod_VIogLBoApE3DO0",
+                "tiers_mode": null,
+                "transform_usage": null,
+                "trial_period_days": null,
+                "usage_type": "licensed"
+              },
+              "price": {
+                "id": "price_1UID2wHIBYZYyePrmvDNmBvj",
+                "object": "price",
+                "active": true,
+                "billing_scheme": "per_unit",
+                "created": 1790019518,
+                "currency": "usd",
+                "custom_unit_amount": null,
+                "livemode": false,
+                "lookup_key": null,
+                "metadata": {},
+                "nickname": null,
+                "product": "prod_VIogLBoApE3DO0",
+                "recurring": {
+                  "interval": "month",
+                  "interval_count": 1,
+                  "meter": null,
+                  "trial_period_days": null,
+                  "usage_type": "licensed"
+                },
+                "tax_behavior": "unspecified",
+                "tiers_mode": null,
+                "transform_quantity": null,
+                "type": "recurring",
+                "unit_amount": 1000,
+                "unit_amount_decimal": "1000"
+              },
+              "quantity": 1,
+              "subscription": "sub_1UID39HIBYZYyePrsJ2rO86E",
+              "tax_rates": []
+            }
+          ],
+          "has_more": false,
+          "total_count": 1,
+          "url": "/v1/subscription_items?subscription=sub_1UID39HIBYZYyePrsJ2rO86E"
+        },
+        "latest_invoice": "in_1UID39HIBYZYyePriHdEoruZ",
+        "livemode": false,
+        "managed_payments": {
+          "enabled": false
+        },
+        "metadata": {},
+        "next_pending_invoice_item_invoice": null,
+        "on_behalf_of": null,
+        "pause_collection": null,
+        "payment_settings": {
+          "payment_method_options": null,
+          "payment_method_types": null,
+          "save_default_payment_method": "off"
+        },
+        "pending_invoice_item_interval": null,
+        "pending_setup_intent": null,
+        "pending_update": null,
+        "plan": {
+          "id": "price_1UID2wHIBYZYyePrmvDNmBvj",
+          "object": "plan",
+          "active": true,
+          "amount": 1000,
+          "amount_decimal": "1000",
+          "billing_scheme": "per_unit",
+          "created": 1790019518,
+          "currency": "usd",
+          "interval": "month",
+          "interval_count": 1,
+          "livemode": false,
+          "metadata": {},
+          "meter": null,
+          "nickname": null,
+          "product": "prod_VIogLBoApE3DO0",
+          "tiers_mode": null,
+          "transform_usage": null,
+          "trial_period_days": null,
+          "usage_type": "licensed"
+        },
+        "quantity": 1,
+        "schedule": null,
+        "start_date": 1790019531,
+        "status": "active",
+        "test_clock": null,
+        "transfer_data": null,
+        "trial_end": null,
+        "trial_settings": {
+          "end_behavior": {
+            "billing_cycle_anchor": "now",
+            "missing_payment_method": "create_invoice"
+          }
+        },
+        "trial_start": null
+      }
+    },
+    {
+      "seq": 15,
+      "method": "POST",
+      "path": "/v1/subscriptions/{subscription_exposed_id}",
+      "path_refs": {
+        "subscription_exposed_id": {
+          "step": "none_sub",
+          "field": "id"
+        }
+      },
+      "params": {
+        "items": [
+          {
+            "id": "si_VIogn64kY07lCu",
+            "price": {
+              "$ref": {
+                "step": "p18",
+                "field": "id"
+              }
+            }
+          }
+        ],
+        "proration_behavior": "none"
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "sub_1UID39HIBYZYyePrsJ2rO86E",
+        "object": "subscription",
+        "application": null,
+        "application_fee_percent": null,
+        "automatic_tax": {
+          "disabled_reason": null,
+          "enabled": false,
+          "liability": null
+        },
+        "billing_cycle_anchor": 1790019531,
+        "billing_cycle_anchor_config": null,
+        "billing_mode": {
+          "flexible": {
+            "proration_discounts": "included"
+          },
+          "type": "flexible",
+          "updated_at": 1790019531
+        },
+        "billing_schedules": [],
+        "billing_thresholds": null,
+        "cancel_at": null,
+        "cancel_at_period_end": false,
+        "canceled_at": null,
+        "cancellation_details": {
+          "comment": null,
+          "feedback": null,
+          "feedback_option": null,
+          "reason": null
+        },
+        "collection_method": "charge_automatically",
+        "created": 1790019531,
+        "currency": "usd",
+        "customer": "cus_VIogy4r4tz3DQ9",
+        "customer_account": null,
+        "days_until_due": null,
+        "default_payment_method": null,
+        "default_source": null,
+        "default_tax_rates": [],
+        "description": null,
+        "discounts": [],
+        "ended_at": null,
+        "invoice_settings": {
+          "account_tax_ids": null,
+          "custom_fields": null,
+          "description": null,
+          "footer": null,
+          "issuer": {
+            "type": "self"
+          }
+        },
+        "items": {
+          "object": "list",
+          "data": [
+            {
+              "id": "si_VIogn64kY07lCu",
+              "object": "subscription_item",
+              "billing_thresholds": null,
+              "created": 1790019532,
+              "current_period_end": 1792611531,
+              "current_period_start": 1790019531,
+              "current_trial": null,
+              "discounts": [],
+              "metadata": {},
+              "plan": {
+                "id": "price_1UID2wHIBYZYyePr9DffXNyh",
+                "object": "plan",
+                "active": true,
+                "amount": 1800,
+                "amount_decimal": "1800",
+                "billing_scheme": "per_unit",
+                "created": 1790019518,
+                "currency": "usd",
+                "interval": "month",
+                "interval_count": 1,
+                "livemode": false,
+                "metadata": {},
+                "meter": null,
+                "nickname": null,
+                "product": "prod_VIogLBoApE3DO0",
+                "tiers_mode": null,
+                "transform_usage": null,
+                "trial_period_days": null,
+                "usage_type": "licensed"
+              },
+              "price": {
+                "id": "price_1UID2wHIBYZYyePr9DffXNyh",
+                "object": "price",
+                "active": true,
+                "billing_scheme": "per_unit",
+                "created": 1790019518,
+                "currency": "usd",
+                "custom_unit_amount": null,
+                "livemode": false,
+                "lookup_key": null,
+                "metadata": {},
+                "nickname": null,
+                "product": "prod_VIogLBoApE3DO0",
+                "recurring": {
+                  "interval": "month",
+                  "interval_count": 1,
+                  "meter": null,
+                  "trial_period_days": null,
+                  "usage_type": "licensed"
+                },
+                "tax_behavior": "unspecified",
+                "tiers_mode": null,
+                "transform_quantity": null,
+                "type": "recurring",
+                "unit_amount": 1800,
+                "unit_amount_decimal": "1800"
+              },
+              "quantity": 1,
+              "subscription": "sub_1UID39HIBYZYyePrsJ2rO86E",
+              "tax_rates": []
+            }
+          ],
+          "has_more": false,
+          "total_count": 1,
+          "url": "/v1/subscription_items?subscription=sub_1UID39HIBYZYyePrsJ2rO86E"
+        },
+        "latest_invoice": "in_1UID39HIBYZYyePriHdEoruZ",
+        "livemode": false,
+        "managed_payments": {
+          "enabled": false
+        },
+        "metadata": {},
+        "next_pending_invoice_item_invoice": null,
+        "on_behalf_of": null,
+        "pause_collection": null,
+        "payment_settings": {
+          "payment_method_options": null,
+          "payment_method_types": null,
+          "save_default_payment_method": "off"
+        },
+        "pending_invoice_item_interval": null,
+        "pending_setup_intent": null,
+        "pending_update": null,
+        "plan": {
+          "id": "price_1UID2wHIBYZYyePr9DffXNyh",
+          "object": "plan",
+          "active": true,
+          "amount": 1800,
+          "amount_decimal": "1800",
+          "billing_scheme": "per_unit",
+          "created": 1790019518,
+          "currency": "usd",
+          "interval": "month",
+          "interval_count": 1,
+          "livemode": false,
+          "metadata": {},
+          "meter": null,
+          "nickname": null,
+          "product": "prod_VIogLBoApE3DO0",
+          "tiers_mode": null,
+          "transform_usage": null,
+          "trial_period_days": null,
+          "usage_type": "licensed"
+        },
+        "quantity": 1,
+        "schedule": null,
+        "start_date": 1790019531,
+        "status": "active",
+        "test_clock": null,
+        "transfer_data": null,
+        "trial_end": null,
+        "trial_settings": {
+          "end_behavior": {
+            "billing_cycle_anchor": "now",
+            "missing_payment_method": "create_invoice"
+          }
+        },
+        "trial_start": null
+      }
+    },
+    {
+      "seq": 16,
+      "method": "GET",
+      "path": "/v1/invoiceitems",
+      "path_refs": {},
+      "params": {
+        "customer": {
+          "$ref": {
+            "step": "customer",
+            "field": "id"
+          }
+        },
+        "pending": true
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "object": "list",
+        "data": [
+          {
+            "id": "ii_1UID39HIBYZYyePrF5iZGFIE",
+            "object": "invoiceitem",
+            "amount": -3,
+            "currency": "usd",
+            "customer": "cus_VIogy4r4tz3DQ9",
+            "customer_account": null,
+            "date": 1790019531,
+            "description": "Unused time on probe proration after 21 Oct 2026",
+            "discountable": false,
+            "discounts": [],
+            "frozen_fields": [
+              "pricing",
+              "quantity",
+              "discounts"
+            ],
+            "invoice": null,
+            "invoicing_rules": [],
+            "livemode": false,
+            "metadata": {},
+            "net_amount": -3,
+            "parent": {
+              "subscription_details": {
+                "subscription": "sub_1UID36HIBYZYyePrDcxlrGTb",
+                "subscription_item": "si_VIogBL4nbgDtdy"
+              },
+              "type": "subscription_details"
+            },
+            "period": {
+              "end": 1792611528,
+              "start": 1792605048
+            },
+            "pricing": {
+              "price_details": {
+                "price": "price_1UID2wHIBYZYyePrmvDNmBvj",
+                "product": "prod_VIogLBoApE3DO0"
+              },
+              "type": "price_details",
+              "unit_amount_decimal": null
+            },
+            "proration": true,
+            "proration_details": {
+              "credited_items": {
+                "invoice_line_item_details": {
+                  "invoice": "in_1UID36HIBYZYyePr0aCWUnn0",
+                  "invoice_line_items": [
+                    "il_1UID36HIBYZYyePrgNFl3yvH"
+                  ]
+                },
+                "type": "invoice_line_items"
+              },
+              "discount_amounts": []
+            },
+            "quantity": 1,
+            "quantity_decimal": "1",
+            "tax_rates": [],
+            "test_clock": null
+          },
+          {
+            "id": "ii_1UID39HIBYZYyePrwCD2QoV9",
+            "object": "invoiceitem",
+            "amount": 4,
+            "currency": "usd",
+            "customer": "cus_VIogy4r4tz3DQ9",
+            "customer_account": null,
+            "date": 1790019531,
+            "description": "Remaining time on probe proration after 21 Oct 2026",
+            "discountable": false,
+            "discounts": [],
+            "frozen_fields": [
+              "pricing",
+              "quantity",
+              "discounts"
+            ],
+            "invoice": null,
+            "invoicing_rules": [],
+            "livemode": false,
+            "metadata": {},
+            "net_amount": 4,
+            "parent": {
+              "subscription_details": {
+                "subscription": "sub_1UID36HIBYZYyePrDcxlrGTb",
+                "subscription_item": "si_VIogBL4nbgDtdy"
+              },
+              "type": "subscription_details"
+            },
+            "period": {
+              "end": 1792611528,
+              "start": 1792605048
+            },
+            "pricing": {
+              "price_details": {
+                "price": "price_1UID2wHIBYZYyePr9DffXNyh",
+                "product": "prod_VIogLBoApE3DO0"
+              },
+              "type": "price_details",
+              "unit_amount_decimal": null
+            },
+            "proration": true,
+            "proration_details": {
+              "credited_items": null,
+              "discount_amounts": []
+            },
+            "quantity": 1,
+            "quantity_decimal": "1",
+            "tax_rates": [],
+            "test_clock": null
+          }
+        ],
+        "has_more": false,
+        "url": "/v1/invoiceitems"
+      }
+    },
+    {
+      "seq": 17,
+      "method": "DELETE",
+      "path": "/v1/subscriptions/{subscription_exposed_id}",
+      "path_refs": {
+        "subscription_exposed_id": {
+          "step": "none_sub",
+          "field": "id"
+        }
+      },
+      "params": {
+        "prorate": true
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "sub_1UID39HIBYZYyePrsJ2rO86E",
+        "object": "subscription",
+        "application": null,
+        "application_fee_percent": null,
+        "automatic_tax": {
+          "disabled_reason": null,
+          "enabled": false,
+          "liability": null
+        },
+        "billing_cycle_anchor": 1790019531,
+        "billing_cycle_anchor_config": null,
+        "billing_mode": {
+          "flexible": {
+            "proration_discounts": "included"
+          },
+          "type": "flexible",
+          "updated_at": 1790019531
+        },
+        "billing_schedules": [],
+        "billing_thresholds": null,
+        "cancel_at": null,
+        "cancel_at_period_end": false,
+        "canceled_at": 1790019534,
+        "cancellation_details": {
+          "comment": null,
+          "feedback": null,
+          "feedback_option": null,
+          "reason": "cancellation_requested"
+        },
+        "collection_method": "charge_automatically",
+        "created": 1790019531,
+        "currency": "usd",
+        "customer": "cus_VIogy4r4tz3DQ9",
+        "customer_account": null,
+        "days_until_due": null,
+        "default_payment_method": null,
+        "default_source": null,
+        "default_tax_rates": [],
+        "description": null,
+        "discounts": [],
+        "ended_at": 1790019534,
+        "invoice_settings": {
+          "account_tax_ids": null,
+          "custom_fields": null,
+          "description": null,
+          "footer": null,
+          "issuer": {
+            "type": "self"
+          }
+        },
+        "items": {
+          "object": "list",
+          "data": [
+            {
+              "id": "si_VIogn64kY07lCu",
+              "object": "subscription_item",
+              "billing_thresholds": null,
+              "created": 1790019532,
+              "current_period_end": 1792611531,
+              "current_period_start": 1790019531,
+              "current_trial": null,
+              "discounts": [],
+              "metadata": {},
+              "plan": {
+                "id": "price_1UID2wHIBYZYyePr9DffXNyh",
+                "object": "plan",
+                "active": true,
+                "amount": 1800,
+                "amount_decimal": "1800",
+                "billing_scheme": "per_unit",
+                "created": 1790019518,
+                "currency": "usd",
+                "interval": "month",
+                "interval_count": 1,
+                "livemode": false,
+                "metadata": {},
+                "meter": null,
+                "nickname": null,
+                "product": "prod_VIogLBoApE3DO0",
+                "tiers_mode": null,
+                "transform_usage": null,
+                "trial_period_days": null,
+                "usage_type": "licensed"
+              },
+              "price": {
+                "id": "price_1UID2wHIBYZYyePr9DffXNyh",
+                "object": "price",
+                "active": true,
+                "billing_scheme": "per_unit",
+                "created": 1790019518,
+                "currency": "usd",
+                "custom_unit_amount": null,
+                "livemode": false,
+                "lookup_key": null,
+                "metadata": {},
+                "nickname": null,
+                "product": "prod_VIogLBoApE3DO0",
+                "recurring": {
+                  "interval": "month",
+                  "interval_count": 1,
+                  "meter": null,
+                  "trial_period_days": null,
+                  "usage_type": "licensed"
+                },
+                "tax_behavior": "unspecified",
+                "tiers_mode": null,
+                "transform_quantity": null,
+                "type": "recurring",
+                "unit_amount": 1800,
+                "unit_amount_decimal": "1800"
+              },
+              "quantity": 1,
+              "subscription": "sub_1UID39HIBYZYyePrsJ2rO86E",
+              "tax_rates": []
+            }
+          ],
+          "has_more": false,
+          "total_count": 1,
+          "url": "/v1/subscription_items?subscription=sub_1UID39HIBYZYyePrsJ2rO86E"
+        },
+        "latest_invoice": "in_1UID39HIBYZYyePriHdEoruZ",
+        "livemode": false,
+        "managed_payments": {
+          "enabled": false
+        },
+        "metadata": {},
+        "next_pending_invoice_item_invoice": null,
+        "on_behalf_of": null,
+        "pause_collection": null,
+        "payment_settings": {
+          "payment_method_options": null,
+          "payment_method_types": null,
+          "save_default_payment_method": "off"
+        },
+        "pending_invoice_item_interval": null,
+        "pending_setup_intent": null,
+        "pending_update": null,
+        "plan": {
+          "id": "price_1UID2wHIBYZYyePr9DffXNyh",
+          "object": "plan",
+          "active": true,
+          "amount": 1800,
+          "amount_decimal": "1800",
+          "billing_scheme": "per_unit",
+          "created": 1790019518,
+          "currency": "usd",
+          "interval": "month",
+          "interval_count": 1,
+          "livemode": false,
+          "metadata": {},
+          "meter": null,
+          "nickname": null,
+          "product": "prod_VIogLBoApE3DO0",
+          "tiers_mode": null,
+          "transform_usage": null,
+          "trial_period_days": null,
+          "usage_type": "licensed"
+        },
+        "quantity": 1,
+        "schedule": null,
+        "start_date": 1790019531,
+        "status": "canceled",
+        "test_clock": null,
+        "transfer_data": null,
+        "trial_end": null,
+        "trial_settings": {
+          "end_behavior": {
+            "billing_cycle_anchor": "now",
+            "missing_payment_method": "create_invoice"
+          }
+        },
+        "trial_start": null
+      }
+    },
+    {
+      "seq": 18,
+      "method": "POST",
+      "path": "/v1/subscriptions",
+      "path_refs": {},
+      "params": {
+        "customer": {
+          "$ref": {
+            "step": "customer",
+            "field": "id"
+          }
+        },
+        "items": [
+          {
+            "price": {
+              "$ref": {
+                "step": "p10",
+                "field": "id"
+              }
+            }
+          }
+        ]
+      },
+      "idempotency_key": null,
+      "binds_as": "cancel2",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "sub_1UID3DHIBYZYyePrIPjjbvw8",
+        "object": "subscription",
+        "application": null,
+        "application_fee_percent": null,
+        "automatic_tax": {
+          "disabled_reason": null,
+          "enabled": false,
+          "liability": null
+        },
+        "billing_cycle_anchor": 1790019535,
+        "billing_cycle_anchor_config": null,
+        "billing_mode": {
+          "flexible": {
+            "proration_discounts": "included"
+          },
+          "type": "flexible",
+          "updated_at": 1790019535
+        },
+        "billing_schedules": [],
+        "billing_thresholds": null,
+        "cancel_at": null,
+        "cancel_at_period_end": false,
+        "canceled_at": null,
+        "cancellation_details": {
+          "comment": null,
+          "feedback": null,
+          "feedback_option": null,
+          "reason": null
+        },
+        "collection_method": "charge_automatically",
+        "created": 1790019535,
+        "currency": "usd",
+        "customer": "cus_VIogy4r4tz3DQ9",
+        "customer_account": null,
+        "days_until_due": null,
+        "default_payment_method": null,
+        "default_source": null,
+        "default_tax_rates": [],
+        "description": null,
+        "discounts": [],
+        "ended_at": null,
+        "invoice_settings": {
+          "account_tax_ids": null,
+          "custom_fields": null,
+          "description": null,
+          "footer": null,
+          "issuer": {
+            "type": "self"
+          }
+        },
+        "items": {
+          "object": "list",
+          "data": [
+            {
+              "id": "si_VIogCGGcfaJGBH",
+              "object": "subscription_item",
+              "billing_thresholds": null,
+              "created": 1790019535,
+              "current_period_end": 1792611535,
+              "current_period_start": 1790019535,
+              "current_trial": null,
+              "discounts": [],
+              "metadata": {},
+              "plan": {
+                "id": "price_1UID2wHIBYZYyePrmvDNmBvj",
+                "object": "plan",
+                "active": true,
+                "amount": 1000,
+                "amount_decimal": "1000",
+                "billing_scheme": "per_unit",
+                "created": 1790019518,
+                "currency": "usd",
+                "interval": "month",
+                "interval_count": 1,
+                "livemode": false,
+                "metadata": {},
+                "meter": null,
+                "nickname": null,
+                "product": "prod_VIogLBoApE3DO0",
+                "tiers_mode": null,
+                "transform_usage": null,
+                "trial_period_days": null,
+                "usage_type": "licensed"
+              },
+              "price": {
+                "id": "price_1UID2wHIBYZYyePrmvDNmBvj",
+                "object": "price",
+                "active": true,
+                "billing_scheme": "per_unit",
+                "created": 1790019518,
+                "currency": "usd",
+                "custom_unit_amount": null,
+                "livemode": false,
+                "lookup_key": null,
+                "metadata": {},
+                "nickname": null,
+                "product": "prod_VIogLBoApE3DO0",
+                "recurring": {
+                  "interval": "month",
+                  "interval_count": 1,
+                  "meter": null,
+                  "trial_period_days": null,
+                  "usage_type": "licensed"
+                },
+                "tax_behavior": "unspecified",
+                "tiers_mode": null,
+                "transform_quantity": null,
+                "type": "recurring",
+                "unit_amount": 1000,
+                "unit_amount_decimal": "1000"
+              },
+              "quantity": 1,
+              "subscription": "sub_1UID3DHIBYZYyePrIPjjbvw8",
+              "tax_rates": []
+            }
+          ],
+          "has_more": false,
+          "total_count": 1,
+          "url": "/v1/subscription_items?subscription=sub_1UID3DHIBYZYyePrIPjjbvw8"
+        },
+        "latest_invoice": "in_1UID3DHIBYZYyePrJScHYvwl",
+        "livemode": false,
+        "managed_payments": {
+          "enabled": false
+        },
+        "metadata": {},
+        "next_pending_invoice_item_invoice": null,
+        "on_behalf_of": null,
+        "pause_collection": null,
+        "payment_settings": {
+          "payment_method_options": null,
+          "payment_method_types": null,
+          "save_default_payment_method": "off"
+        },
+        "pending_invoice_item_interval": null,
+        "pending_setup_intent": null,
+        "pending_update": null,
+        "plan": {
+          "id": "price_1UID2wHIBYZYyePrmvDNmBvj",
+          "object": "plan",
+          "active": true,
+          "amount": 1000,
+          "amount_decimal": "1000",
+          "billing_scheme": "per_unit",
+          "created": 1790019518,
+          "currency": "usd",
+          "interval": "month",
+          "interval_count": 1,
+          "livemode": false,
+          "metadata": {},
+          "meter": null,
+          "nickname": null,
+          "product": "prod_VIogLBoApE3DO0",
+          "tiers_mode": null,
+          "transform_usage": null,
+          "trial_period_days": null,
+          "usage_type": "licensed"
+        },
+        "quantity": 1,
+        "schedule": null,
+        "start_date": 1790019535,
+        "status": "active",
+        "test_clock": null,
+        "transfer_data": null,
+        "trial_end": null,
+        "trial_settings": {
+          "end_behavior": {
+            "billing_cycle_anchor": "now",
+            "missing_payment_method": "create_invoice"
+          }
+        },
+        "trial_start": null
+      }
+    },
+    {
+      "seq": 19,
+      "method": "DELETE",
+      "path": "/v1/subscriptions/{subscription_exposed_id}",
+      "path_refs": {
+        "subscription_exposed_id": {
+          "step": "cancel2",
+          "field": "id"
+        }
+      },
+      "params": {
+        "prorate": true,
+        "invoice_now": true
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "sub_1UID3DHIBYZYyePrIPjjbvw8",
+        "object": "subscription",
+        "application": null,
+        "application_fee_percent": null,
+        "automatic_tax": {
+          "disabled_reason": null,
+          "enabled": false,
+          "liability": null
+        },
+        "billing_cycle_anchor": 1790019535,
+        "billing_cycle_anchor_config": null,
+        "billing_mode": {
+          "flexible": {
+            "proration_discounts": "included"
+          },
+          "type": "flexible",
+          "updated_at": 1790019535
+        },
+        "billing_schedules": [],
+        "billing_thresholds": null,
+        "cancel_at": null,
+        "cancel_at_period_end": false,
+        "canceled_at": 1790019536,
+        "cancellation_details": {
+          "comment": null,
+          "feedback": null,
+          "feedback_option": null,
+          "reason": "cancellation_requested"
+        },
+        "collection_method": "charge_automatically",
+        "created": 1790019535,
+        "currency": "usd",
+        "customer": "cus_VIogy4r4tz3DQ9",
+        "customer_account": null,
+        "days_until_due": null,
+        "default_payment_method": null,
+        "default_source": null,
+        "default_tax_rates": [],
+        "description": null,
+        "discounts": [],
+        "ended_at": 1790019536,
+        "invoice_settings": {
+          "account_tax_ids": null,
+          "custom_fields": null,
+          "description": null,
+          "footer": null,
+          "issuer": {
+            "type": "self"
+          }
+        },
+        "items": {
+          "object": "list",
+          "data": [
+            {
+              "id": "si_VIogCGGcfaJGBH",
+              "object": "subscription_item",
+              "billing_thresholds": null,
+              "created": 1790019535,
+              "current_period_end": 1792611535,
+              "current_period_start": 1790019535,
+              "current_trial": null,
+              "discounts": [],
+              "metadata": {},
+              "plan": {
+                "id": "price_1UID2wHIBYZYyePrmvDNmBvj",
+                "object": "plan",
+                "active": true,
+                "amount": 1000,
+                "amount_decimal": "1000",
+                "billing_scheme": "per_unit",
+                "created": 1790019518,
+                "currency": "usd",
+                "interval": "month",
+                "interval_count": 1,
+                "livemode": false,
+                "metadata": {},
+                "meter": null,
+                "nickname": null,
+                "product": "prod_VIogLBoApE3DO0",
+                "tiers_mode": null,
+                "transform_usage": null,
+                "trial_period_days": null,
+                "usage_type": "licensed"
+              },
+              "price": {
+                "id": "price_1UID2wHIBYZYyePrmvDNmBvj",
+                "object": "price",
+                "active": true,
+                "billing_scheme": "per_unit",
+                "created": 1790019518,
+                "currency": "usd",
+                "custom_unit_amount": null,
+                "livemode": false,
+                "lookup_key": null,
+                "metadata": {},
+                "nickname": null,
+                "product": "prod_VIogLBoApE3DO0",
+                "recurring": {
+                  "interval": "month",
+                  "interval_count": 1,
+                  "meter": null,
+                  "trial_period_days": null,
+                  "usage_type": "licensed"
+                },
+                "tax_behavior": "unspecified",
+                "tiers_mode": null,
+                "transform_quantity": null,
+                "type": "recurring",
+                "unit_amount": 1000,
+                "unit_amount_decimal": "1000"
+              },
+              "quantity": 1,
+              "subscription": "sub_1UID3DHIBYZYyePrIPjjbvw8",
+              "tax_rates": []
+            }
+          ],
+          "has_more": false,
+          "total_count": 1,
+          "url": "/v1/subscription_items?subscription=sub_1UID3DHIBYZYyePrIPjjbvw8"
+        },
+        "latest_invoice": "in_1UID3FHIBYZYyePrL68AiJ3c",
+        "livemode": false,
+        "managed_payments": {
+          "enabled": false
+        },
+        "metadata": {},
+        "next_pending_invoice_item_invoice": null,
+        "on_behalf_of": null,
+        "pause_collection": null,
+        "payment_settings": {
+          "payment_method_options": null,
+          "payment_method_types": null,
+          "save_default_payment_method": "off"
+        },
+        "pending_invoice_item_interval": null,
+        "pending_setup_intent": null,
+        "pending_update": null,
+        "plan": {
+          "id": "price_1UID2wHIBYZYyePrmvDNmBvj",
+          "object": "plan",
+          "active": true,
+          "amount": 1000,
+          "amount_decimal": "1000",
+          "billing_scheme": "per_unit",
+          "created": 1790019518,
+          "currency": "usd",
+          "interval": "month",
+          "interval_count": 1,
+          "livemode": false,
+          "metadata": {},
+          "meter": null,
+          "nickname": null,
+          "product": "prod_VIogLBoApE3DO0",
+          "tiers_mode": null,
+          "transform_usage": null,
+          "trial_period_days": null,
+          "usage_type": "licensed"
+        },
+        "quantity": 1,
+        "schedule": null,
+        "start_date": 1790019535,
+        "status": "canceled",
+        "test_clock": null,
+        "transfer_data": null,
+        "trial_end": null,
+        "trial_settings": {
+          "end_behavior": {
+            "billing_cycle_anchor": "now",
+            "missing_payment_method": "create_invoice"
+          }
+        },
+        "trial_start": null
+      }
+    },
+    {
+      "seq": 20,
+      "method": "POST",
+      "path": "/v1/subscriptions",
+      "path_refs": {},
+      "params": {
+        "customer": {
+          "$ref": {
+            "step": "customer",
+            "field": "id"
+          }
+        },
+        "items": [
+          {
+            "price": {
+              "$ref": {
+                "step": "p10",
+                "field": "id"
+              }
+            }
+          }
+        ]
+      },
+      "idempotency_key": null,
+      "binds_as": "anchor",
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "sub_1UID3FHIBYZYyePrY0mK3WQp",
+        "object": "subscription",
+        "application": null,
+        "application_fee_percent": null,
+        "automatic_tax": {
+          "disabled_reason": null,
+          "enabled": false,
+          "liability": null
+        },
+        "billing_cycle_anchor": 1790019537,
+        "billing_cycle_anchor_config": null,
+        "billing_mode": {
+          "flexible": {
+            "proration_discounts": "included"
+          },
+          "type": "flexible",
+          "updated_at": 1790019537
+        },
+        "billing_schedules": [],
+        "billing_thresholds": null,
+        "cancel_at": null,
+        "cancel_at_period_end": false,
+        "canceled_at": null,
+        "cancellation_details": {
+          "comment": null,
+          "feedback": null,
+          "feedback_option": null,
+          "reason": null
+        },
+        "collection_method": "charge_automatically",
+        "created": 1790019537,
+        "currency": "usd",
+        "customer": "cus_VIogy4r4tz3DQ9",
+        "customer_account": null,
+        "days_until_due": null,
+        "default_payment_method": null,
+        "default_source": null,
+        "default_tax_rates": [],
+        "description": null,
+        "discounts": [],
+        "ended_at": null,
+        "invoice_settings": {
+          "account_tax_ids": null,
+          "custom_fields": null,
+          "description": null,
+          "footer": null,
+          "issuer": {
+            "type": "self"
+          }
+        },
+        "items": {
+          "object": "list",
+          "data": [
+            {
+              "id": "si_VIogryohiyoEAo",
+              "object": "subscription_item",
+              "billing_thresholds": null,
+              "created": 1790019538,
+              "current_period_end": 1792611537,
+              "current_period_start": 1790019537,
+              "current_trial": null,
+              "discounts": [],
+              "metadata": {},
+              "plan": {
+                "id": "price_1UID2wHIBYZYyePrmvDNmBvj",
+                "object": "plan",
+                "active": true,
+                "amount": 1000,
+                "amount_decimal": "1000",
+                "billing_scheme": "per_unit",
+                "created": 1790019518,
+                "currency": "usd",
+                "interval": "month",
+                "interval_count": 1,
+                "livemode": false,
+                "metadata": {},
+                "meter": null,
+                "nickname": null,
+                "product": "prod_VIogLBoApE3DO0",
+                "tiers_mode": null,
+                "transform_usage": null,
+                "trial_period_days": null,
+                "usage_type": "licensed"
+              },
+              "price": {
+                "id": "price_1UID2wHIBYZYyePrmvDNmBvj",
+                "object": "price",
+                "active": true,
+                "billing_scheme": "per_unit",
+                "created": 1790019518,
+                "currency": "usd",
+                "custom_unit_amount": null,
+                "livemode": false,
+                "lookup_key": null,
+                "metadata": {},
+                "nickname": null,
+                "product": "prod_VIogLBoApE3DO0",
+                "recurring": {
+                  "interval": "month",
+                  "interval_count": 1,
+                  "meter": null,
+                  "trial_period_days": null,
+                  "usage_type": "licensed"
+                },
+                "tax_behavior": "unspecified",
+                "tiers_mode": null,
+                "transform_quantity": null,
+                "type": "recurring",
+                "unit_amount": 1000,
+                "unit_amount_decimal": "1000"
+              },
+              "quantity": 1,
+              "subscription": "sub_1UID3FHIBYZYyePrY0mK3WQp",
+              "tax_rates": []
+            }
+          ],
+          "has_more": false,
+          "total_count": 1,
+          "url": "/v1/subscription_items?subscription=sub_1UID3FHIBYZYyePrY0mK3WQp"
+        },
+        "latest_invoice": "in_1UID3FHIBYZYyePruzDquNQz",
+        "livemode": false,
+        "managed_payments": {
+          "enabled": false
+        },
+        "metadata": {},
+        "next_pending_invoice_item_invoice": null,
+        "on_behalf_of": null,
+        "pause_collection": null,
+        "payment_settings": {
+          "payment_method_options": null,
+          "payment_method_types": null,
+          "save_default_payment_method": "off"
+        },
+        "pending_invoice_item_interval": null,
+        "pending_setup_intent": null,
+        "pending_update": null,
+        "plan": {
+          "id": "price_1UID2wHIBYZYyePrmvDNmBvj",
+          "object": "plan",
+          "active": true,
+          "amount": 1000,
+          "amount_decimal": "1000",
+          "billing_scheme": "per_unit",
+          "created": 1790019518,
+          "currency": "usd",
+          "interval": "month",
+          "interval_count": 1,
+          "livemode": false,
+          "metadata": {},
+          "meter": null,
+          "nickname": null,
+          "product": "prod_VIogLBoApE3DO0",
+          "tiers_mode": null,
+          "transform_usage": null,
+          "trial_period_days": null,
+          "usage_type": "licensed"
+        },
+        "quantity": 1,
+        "schedule": null,
+        "start_date": 1790019537,
+        "status": "active",
+        "test_clock": null,
+        "transfer_data": null,
+        "trial_end": null,
+        "trial_settings": {
+          "end_behavior": {
+            "billing_cycle_anchor": "now",
+            "missing_payment_method": "create_invoice"
+          }
+        },
+        "trial_start": null
+      }
+    },
+    {
+      "seq": 21,
+      "method": "POST",
+      "path": "/v1/subscriptions/{subscription_exposed_id}",
+      "path_refs": {
+        "subscription_exposed_id": {
+          "step": "anchor",
+          "field": "id"
+        }
+      },
+      "params": {
+        "billing_cycle_anchor": "now"
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "sub_1UID3FHIBYZYyePrY0mK3WQp",
+        "object": "subscription",
+        "application": null,
+        "application_fee_percent": null,
+        "automatic_tax": {
+          "disabled_reason": null,
+          "enabled": false,
+          "liability": null
+        },
+        "billing_cycle_anchor": 1790019541,
+        "billing_cycle_anchor_config": null,
+        "billing_mode": {
+          "flexible": {
+            "proration_discounts": "included"
+          },
+          "type": "flexible",
+          "updated_at": 1790019537
+        },
+        "billing_schedules": [],
+        "billing_thresholds": null,
+        "cancel_at": null,
+        "cancel_at_period_end": false,
+        "canceled_at": null,
+        "cancellation_details": {
+          "comment": null,
+          "feedback": null,
+          "feedback_option": null,
+          "reason": null
+        },
+        "collection_method": "charge_automatically",
+        "created": 1790019537,
+        "currency": "usd",
+        "customer": "cus_VIogy4r4tz3DQ9",
+        "customer_account": null,
+        "days_until_due": null,
+        "default_payment_method": null,
+        "default_source": null,
+        "default_tax_rates": [],
+        "description": null,
+        "discounts": [],
+        "ended_at": null,
+        "invoice_settings": {
+          "account_tax_ids": null,
+          "custom_fields": null,
+          "description": null,
+          "footer": null,
+          "issuer": {
+            "type": "self"
+          }
+        },
+        "items": {
+          "object": "list",
+          "data": [
+            {
+              "id": "si_VIogryohiyoEAo",
+              "object": "subscription_item",
+              "billing_thresholds": null,
+              "created": 1790019538,
+              "current_period_end": 1792611541,
+              "current_period_start": 1790019541,
+              "current_trial": null,
+              "discounts": [],
+              "metadata": {},
+              "plan": {
+                "id": "price_1UID2wHIBYZYyePrmvDNmBvj",
+                "object": "plan",
+                "active": true,
+                "amount": 1000,
+                "amount_decimal": "1000",
+                "billing_scheme": "per_unit",
+                "created": 1790019518,
+                "currency": "usd",
+                "interval": "month",
+                "interval_count": 1,
+                "livemode": false,
+                "metadata": {},
+                "meter": null,
+                "nickname": null,
+                "product": "prod_VIogLBoApE3DO0",
+                "tiers_mode": null,
+                "transform_usage": null,
+                "trial_period_days": null,
+                "usage_type": "licensed"
+              },
+              "price": {
+                "id": "price_1UID2wHIBYZYyePrmvDNmBvj",
+                "object": "price",
+                "active": true,
+                "billing_scheme": "per_unit",
+                "created": 1790019518,
+                "currency": "usd",
+                "custom_unit_amount": null,
+                "livemode": false,
+                "lookup_key": null,
+                "metadata": {},
+                "nickname": null,
+                "product": "prod_VIogLBoApE3DO0",
+                "recurring": {
+                  "interval": "month",
+                  "interval_count": 1,
+                  "meter": null,
+                  "trial_period_days": null,
+                  "usage_type": "licensed"
+                },
+                "tax_behavior": "unspecified",
+                "tiers_mode": null,
+                "transform_quantity": null,
+                "type": "recurring",
+                "unit_amount": 1000,
+                "unit_amount_decimal": "1000"
+              },
+              "quantity": 1,
+              "subscription": "sub_1UID3FHIBYZYyePrY0mK3WQp",
+              "tax_rates": []
+            }
+          ],
+          "has_more": false,
+          "total_count": 1,
+          "url": "/v1/subscription_items?subscription=sub_1UID3FHIBYZYyePrY0mK3WQp"
+        },
+        "latest_invoice": "in_1UID3FHIBYZYyePruzDquNQz",
+        "livemode": false,
+        "managed_payments": {
+          "enabled": false
+        },
+        "metadata": {},
+        "next_pending_invoice_item_invoice": null,
+        "on_behalf_of": null,
+        "pause_collection": null,
+        "payment_settings": {
+          "payment_method_options": null,
+          "payment_method_types": null,
+          "save_default_payment_method": "off"
+        },
+        "pending_invoice_item_interval": null,
+        "pending_setup_intent": null,
+        "pending_update": null,
+        "plan": {
+          "id": "price_1UID2wHIBYZYyePrmvDNmBvj",
+          "object": "plan",
+          "active": true,
+          "amount": 1000,
+          "amount_decimal": "1000",
+          "billing_scheme": "per_unit",
+          "created": 1790019518,
+          "currency": "usd",
+          "interval": "month",
+          "interval_count": 1,
+          "livemode": false,
+          "metadata": {},
+          "meter": null,
+          "nickname": null,
+          "product": "prod_VIogLBoApE3DO0",
+          "tiers_mode": null,
+          "transform_usage": null,
+          "trial_period_days": null,
+          "usage_type": "licensed"
+        },
+        "quantity": 1,
+        "schedule": null,
+        "start_date": 1790019537,
+        "status": "active",
+        "test_clock": null,
+        "transfer_data": null,
+        "trial_end": null,
+        "trial_settings": {
+          "end_behavior": {
+            "billing_cycle_anchor": "now",
+            "missing_payment_method": "create_invoice"
+          }
+        },
+        "trial_start": null
+      }
+    },
+    {
+      "seq": 22,
+      "method": "POST",
+      "path": "/v1/subscriptions/{subscription_exposed_id}",
+      "path_refs": {
+        "subscription_exposed_id": {
+          "step": "anchor",
+          "field": "id"
+        }
+      },
+      "params": {
+        "billing_cycle_anchor": "unchanged"
+      },
+      "idempotency_key": null,
+      "binds_as": null,
+      "recorded_status": 200,
+      "recorded_stripe_version": "2026-08-26.dahlia",
+      "recorded_body": {
+        "id": "sub_1UID3FHIBYZYyePrY0mK3WQp",
+        "object": "subscription",
+        "application": null,
+        "application_fee_percent": null,
+        "automatic_tax": {
+          "disabled_reason": null,
+          "enabled": false,
+          "liability": null
+        },
+        "billing_cycle_anchor": 1790019541,
+        "billing_cycle_anchor_config": null,
+        "billing_mode": {
+          "flexible": {
+            "proration_discounts": "included"
+          },
+          "type": "flexible",
+          "updated_at": 1790019537
+        },
+        "billing_schedules": [],
+        "billing_thresholds": null,
+        "cancel_at": null,
+        "cancel_at_period_end": false,
+        "canceled_at": null,
+        "cancellation_details": {
+          "comment": null,
+          "feedback": null,
+          "feedback_option": null,
+          "reason": null
+        },
+        "collection_method": "charge_automatically",
+        "created": 1790019537,
+        "currency": "usd",
+        "customer": "cus_VIogy4r4tz3DQ9",
+        "customer_account": null,
+        "days_until_due": null,
+        "default_payment_method": null,
+        "default_source": null,
+        "default_tax_rates": [],
+        "description": null,
+        "discounts": [],
+        "ended_at": null,
+        "invoice_settings": {
+          "account_tax_ids": null,
+          "custom_fields": null,
+          "description": null,
+          "footer": null,
+          "issuer": {
+            "type": "self"
+          }
+        },
+        "items": {
+          "object": "list",
+          "data": [
+            {
+              "id": "si_VIogryohiyoEAo",
+              "object": "subscription_item",
+              "billing_thresholds": null,
+              "created": 1790019538,
+              "current_period_end": 1792611541,
+              "current_period_start": 1790019541,
+              "current_trial": null,
+              "discounts": [],
+              "metadata": {},
+              "plan": {
+                "id": "price_1UID2wHIBYZYyePrmvDNmBvj",
+                "object": "plan",
+                "active": true,
+                "amount": 1000,
+                "amount_decimal": "1000",
+                "billing_scheme": "per_unit",
+                "created": 1790019518,
+                "currency": "usd",
+                "interval": "month",
+                "interval_count": 1,
+                "livemode": false,
+                "metadata": {},
+                "meter": null,
+                "nickname": null,
+                "product": "prod_VIogLBoApE3DO0",
+                "tiers_mode": null,
+                "transform_usage": null,
+                "trial_period_days": null,
+                "usage_type": "licensed"
+              },
+              "price": {
+                "id": "price_1UID2wHIBYZYyePrmvDNmBvj",
+                "object": "price",
+                "active": true,
+                "billing_scheme": "per_unit",
+                "created": 1790019518,
+                "currency": "usd",
+                "custom_unit_amount": null,
+                "livemode": false,
+                "lookup_key": null,
+                "metadata": {},
+                "nickname": null,
+                "product": "prod_VIogLBoApE3DO0",
+                "recurring": {
+                  "interval": "month",
+                  "interval_count": 1,
+                  "meter": null,
+                  "trial_period_days": null,
+                  "usage_type": "licensed"
+                },
+                "tax_behavior": "unspecified",
+                "tiers_mode": null,
+                "transform_quantity": null,
+                "type": "recurring",
+                "unit_amount": 1000,
+                "unit_amount_decimal": "1000"
+              },
+              "quantity": 1,
+              "subscription": "sub_1UID3FHIBYZYyePrY0mK3WQp",
+              "tax_rates": []
+            }
+          ],
+          "has_more": false,
+          "total_count": 1,
+          "url": "/v1/subscription_items?subscription=sub_1UID3FHIBYZYyePrY0mK3WQp"
+        },
+        "latest_invoice": "in_1UID3FHIBYZYyePruzDquNQz",
+        "livemode": false,
+        "managed_payments": {
+          "enabled": false
+        },
+        "metadata": {},
+        "next_pending_invoice_item_invoice": null,
+        "on_behalf_of": null,
+        "pause_collection": null,
+        "payment_settings": {
+          "payment_method_options": null,
+          "payment_method_types": null,
+          "save_default_payment_method": "off"
+        },
+        "pending_invoice_item_interval": null,
+        "pending_setup_intent": null,
+        "pending_update": null,
+        "plan": {
+          "id": "price_1UID2wHIBYZYyePrmvDNmBvj",
+          "object": "plan",
+          "active": true,
+          "amount": 1000,
+          "amount_decimal": "1000",
+          "billing_scheme": "per_unit",
+          "created": 1790019518,
+          "currency": "usd",
+          "interval": "month",
+          "interval_count": 1,
+          "livemode": false,
+          "metadata": {},
+          "meter": null,
+          "nickname": null,
+          "product": "prod_VIogLBoApE3DO0",
+          "tiers_mode": null,
+          "transform_usage": null,
+          "trial_period_days": null,
+          "usage_type": "licensed"
+        },
+        "quantity": 1,
+        "schedule": null,
+        "start_date": 1790019537,
+        "status": "active",
+        "test_clock": null,
+        "transfer_data": null,
+        "trial_end": null,
+        "trial_settings": {
+          "end_behavior": {
+            "billing_cycle_anchor": "now",
+            "missing_payment_method": "create_invoice"
+          }
+        },
+        "trial_start": null
+      }
+    }
+  ]
+}

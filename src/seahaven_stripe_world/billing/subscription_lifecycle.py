@@ -11,10 +11,10 @@ going `past_due`, and a trial-end cancel stamps reason
 `cancellation_requested` — the recording wins and the doc is corrected in
 the same phase.
 
-Proration side effects are Phase 14's (the behavior spanning this phase and
-Phase 13): item create/update/delete and `proration_behavior` parameters
-are accepted and validated, and no proration lines are generated yet — a
-declared gap, closed by the proration phase.
+Proration side effects are Phase 14's, landed: item create/update/delete and
+the `proration_behavior` family generate the recorded credit/debit pairs
+(cassette 01), `billing_cycle_anchor: "now"` truncates and rolls, and
+`DELETE` takes `prorate`/`invoice_now`.
 """
 
 from collections.abc import Mapping, Sequence
@@ -25,7 +25,7 @@ from typing import Any
 import seahaven
 
 from seahaven_stripe_world import _ids, _json, _seq, _time
-from seahaven_stripe_world.billing import invoicing
+from seahaven_stripe_world.billing import invoicing, proration
 from seahaven_stripe_world.billing._money import round_half_up
 from seahaven_stripe_world.billing.invoicing import DiscountSpec, TaxRateSpec
 from seahaven_stripe_world.resources import _lookup, events, payment_intents
@@ -1335,8 +1335,50 @@ def apply_update(ctx: seahaven.Ctx, sub_id: str, params: dict[str, Any]) -> dict
             f"UPDATE subscriptions SET {assignments} WHERE id = ?", *sets.values(), sub_id
         )
 
-    if "items" in params:
+    if "items" in params and params.get("trial_end") != "now":
+        # The proration side effects (Phase 14): the diff between the items
+        # before and after the change drives the credit/debit pairs, per
+        # `proration_behavior`. A simultaneous `trial_end: "now"` skips them
+        # — the trial-end flow mints its own invoice and owns the moment
+        # (declared edge; the recorded conversion probe billed exactly that
+        # one credit).
+        old_items = _items_of(ctx, sub_id)
         _apply_items_update(ctx, row, params["items"])
+        emit_proration_side_effects(
+            ctx,
+            sub_id,
+            old_items,
+            _items_of(ctx, sub_id),
+            proration_behavior=params.get("proration_behavior", "create_prorations"),
+            proration_date=params.get("proration_date"),
+        )
+    elif "items" in params:
+        _apply_items_update(ctx, row, params["items"])
+    if params.get("billing_cycle_anchor") == "now" and params.get("trial_end") != "now":
+        # The machine table's classic ruling, UNCONDITIONAL on the update
+        # (the recording account is flexible-mode and answers a different
+        # shape — probe_proration_invoices.json carries it; declared):
+        # truncate at now, prorate per `proration_behavior` (the items
+        # branch above already emitted any changed pairs over the old
+        # window; with no `items`, the configurations are identical and the
+        # truncation itself contributes nothing), then reset the anchor and
+        # restart the periods.
+        if "items" not in params:
+            items = _items_of(ctx, sub_id)
+            emit_proration_side_effects(
+                ctx,
+                sub_id,
+                items,
+                items,
+                proration_behavior=params.get("proration_behavior", "create_prorations"),
+                proration_date=params.get("proration_date"),
+            )
+        _roll_periods_to(ctx, sub_id, now)
+        ctx.db.execute(
+            "UPDATE subscriptions SET billing_cycle_anchor = ? WHERE id = ?",
+            now,
+            sub_id,
+        )
     if "trial_end" in params and params["trial_end"] == "now":
         fresh = _re_read(ctx, sub_id)
         if fresh["status"] == "trialing":
@@ -1448,8 +1490,8 @@ def _apply_items_update(
     subscription's period end)` — the recorded new-item period. An
     itemless subscription (spec-blessed) has no period to align to, so the
     new item spans its own `[now, now + interval)` — the create shape, and
-    an honestly-declared unrecorded ruling. No proration lines until
-    Phase 14 (declared)."""
+    an honestly-declared unrecorded ruling. The proration side effects are
+    the caller's (`emit_proration_side_effects`, Phase 14)."""
     now = ctx.clock.iso()
     sub_period_end = _period_end(ctx, row["id"])
     for index, item in enumerate(items_param):
@@ -1495,6 +1537,270 @@ def _apply_items_update(
         )
 
 
+# --- proration (Phase 14) ---------------------------------------------------------------
+
+
+def _item_config(ctx: seahaven.Ctx, item: Mapping[str, Any]) -> proration.ItemConfig:
+    price = _price_of(ctx, item["price"])
+    product = _lookup.require_row(ctx, "products", "product", price["product"], param="product")
+    return proration.ItemConfig(
+        subscription_item_id=item["id"],
+        price_id=price["id"],
+        product_id=price["product"],
+        product_name=product["name"],
+        unit_amount=price["unit_amount"] or 0,
+        # A metered item's null quantity bills nothing yet; the proration
+        # multiplier is 1 (the same default `build_item_lines` applies).
+        quantity=item["quantity"] if item["quantity"] is not None else 1,
+    )
+
+
+def _credited_for_items(
+    ctx: seahaven.Ctx, sub_id: str, old_items: Sequence[Mapping[str, Any]]
+) -> dict[str, tuple[str, tuple[str, ...], dict[str, Any]]]:
+    """The invoice lines that billed each item's current period, as the
+    credits' back-links and the BILLED configuration (RECORDED, cassette
+    01: the credit points at the CREATE invoice's subscription line for the
+    same period — `{invoice, invoice_line_items}` — and the cancel credit
+    prices itself at the line's price, not the item's current one: a
+    `none`-switched item still credits what was actually paid). An item
+    whose period no invoice billed yet carries nothing."""
+    invoices = ctx.db.rows(
+        "SELECT id, lines FROM invoices WHERE parent_subscription = ? ORDER BY x_seq DESC",
+        sub_id,
+    )
+    credited: dict[str, tuple[str, tuple[str, ...], dict[str, Any]]] = {}
+    for item in old_items:
+        want_start = _time.to_unix(item["current_period_start"])
+        for invoice in invoices:
+            for line in _load_list(invoice["lines"]):
+                if not isinstance(line, dict):
+                    continue
+                parent = line.get("parent") or {}
+                details = parent.get("subscription_item_details")
+                period = line.get("period") or {}
+                if (
+                    isinstance(details, dict)
+                    and details.get("subscription_item") == item["id"]
+                    and details.get("proration") in (None, False, 0)
+                    and period.get("start") == want_start
+                ):
+                    credited[item["id"]] = (invoice["id"], (str(line["id"]),), line)
+                    break
+            if item["id"] in credited:
+                break
+    return credited
+
+
+def _billed_config(
+    ctx: seahaven.Ctx,
+    item: Mapping[str, Any],
+    credited_entry: tuple[str, tuple[str, ...], dict] | None,
+) -> proration.ItemConfig:
+    """The configuration to credit on cancel: the BILLED line's price and
+    quantity when one exists (recorded, cassette 01 — a `none`-switched
+    item still credits the old price that was paid), the item's own
+    configuration otherwise."""
+    if credited_entry is not None:
+        line = credited_entry[2]
+        pricing = line.get("pricing") or {}
+        details = pricing.get("price_details") or {}
+        price_id = details.get("price")
+        if isinstance(price_id, str):
+            price = _price_of(ctx, price_id)
+            product = _lookup.require_row(
+                ctx, "products", "product", price["product"], param="product"
+            )
+            return proration.ItemConfig(
+                subscription_item_id=item["id"],
+                price_id=price["id"],
+                product_id=price["product"],
+                product_name=product["name"],
+                unit_amount=price["unit_amount"] or 0,
+                quantity=int(line.get("quantity") or 1),
+            )
+    return _item_config(ctx, item)
+
+
+def _proration_lines_for(
+    ctx: seahaven.Ctx,
+    sub_row: Mapping[str, Any],
+    old_items: Sequence[Mapping[str, Any]],
+    new_items: Sequence[Mapping[str, Any]],
+    *,
+    proration_date: str,
+) -> list[proration.ProrationLine]:
+    """The changed pairs' lines, each computed over its own item window (the
+    recorded window is the item's period; a brand-new item rides the
+    subscription's own cycle)."""
+    credited = _credited_for_items(ctx, sub_row["id"], old_items)
+    credited_ids = {item_id: line_ids for item_id, (_invoice, line_ids, _line) in credited.items()}
+    old_configs = [_item_config(ctx, item) for item in old_items]
+    new_configs = [_item_config(ctx, item) for item in new_items]
+    old_by_id = {item["id"]: item for item in old_items}
+    new_by_id = {config.subscription_item_id: config for config in new_configs}
+    lines: list[proration.ProrationLine] = []
+    for old in old_configs:
+        # one window per surviving item: the OLD period the change lands in
+        window = old_by_id[old.subscription_item_id or ""]
+        successor = new_by_id.get(old.subscription_item_id)
+        lines.extend(
+            proration.proration_lines(
+                [old],
+                [successor] if successor is not None else [],
+                period_start=_time.to_unix(window["current_period_start"]),
+                period_end=_time.to_unix(window["current_period_end"]),
+                proration_date=_time.to_unix(proration_date),
+                credited_line_ids_by_item=credited_ids,
+            )
+        )
+    surviving = {item["id"] for item in old_items}
+    if not old_items:
+        # An itemless subscription (spec-blessed) has no cycle window: a new
+        # item's debit spans its own fresh period at full fraction.
+        for config in new_configs:
+            fresh = next(
+                (item for item in new_items if item["id"] == config.subscription_item_id),
+                None,
+            )
+            if fresh is None:
+                continue
+            lines.extend(
+                proration.proration_lines(
+                    [],
+                    [config],
+                    period_start=_time.to_unix(fresh["current_period_start"]),
+                    period_end=_time.to_unix(fresh["current_period_end"]),
+                    proration_date=_time.to_unix(proration_date),
+                )
+            )
+        return lines
+    sub_start = min(item["current_period_start"] for item in old_items)
+    sub_end = min(item["current_period_end"] for item in old_items)
+    for config in new_configs:
+        if config.subscription_item_id in surviving:
+            continue
+        # An ADDED item rides the subscription's cycle window (its own row
+        # period starts now; the recorded add-period is [now, sub period end))
+        lines.extend(
+            proration.proration_lines(
+                [],
+                [config],
+                period_start=_time.to_unix(sub_start),
+                period_end=_time.to_unix(sub_end),
+                proration_date=_time.to_unix(proration_date),
+            )
+        )
+    return lines
+
+
+def _write_proration_items(
+    ctx: seahaven.Ctx,
+    sub_row: Mapping[str, Any],
+    lines: Sequence[proration.ProrationLine],
+    *,
+    credited: Mapping[str, tuple[str, tuple[str, ...], dict[str, Any]]],
+    plain: bool = False,
+) -> list[dict[str, Any]]:
+    from seahaven_stripe_world.resources import invoiceitems
+
+    # Debits first (recorded, cassette 01: the pending list and the invoice
+    # lines — both newest-first — show the CREDIT first, so the credit is
+    # the newer row). `plain` is the cancel credit's recorded shape: no
+    # parent, no back-links.
+    ordered = [line for line in lines if line.amount > 0] + [
+        line for line in lines if line.amount < 0
+    ]
+    written: list[dict[str, Any]] = []
+    for line in ordered:
+        line_ids = line.credited_line_ids
+        invoice_id: str | None = None
+        if not plain and line.amount < 0 and line.subscription_item_id is not None:
+            entry = credited.get(line.subscription_item_id)
+            if entry is not None:
+                invoice_id = entry[0]
+                line_ids = line_ids or entry[1]
+        written.append(
+            invoiceitems.insert_proration_item(
+                ctx,
+                customer_id=sub_row["customer"],
+                subscription_id=sub_row["id"],
+                subscription_item_id=None if plain else line.subscription_item_id,
+                amount=line.amount,
+                currency=sub_row["currency"],
+                description=line.description,
+                price_id=line.price_id,
+                product_id=line.product_id,
+                period_start=_time.from_unix(line.period_start),
+                period_end=_time.from_unix(line.period_end),
+                quantity=line.quantity,
+                credited_invoice=invoice_id,
+                credited_line_ids=() if plain else line_ids,
+            )
+        )
+    return written
+
+
+def emit_proration_side_effects(
+    ctx: seahaven.Ctx,
+    sub_id: str,
+    old_items: Sequence[Mapping[str, Any]],
+    new_items: Sequence[Mapping[str, Any]],
+    *,
+    proration_behavior: str = "create_prorations",
+    proration_date: str | None = None,
+) -> None:
+    """The `proration_behavior` dispatch every item change drives (sub
+    update, item create/update/delete): compute the changed pairs' lines,
+    write them as pending invoiceitems, and — for `always_invoice` — mint,
+    finalize and settle the `subscription_update` invoice in the same call
+    (RECORDED, cassette 01: paid through the card at attempt 1 when the net
+    is collectable, rolled to the customer balance under the minimum
+    chargeable, credited whole on a net-negative total). `none` writes
+    nothing at all."""
+    if proration_behavior == "none":
+        return
+    sub_row = _re_read(ctx, sub_id)
+    moment = proration_date if proration_date is not None else ctx.clock.iso()
+    lines = _proration_lines_for(ctx, sub_row, old_items, new_items, proration_date=moment)
+    if not lines:
+        return
+    credited = _credited_for_items(ctx, sub_id, old_items)
+    _write_proration_items(ctx, sub_row, lines, credited=credited)
+    if proration_behavior != "always_invoice":
+        return
+    empty = invoicing.compute_totals([], currency=sub_row["currency"])
+    invoice = invoicing.create_invoice(
+        ctx,
+        customer_id=sub_row["customer"],
+        currency=sub_row["currency"],
+        collection_method=sub_row["collection_method"],
+        billing_reason="subscription_update",
+        totals=empty,
+        subscription_id=sub_id,
+        auto_advance=sub_row["collection_method"] == "send_invoice",
+        days_until_due=sub_row["days_until_due"],
+        # RECORDED: the proration invoice's period spans the subscription's
+        # own period start to the update moment.
+        period_start=_period_start(ctx, sub_id) or moment,
+        period_end=moment,
+        sweep=True,
+    )
+    _set_latest_invoice(ctx, sub_id, invoice["id"])
+    if sub_row["collection_method"] == "send_invoice":
+        # The conversion flow's ruling applied (unprobed here, declared): a
+        # send_invoice proration invoice is never charged — it stays draft
+        # with its auto-advance window.
+        return
+    invoicing.finalize_invoice(ctx, invoice["id"])
+    outcome = invoicing.pay_invoice(ctx, invoice["id"], sub_row=sub_row)
+    if outcome["outcome"] != "paid":
+        # The failed collection lands the subscription in `past_due`
+        # (billing_engine §1's charge-fails row); the open invoice is the
+        # customer's to pay — the recovery hook's business.
+        _set_status(ctx, sub_id, "past_due")
+
+
 def cancel_subscription(
     ctx: seahaven.Ctx,
     sub_id: str,
@@ -1504,7 +1810,20 @@ def cancel_subscription(
     cancellation_details: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """`DELETE /v1/subscriptions/{id}`: immediate. A second cancel of the
-    same id is the recorded 404 (the canceled row is gone for this path)."""
+    same id is the recorded 404 (the canceled row is gone for this path).
+
+    `prorate=true` mints the credit-only pending item for the unused
+    remainder (RECORDED, cassette 01's probe trail: "Unused time on …",
+    period `[cancel moment, period end)`, back-links to the line that
+    billed the period). `invoice_now=true` additionally mints the final
+    invoice — `billing_reason: subscription_cycle`, and a credit-only
+    (negative) total is never finalized or applied: live answers a draft
+    that is automatically marked uncollectible seconds later (both probe
+    rounds); a frozen clock cannot wait out that async mark, so the
+    uncollectible state lands inside the call — the dispute-settle
+    precedent, one hop ahead, declared in `allowed_differences.py`.
+    `invoice_now=true` with NOTHING to bill (no `prorate`, or a zero
+    remainder) mints no invoice at all — see `_final_invoice_on_cancel`."""
     row = _re_read(ctx, sub_id)
     if row["status"] in ("canceled", "incomplete_expired"):
         raise resource_missing("subscription", sub_id, param="id")
@@ -1524,12 +1843,82 @@ def cancel_subscription(
         _json.dumps(details),
         sub_id,
     )
-    # `prorate`/`invoice_now` are accepted and recorded; the credit-only
-    # proration item and the final invoice are Phase 14's span (declared) —
-    # with no pending items nothing would bill here anyway.
+    if prorate or invoice_now:
+        items = _items_of(ctx, sub_id)
+        # The canceled row still reads `active` to the arithmetic below —
+        # only the items' periods and the BILLED configurations matter.
+        credited = _credited_for_items(ctx, sub_id, items)
+        plain_lines: list[proration.ProrationLine] = []
+        for item in items:
+            config = _billed_config(ctx, item, credited.get(item["id"]))
+            plain_lines.extend(
+                proration.proration_lines(
+                    [config],
+                    [],
+                    period_start=_time.to_unix(item["current_period_start"]),
+                    period_end=_time.to_unix(item["current_period_end"]),
+                    proration_date=_time.to_unix(now),
+                )
+            )
+        written: list[dict[str, Any]] = []
+        if plain_lines and prorate:
+            written = _write_proration_items(ctx, row, plain_lines, credited=credited, plain=True)
+        if invoice_now:
+            _final_invoice_on_cancel(ctx, sub_id, row, attached=written)
     body = _serialize(ctx, _re_read(ctx, sub_id))
     events.emit_event(ctx, type="customer.subscription.deleted", obj=body)
     return body
+
+
+def _final_invoice_on_cancel(
+    ctx: seahaven.Ctx,
+    sub_id: str,
+    row: Mapping[str, Any],
+    *,
+    attached: list[dict[str, Any]],
+) -> None:
+    """The `invoice_now` final invoice, ONLY when this same call minted
+    something to bill (recorded, cassette 01 — the customer's older pending
+    items stay pending, unlike a subscription create's customer-wide sweep).
+    `invoice_now=true` with `prorate=false`, or with a zero remainder, bills
+    nothing: NO invoice is minted at all — Stripe's final invoice
+    outstanding-amount semantics read that way, and an empty invoice marked
+    uncollectible would be a stretch of the credit-only recording, not an
+    application of it (declared in `allowed_differences.py`).
+
+    With the credit attached, the total is negative by construction (only
+    credits ride — an invariant, not a probed fact), so the outcome is
+    always the uncollectible collapse: un-numbered, never finalized, the
+    credit never reaching the customer balance (recorded, both probe
+    rounds)."""
+    if not attached:
+        return
+    empty = invoicing.compute_totals([], currency=row["currency"])
+    invoice = invoicing.create_invoice(
+        ctx,
+        customer_id=row["customer"],
+        currency=row["currency"],
+        collection_method=row["collection_method"],
+        # RECORDED (both probe rounds): the final invoice's billing_reason,
+        # and its draft carries `auto_advance: true` with the window fields.
+        billing_reason="subscription_cycle",
+        totals=empty,
+        subscription_id=sub_id,
+        auto_advance=True,
+        days_until_due=row["days_until_due"],
+        period_start=_period_start(ctx, sub_id) or ctx.clock.iso(),
+        period_end=ctx.clock.iso(),
+    )
+    placeholders = ", ".join("?" for _ in attached)
+    ctx.db.execute(
+        f"UPDATE invoiceitems SET invoice = ? WHERE id IN ({placeholders})",
+        invoice["id"],
+        *[item["id"] for item in attached],
+    )
+    invoicing.rebuild_invoice_lines(ctx, invoice["id"])
+    invoice = _lookup.require_row(ctx, "invoices", "invoice", invoice["id"], param="invoice")
+    _set_latest_invoice(ctx, sub_id, invoice["id"])
+    invoicing.mark_uncollectible_invoice_draft(ctx, invoice["id"])
 
 
 def resume_subscription(

@@ -1,9 +1,9 @@
 """Shared money primitives: the fee schedule, with no `ctx`, no I/O, no floats.
 
 `components/billing_engine.md` §"Public Interface" places `FeeSchedule` and
-`stripe_fee` here. The module's other primitives (`round_cents_half_up`,
-`apportion`) belong to the proration and invoicing phases and land with them;
-nothing here pre-declares them.
+`stripe_fee` here. The proration phase adds `floor_cents` — the recorded
+proration rounding rule — beside the fee rule, so the two rounding
+authorities live in one auditable place.
 
 The processing fee is **account pricing**, not spec behavior: no Stripe page
 states a canonical rate as an API-discoverable value
@@ -17,14 +17,29 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from fractions import Fraction
 
-__all__ = ["FeeSchedule", "apportion", "round_half_up", "stripe_fee"]
+__all__ = ["FeeSchedule", "apportion", "floor_cents", "round_half_up", "stripe_fee"]
+
+
+def floor_cents(value: Fraction) -> int:
+    """Floor of an exact rational, toward negative infinity — the proration rule.
+
+    RECORDED (Phase 14, cassette 01 + the probe trails, 2026-09-21): an
+    engineered half-cent tie floors on both sides — a credit of -2.5¢ lands
+    as -3 and a debit of +4.5¢ as +4 — which no nearest-integer rule
+    (half-up, half-even, truncation) reproduces. The documented -667/+333
+    case agrees: floor(-666.67) = -667, floor(333.33) = 333, where
+    truncation would give -666 and fail. This corrects billing_engine's
+    original round-half-up assumption; every other value (fees, coupons,
+    taxes) keeps its own documented rule.
+    """
+    return value.numerator // value.denominator
 
 
 def round_half_up(value: Fraction) -> int:
     """Nearest integer, ties away from zero, exact. Stripe documents half-up
     for *fees* (support.stripe.com/questions/rounding-rules-for-stripe-fees)
-    — a different authority from proration's assumed tie-break, which is why
-    this lives here and not in the proration module.
+    — a different authority from proration's recorded floor, which is why
+    both live here, separately named, and never blur.
     """
     quotient = decimal.Decimal(value.numerator) / decimal.Decimal(value.denominator)
     return int(quotient.quantize(decimal.Decimal("1"), rounding=decimal.ROUND_HALF_UP))
@@ -37,7 +52,7 @@ def apportion(total: int, weights: Sequence[int]) -> list[int]:
     entry. This is Stripe's documented coupon-across-items rule, NOT independent
     rounding: a $5 coupon split 1:2 over a $10 and a $20 item yields [166, 334],
     not [167, 333] (gap-closure-2026-09-18.md item 1, closing paragraph).
-    Never call round_cents_half_up here — the two rounding behaviors are
+    Never call floor_cents here — the two rounding behaviors are
     documented separately and must not blur.
     """
     if not weights:

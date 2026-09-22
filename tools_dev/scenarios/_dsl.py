@@ -44,13 +44,15 @@ class StepHandle:
     name: str
 
 
-def ref(handle: StepHandle | str, field_: str = "id") -> Ref:
+def ref(handle: StepHandle | str, field_: str = "id", *, offset: int = 0) -> Ref:
     """Declare a value wired to an earlier step's response (`field_` is a
-    dotted path into that step's body, `data[3].id` included). Passing the
+    dotted path into that step's body, `data[3].id` included; `offset` adds
+    a constant to an integer field — the proration tie engineering, stored
+    relatively so record and replay each resolve their own). Passing the
     handle itself — or the bare binds_as name — elsewhere in a step means the
     same as `ref(...)` with the default field."""
     name = handle.name if isinstance(handle, StepHandle) else handle
-    return Ref(step=name, field=field_)
+    return Ref(step=name, field=field_, offset=offset)
 
 
 def _as_ref(value: StepHandle | str | Ref) -> Ref:

@@ -501,3 +501,354 @@ def test_the_idempotent_create_replays(instance: seahaven.Instance) -> None:
     assert second["body"]["id"] == first["body"]["id"]
     count = instance.inspect().one("SELECT count(*) AS n FROM subscriptions")
     assert count == {"n": 1}
+
+
+# --- proration (Phase 14, cassette 01) ---------------------------------------------------
+
+
+def proration_catalog(
+    instance: seahaven.Instance, name: str = "proration suite"
+) -> tuple[str, str, str, str]:
+    """A customer with a paying default card and monthly 10.00 / 18.00 /
+    20.00 prices — cassette 01's own setup shape."""
+    cus, _, _ = setup_catalog(instance)
+    prod = call(instance, "POST", "/v1/products", {"name": name})["body"]["id"]
+    prices = []
+    for unit in (1000, 1800, 2000):
+        prices.append(
+            call(
+                instance,
+                "POST",
+                "/v1/prices",
+                {
+                    "product": prod,
+                    "unit_amount": unit,
+                    "currency": "cad",
+                    "recurring": {"interval": "month"},
+                },
+            )["body"]["id"]
+        )
+    return (cus, *prices)
+
+
+def _sub(instance: seahaven.Instance, cus: str, price: str) -> dict:
+    return call(
+        instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": price}]}
+    )["body"]
+
+
+def _item_id(body: dict) -> str:
+    return body["items"]["data"][0]["id"]
+
+
+def _period(body: dict) -> tuple[int, int]:
+    item = body["items"]["data"][0]
+    return item["current_period_start"], item["current_period_end"]
+
+
+def _proration_date(body: dict, divisor: int) -> int:
+    start, end = _period(body)
+    return end - (end - start) // divisor
+
+
+def test_default_update_writes_pending_proration_items(instance: seahaven.Instance) -> None:
+    """`create_prorations` (the default): the credit/debit pair lands as
+    PENDING invoiceitems with cassette 01's wire body, and no invoice."""
+    cus, p10, p18, _ = proration_catalog(instance)
+    sub = _sub(instance, cus, p10)
+    call(
+        instance,
+        "POST",
+        f"/v1/subscriptions/{sub['id']}",
+        {
+            "items": [{"id": _item_id(sub), "price": p18}],
+            "proration_date": _proration_date(sub, 400),
+        },
+    )
+    pending = call(instance, "GET", "/v1/invoiceitems", {"customer": cus, "pending": True})["body"][
+        "data"
+    ]
+    # Newest-first: the credit leads (the debit was written first).
+    assert [(item["amount"], item["quantity"]) for item in pending] == [(-3, 1), (4, 1)]
+    credit, debit = pending[0], pending[1]
+    assert credit["description"].startswith("Unused time on")
+    assert debit["description"].startswith("Remaining time on")
+    for item in pending:
+        assert item["proration"] is True
+        assert item["discountable"] is False
+        assert item["net_amount"] == item["amount"]
+        assert item["frozen_fields"] == ["pricing", "quantity", "discounts"]
+        assert item["parent"]["type"] == "subscription_details"
+        assert item["pricing"]["unit_amount_decimal"] is None
+    # The credit's back-links point at the invoice that billed the period.
+    assert credit["proration_details"]["credited_items"]["type"] == "invoice_line_items"
+    assert (
+        credit["proration_details"]["credited_items"]["invoice_line_item_details"]["invoice"]
+        == sub["latest_invoice"]
+    )
+    # And no invoice was minted by the default behavior.
+    assert (
+        call(instance, "GET", "/v1/subscriptions/{id}".format(id=sub["id"]))["body"][
+            "latest_invoice"
+        ]
+        == sub["latest_invoice"]
+    )
+
+
+def test_always_invoice_pays_the_update_invoice(instance: seahaven.Instance) -> None:
+    """RECORDED (cassette 01): the subscription_update invoice carries only
+    the proration lines, finalizes and pays inside the call, and a net above
+    the minimum chargeable charges at attempt 1."""
+    cus, p10, _p18, p20 = proration_catalog(instance)
+    sub = _sub(instance, cus, p10)  # 10.00 -> 20.00 at a third: -334 + 666
+    updated = call(
+        instance,
+        "POST",
+        f"/v1/subscriptions/{sub['id']}",
+        {
+            "items": [{"id": _item_id(sub), "price": p20}],
+            "proration_behavior": "always_invoice",
+            "proration_date": _proration_date(sub, 3),
+        },
+    )["body"]
+    invoice = call(instance, "GET", f"/v1/invoices/{updated['latest_invoice']}")["body"]
+    assert invoice["billing_reason"] == "subscription_update"
+    assert invoice["status"] == "paid"
+    assert invoice["attempted"] is True
+    assert invoice["attempt_count"] == 1
+    assert [line["amount"] for line in invoice["lines"]["data"]] == [-334, 666]
+    assert invoice["subtotal"] == invoice["total"] == 332
+
+
+def test_a_sub_minimum_net_rolls_to_the_balance(instance: seahaven.Instance) -> None:
+    """RECORDED (cassette 01): a net of +1 is never charged — the invoice
+    settles paid with `attempted: true, attempt_count: 0`, the cent lands
+    on `customer.balance` as owed through an `invoice_too_small` row, and
+    the next invoice draws it (`starting_balance`)."""
+    cus, p10, p18, _ = proration_catalog(instance)
+    sub = _sub(instance, cus, p10)
+    updated = call(
+        instance,
+        "POST",
+        f"/v1/subscriptions/{sub['id']}",
+        {
+            "items": [{"id": _item_id(sub), "price": p18}],
+            "proration_behavior": "always_invoice",
+            "proration_date": _proration_date(sub, 400),  # -3 + 4 = +1
+        },
+    )["body"]
+    invoice = call(instance, "GET", f"/v1/invoices/{updated['latest_invoice']}")["body"]
+    assert invoice["total"] == 1
+    assert invoice["status"] == "paid"
+    assert invoice["attempt_count"] == 0
+    assert invoice["attempted"] is True
+    assert invoice["amount_due"] == 0
+    assert invoice["ending_balance"] == 1
+    customer = call(instance, "GET", f"/v1/customers/{cus}")["body"]
+    assert customer["balance"] == 1
+    # The roll's balance row (probe_proration_settlement pins the wire):
+    with instance.bulk() as ctx:
+        rows = ctx.db.rows(
+            "SELECT amount, type, ending_balance FROM customer_balance_transactions"
+            " WHERE invoice = ?",
+            invoice["id"],
+        )
+    assert [(row["amount"], row["type"], row["ending_balance"]) for row in rows] == [
+        (1, "invoice_too_small", 1)
+    ]
+    # The next create draws the owed cent onto its invoice.
+    next_sub = _sub(instance, cus, p10)
+    next_invoice = call(instance, "GET", f"/v1/invoices/{next_sub['latest_invoice']}")["body"]
+    assert next_invoice["starting_balance"] == 1
+    assert next_invoice["amount_due"] == 1001
+
+
+def test_a_negative_net_credits_the_customer_balance(instance: seahaven.Instance) -> None:
+    """The documented -334 (RECORDED, cassette 01): a downgrade's invoice
+    settles at amount_due 0 with `attempted: true, attempt_count: 0`, and
+    the credit lands as an `applied_to_invoice` balance row — correcting
+    billing_engine §3.5's `adjustment` guess."""
+    cus, p10, _p18, p20 = proration_catalog(instance)
+    sub = _sub(instance, cus, p20)
+    updated = call(
+        instance,
+        "POST",
+        f"/v1/subscriptions/{sub['id']}",
+        {
+            "items": [{"id": _item_id(sub), "price": p10}],
+            "proration_behavior": "always_invoice",
+            "proration_date": _proration_date(sub, 3),
+        },
+    )["body"]
+    invoice = call(instance, "GET", f"/v1/invoices/{updated['latest_invoice']}")["body"]
+    assert invoice["total"] == -334
+    assert invoice["amount_due"] == 0
+    assert invoice["status"] == "paid"
+    assert invoice["attempt_count"] == 0
+    assert invoice["ending_balance"] == -334
+    with instance.bulk() as ctx:
+        rows = ctx.db.rows(
+            "SELECT amount, type FROM customer_balance_transactions WHERE invoice = ?",
+            invoice["id"],
+        )
+    assert [(row["amount"], row["type"]) for row in rows] == [(-334, "applied_to_invoice")]
+
+
+def test_proration_behavior_none_writes_nothing(instance: seahaven.Instance) -> None:
+    cus, p10, p18, _ = proration_catalog(instance)
+    sub = _sub(instance, cus, p10)
+    before = call(instance, "GET", "/v1/invoiceitems", {"customer": cus, "pending": True})
+    updated = call(
+        instance,
+        "POST",
+        f"/v1/subscriptions/{sub['id']}",
+        {
+            "items": [{"id": _item_id(sub), "price": p18}],
+            "proration_behavior": "none",
+        },
+    )["body"]
+    after = call(instance, "GET", "/v1/invoiceitems", {"customer": cus, "pending": True})
+    assert after["body"]["data"] == before["body"]["data"] == []
+    assert updated["items"]["data"][0]["price"]["id"] == p18
+
+
+def test_quantity_only_change_reprorates_the_whole_item(instance: seahaven.Instance) -> None:
+    """RECORDED (cassette 01): 1 -> 3 at a 1/400 fraction writes the -3
+    credit and the +7 whole-item debit (a delta would read +5)."""
+    cus, p10, _p18, _ = proration_catalog(instance)
+    sub = _sub(instance, cus, p10)
+    call(
+        instance,
+        "POST",
+        f"/v1/subscriptions/{sub['id']}",
+        {
+            "items": [{"id": _item_id(sub), "quantity": 3}],
+            "proration_date": _proration_date(sub, 400),
+        },
+    )
+    pending = call(instance, "GET", "/v1/invoiceitems", {"customer": cus, "pending": True})["body"][
+        "data"
+    ]
+    assert [(item["amount"], item["quantity"]) for item in pending] == [(-3, 1), (7, 3)]
+    assert pending[1]["description"].startswith("Remaining time on 3 \u00d7")
+
+
+def test_cancel_with_prorate_mints_the_pending_credit(instance: seahaven.Instance) -> None:
+    """RECORDED (cassette 01): the prorate-only DELETE leaves one PENDING
+    credit at the billed configuration (a `none`-switched item still
+    credits the price that was paid), with the plain wire body — no
+    parent, no proration_details."""
+    cus, p10, p18, _ = proration_catalog(instance)
+    sub = _sub(instance, cus, p10)
+    call(
+        instance,
+        "POST",
+        f"/v1/subscriptions/{sub['id']}",
+        {"items": [{"id": _item_id(sub), "price": p18}], "proration_behavior": "none"},
+    )
+    canceled = call(instance, "DELETE", f"/v1/subscriptions/{sub['id']}", {"prorate": True})["body"]
+    assert canceled["status"] == "canceled"
+    pending = call(instance, "GET", "/v1/invoiceitems", {"customer": cus, "pending": True})["body"][
+        "data"
+    ]
+    assert len(pending) == 1
+    credit = pending[0]
+    assert credit["amount"] == -1000  # the BILLED price, not the switched-to one
+    assert credit["description"].startswith("Unused time on")
+    assert credit["parent"] is None
+    assert "proration_details" not in credit  # omitted, not null (recorded)
+    assert credit["frozen_fields"] == ["pricing", "quantity", "discounts"]
+
+
+def test_cancel_with_invoice_now_mints_the_uncollectible_final_invoice(
+    instance: seahaven.Instance,
+) -> None:
+    """RECORDED (cassette 01): the credit-only final invoice is a
+    `subscription_cycle` draft live marks uncollectible seconds later;
+    this world collapses the mark inside the call, and the credit never
+    reaches the customer balance."""
+    cus, p10, _p18, _ = proration_catalog(instance)
+    sub = _sub(instance, cus, p10)
+    canceled = call(
+        instance,
+        "DELETE",
+        f"/v1/subscriptions/{sub['id']}",
+        {"prorate": True, "invoice_now": True},
+    )["body"]
+    invoice = call(instance, "GET", f"/v1/invoices/{canceled['latest_invoice']}")["body"]
+    assert invoice["billing_reason"] == "subscription_cycle"
+    assert invoice["status"] == "uncollectible"
+    assert invoice["number"] is None
+    assert invoice["total"] == -1000
+    assert [line["amount"] for line in invoice["lines"]["data"]] == [-1000]
+    customer = call(instance, "GET", f"/v1/customers/{cus}")["body"]
+    assert customer["balance"] == 0
+
+
+def test_the_anchor_reset_truncates_rolls_and_re_anchors(instance: seahaven.Instance) -> None:
+    """`billing_cycle_anchor: "now"` on update (the classic ruling; the
+    recording account's flexible shape lives in the probe trail) — and it
+    runs WITHOUT `items` too (the machine table's row is unconditional).
+    Under the frozen clock a fresh subscription's reset instant equals its
+    creation instant, so the detectable setup BACKDATES the item period
+    first: the reset then lands mid-period, the truncation is observable,
+    and the anchor column demonstrably moves."""
+    cus, p10, _p18, _ = proration_catalog(instance)
+    sub = _sub(instance, cus, p10)
+    # Backdate the period to [Aug 2, Sep 2): the frozen `now`
+    # (Sep 1 14:00) sits one day before its end — a genuine mid-period
+    # subscription, the shape any fixture-generated history carries.
+    with instance.bulk() as ctx:
+        ctx.db.execute(
+            "UPDATE subscription_items SET current_period_start = ?, current_period_end = ?"
+            " WHERE subscription = ?",
+            "2026-08-02T14:00:00.000Z",
+            "2026-09-02T14:00:00.000Z",
+            sub["id"],
+        )
+    body = call(
+        instance,
+        "POST",
+        f"/v1/subscriptions/{sub['id']}",
+        {"billing_cycle_anchor": "now"},
+    )["body"]
+    assert body["status"] == "active"
+    start, end = _period(body)
+    # The period RESTARTED at the reset instant: [now, now + interval)
+    assert start == 1_788_271_200  # 2026-09-01T14:00:00Z, the frozen now
+    assert end == 1_790_863_200  # one month onward (Oct 1 14:00Z)
+    assert body["billing_cycle_anchor"] == start  # the column moved with it
+    # An unchanged configuration truncates to nothing: no proration items.
+    pending = call(instance, "GET", "/v1/invoiceitems", {"customer": cus, "pending": True})["body"][
+        "data"
+    ]
+    assert pending == []
+    # `unchanged` is the recorded no-op sibling.
+    again = call(
+        instance,
+        "POST",
+        f"/v1/subscriptions/{sub['id']}",
+        {"billing_cycle_anchor": "unchanged"},
+    )["body"]
+    assert _period(again) == (start, end)
+
+
+def test_cancel_with_invoice_now_and_nothing_to_bill_mints_no_invoice(
+    instance: seahaven.Instance,
+) -> None:
+    """`invoice_now=true` with `prorate=false` bills nothing, and the
+    graceful Stripe-shaped outcome is NO invoice (the final invoice bills
+    the outstanding amount; an empty uncollectible invoice would be a
+    stretch of the credit-only recording). Declared in
+    `allowed_differences.py`."""
+    cus, p10, _p18, _ = proration_catalog(instance)
+    sub = _sub(instance, cus, p10)
+    invoices_before = instance.inspect().rows("SELECT id FROM invoices")
+    canceled = call(
+        instance,
+        "DELETE",
+        f"/v1/subscriptions/{sub['id']}",
+        {"invoice_now": True},
+    )["body"]
+    assert canceled["status"] == "canceled"
+    assert instance.inspect().rows("SELECT id FROM invoices") == invoices_before

@@ -70,7 +70,7 @@ Each still touches only its own tables.
 - [x] **Phase 12: Subscriptions.** `subscriptions`, `subscription_items`, the eight-status machine.
 - [x] **Phase 13: Invoices.** `invoices`, `invoiceitems`, nested lines, the status machine,
        `automatically_finalizes_at`.
-- [ ] **Phase 14: Proration and dunning.** The behavior spanning Phases 12 and 13. Proration's
+- [x] **Phase 14: Proration and dunning.** The behavior spanning Phases 12 and 13. Proration's
       documented −667/+333/−334 case is a test here; the half-cent tie-break is the one assumption and
       is probed against the real API in this phase's step 3.
 - [ ] **Phase 15: Credit notes and customer balance.** `credit_notes`,
