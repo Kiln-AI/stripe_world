@@ -148,6 +148,10 @@ CREATE TABLE invoices (
     total_excluding_tax              INTEGER,
     total_pretax_credit_amounts      TEXT CHECK (total_pretax_credit_amounts IS NULL OR (json_valid(total_pretax_credit_amounts) AND json_type(total_pretax_credit_amounts) = 'array')),
     total_taxes                      TEXT CHECK (total_taxes IS NULL OR (json_valid(total_taxes) AND json_type(total_taxes) = 'array')),
+    -- Internal: the charge that paid this invoice.  Not serialized (no
+    -- `charge` field exists on `invoice` at 2026-08-26.dahlia).  Written by
+    -- `_mark_paid` so credit notes can refund the correct charge (Phase 15).
+    _charge                          TEXT REFERENCES charges (id),
     CHECK (parent_subscription IS NULL OR parent_type = 'subscription_details'),
     -- `uncollectible` joins `draft` in the un-numbered set (recorded, cassette
     -- 01): the invoice_now cancel collapse marks its credit-only final invoice
@@ -210,10 +214,7 @@ CREATE TABLE customer_balance_transactions (
     x_seq          INTEGER NOT NULL,
     created        TEXT NOT NULL,
     amount         INTEGER NOT NULL,
-    -- Phase 15 joins the credit_notes REFERENCES clause when that table
-    -- lands (the Phase 8→11 deferral precedent: SQLite resolves a foreign
-    -- key's target at write time, so the clause cannot precede the table).
-    credit_note    TEXT,
+    credit_note    TEXT REFERENCES credit_notes (id),
     currency       TEXT NOT NULL,
     customer       TEXT NOT NULL REFERENCES customers (id),
     description    TEXT,
@@ -233,6 +234,46 @@ CREATE INDEX cbt_by_customer    ON customer_balance_transactions (customer, x_se
 CREATE INDEX cbt_by_invoice     ON customer_balance_transactions (invoice, x_seq DESC);
 CREATE INDEX cbt_by_credit_note ON customer_balance_transactions (credit_note);
 
--- Phase 15 routes /v1/credit_notes and joins the credit_notes REFERENCES clause the
--- cbt.credit_note column above will want; until that table exists the bare column is
--- the Phase 8→11 deferral precedent again (the clause is added with the table).
+-- Phase 15: the credit_notes table and its line-item freeze (DDL verbatim from
+-- components/data_model.md §5). credit_note.lines are frozen JSON (written once
+-- by the transaction that writes the parent, never independently mutated).
+
+CREATE TABLE credit_notes (
+    id                           TEXT PRIMARY KEY,
+    x_seq                        INTEGER NOT NULL,
+    created                      TEXT NOT NULL,
+    amount                       INTEGER NOT NULL,
+    amount_shipping              INTEGER NOT NULL DEFAULT 0,
+    currency                     TEXT NOT NULL,
+    customer                     TEXT NOT NULL REFERENCES customers (id),
+    customer_balance_transaction TEXT REFERENCES customer_balance_transactions (id),
+    discount_amount              INTEGER NOT NULL DEFAULT 0,
+    discount_amounts             TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(discount_amounts) AND json_type(discount_amounts) = 'array'),
+    effective_at                 TEXT,
+    invoice                      TEXT NOT NULL REFERENCES invoices (id),
+    lines                        TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(lines) AND json_type(lines) = 'array'),
+    memo                         TEXT,
+    metadata                     TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata) AND json_type(metadata) = 'object'),
+    number                       TEXT NOT NULL,
+    out_of_band_amount           INTEGER,
+    post_payment_amount          INTEGER NOT NULL DEFAULT 0,
+    pre_payment_amount           INTEGER NOT NULL DEFAULT 0,
+    pretax_credit_amounts        TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(pretax_credit_amounts) AND json_type(pretax_credit_amounts) = 'array'),
+    reason                       TEXT CHECK (reason IS NULL OR reason IN
+                                     ('duplicate', 'fraudulent', 'order_change', 'product_unsatisfactory')),
+    refunds                      TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(refunds) AND json_type(refunds) = 'array'),
+    status                       TEXT NOT NULL CHECK (status IN ('issued', 'void')),
+    subtotal                     INTEGER NOT NULL,
+    subtotal_excluding_tax       INTEGER,
+    total                        INTEGER NOT NULL,
+    total_excluding_tax          INTEGER,
+    total_taxes                  TEXT CHECK (total_taxes IS NULL OR (json_valid(total_taxes) AND json_type(total_taxes) = 'array')),
+    type                         TEXT NOT NULL CHECK (type IN ('mixed', 'post_payment', 'pre_payment')),
+    voided_at                    TEXT,
+    CHECK ((status = 'void') = (voided_at IS NOT NULL)),
+    CHECK (amount = pre_payment_amount + post_payment_amount)
+) STRICT;
+
+CREATE UNIQUE INDEX credit_notes_by_seq  ON credit_notes (x_seq DESC);
+CREATE INDEX credit_notes_by_customer ON credit_notes (customer, x_seq DESC);
+CREATE INDEX credit_notes_by_invoice  ON credit_notes (invoice, x_seq DESC);

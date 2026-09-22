@@ -1322,6 +1322,14 @@ def _mark_paid(
         _json.dumps(transitions),
         row["id"],
     )
+    if charge_id is not None:
+        # Store the charge on the invoice so credit notes can refund the
+        # correct charge (Phase 15).  Not serialized — internal column only.
+        ctx.db.execute(
+            "UPDATE invoices SET _charge = ? WHERE id = ?",
+            charge_id,
+            row["id"],
+        )
     fresh = _re_read(ctx, row["id"])
     if charge_id is not None:
         # A real collection attempt succeeded: the payment event pair

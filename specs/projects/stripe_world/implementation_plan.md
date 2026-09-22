@@ -73,7 +73,7 @@ Each still touches only its own tables.
 - [x] **Phase 14: Proration and dunning.** The behavior spanning Phases 12 and 13. Proration's
       documented −667/+333/−334 case is a test here; the half-cent tie-break is the one assumption and
       is probed against the real API in this phase's step 3.
-- [ ] **Phase 15: Credit notes and customer balance.** `credit_notes`,
+- [x] **Phase 15: Credit notes and customer balance.** `credit_notes`,
       `customer_balance_transactions`, the three settlement channels.
 - [ ] **Phase 16: Subscription schedules.** Scoped-down `phases`.
 - [ ] **Phase 17: Events.** Emission across every earlier slice, backfilled, plus `/v1/events`.

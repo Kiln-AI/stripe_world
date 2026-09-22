@@ -33,6 +33,7 @@ def test_an_instance_of_empty_has_the_schema_and_no_rows(instance: seahaven.Inst
         "charges",
         "counters",
         "coupons",
+        "credit_notes",
         "customer_balance_transactions",
         "customers",
         "disputes",
@@ -71,6 +72,7 @@ def test_an_instance_of_empty_has_the_schema_and_no_rows(instance: seahaven.Inst
         "subscriptions",
         "subscription_items",
         "invoices",
+        "credit_notes",
         "customer_balance_transactions",
     ):
         assert instance.inspect().one(f"SELECT count(*) AS n FROM {table}") == {"n": 0}
