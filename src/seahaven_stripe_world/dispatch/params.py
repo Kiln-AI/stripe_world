@@ -128,6 +128,11 @@ class ParamSpec:
     metadata: bool = False
     required_one_of: tuple[tuple[str, ...], ...] = ()
     mutually_exclusive: tuple[tuple[str, ...], ...] = ()
+    # Search endpoints accept ``expand[]=total_count`` (functional_spec §6.2).
+    # Only when this flag is True is ``total_count`` stripped from the expand
+    # list before static path validation.  On non-search routes the path stays
+    # in the list and validation rejects it as non-expandable (§6.3).
+    search: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -823,10 +828,20 @@ def bind(
     metadata_raw = remaining.pop("metadata", None)
 
     expand: tuple[str, ...] = ()
+    include_total_count = False
     if expand_raw is not None:
         if not spec.expand:
             raise unknown_parameter("expand")
         expand = tuple(_check(EXPAND, expand_raw, "expand"))
+    # Search endpoints accept ``expand[]=total_count`` to opt into the count
+    # (functional_spec §6.2).  ``total_count`` is not a real expand path (it
+    # is a top-level envelope field, not a nested object reference), so strip
+    # it before the static path validation that would otherwise reject it.
+    # On non-search routes the path stays in the list and validation rejects
+    # it as non-expandable (§6.3: bad path is a hard 400).
+    if "total_count" in expand and spec.search:
+        include_total_count = True
+        expand = tuple(p for p in expand if p != "total_count")
     if expand:
         # Static path validation, in this layer, with no database access
         # (cross_cutting.md §3.3.1): a bad path is caught before any row is
@@ -851,22 +866,35 @@ def bind(
         # The silent clamp the live API applies (see DEFAULT_LIMIT): 0 and
         # negatives become 1, anything above 100 becomes 100.
         limit = max(LIMIT_FLOOR, min(LIMIT_CEILING, limit))
-        starting_after = (
-            None
-            if starting_after_raw is None
-            else _check(STARTING_AFTER, starting_after_raw, "starting_after")
-        )
-        ending_before = (
-            None
-            if ending_before_raw is None
-            else _check(ENDING_BEFORE, ending_before_raw, "ending_before")
-        )
-        # Both cursors present is *not* rejected here: the live API resolves
-        # each cursor first and only then refuses the pair (probed with a
-        # bogus + a real id — the bogus one's 400 wins; Phase 5 cassettes,
-        # scenario 09), so the exclusivity check lives in `page()` /
-        # `page_embedded()`, after resolution.
-        page = Page(limit=limit, starting_after=starting_after, ending_before=ending_before)
+        if spec.search:
+            # Search endpoints paginate via ``page`` / ``next_page`` tokens,
+            # not ``starting_after`` / ``ending_before``.  Accepting those
+            # cursors silently would produce wrong results (§6.3: never
+            # silently ignored), so reject them as unknown.
+            for name, value in (
+                ("starting_after", starting_after_raw),
+                ("ending_before", ending_before_raw),
+            ):
+                if value is not None:
+                    raise unknown_parameter(name)
+            page = Page(limit=limit, starting_after=None, ending_before=None)
+        else:
+            starting_after = (
+                None
+                if starting_after_raw is None
+                else _check(STARTING_AFTER, starting_after_raw, "starting_after")
+            )
+            ending_before = (
+                None
+                if ending_before_raw is None
+                else _check(ENDING_BEFORE, ending_before_raw, "ending_before")
+            )
+            # Both cursors present is *not* rejected here: the live API resolves
+            # each cursor first and only then refuses the pair (probed with a
+            # bogus + a real id — the bogus one's 400 wins; Phase 5 cassettes,
+            # scenario 09), so the exclusivity check lives in `page()` /
+            # `page_embedded()`, after resolution.
+            page = Page(limit=limit, starting_after=starting_after, ending_before=ending_before)
     else:
         for name, value in (
             ("limit", limit_raw),
@@ -917,4 +945,5 @@ def bind(
         metadata=metadata,
         page=page,
         idempotency_key=idempotency_key,
+        include_total_count=include_total_count,
     )

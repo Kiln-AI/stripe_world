@@ -24,11 +24,10 @@ def test_the_index_matches_the_route_table_both_directions() -> None:
     assert set(index.BY_KEY) == route_keys
 
 
-def test_an_unrouted_operation_is_invisible() -> None:
-    """`/v1/customers/search` exists in the full spec and is deliberately cut
-    (functional spec §3.3): it has neither results nor details."""
-    assert ("GET", "/v1/customers/search") not in index.BY_KEY
-    assert all("/search" not in result["path"] for result in index.search("search customers"))
+def test_search_operations_are_visible() -> None:
+    """The seven search endpoints (Phase 22) are now routed and visible."""
+    assert ("GET", "/v1/customers/search") in index.BY_KEY
+    assert ("GET", "/v1/charges/search") in index.BY_KEY
 
 
 def test_search_is_deterministic_with_a_total_order() -> None:

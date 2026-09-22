@@ -56,7 +56,7 @@ EVENT_TYPES_TXT = (
 )
 
 API_VERSION = "2026-08-26.dahlia"
-ROUTE_COUNT = 148
+ROUTE_COUNT = 155
 # Regression guards against a spec bump silently reintroducing the closure
 # inflation (components/discovery.md §3): crossing either forces a human
 # decision rather than a quiet multi-hundred-schema regrowth.
@@ -507,10 +507,11 @@ class GenerationError(Exception):
 def derive_operations(
     full_spec: dict[str, Any], *, expected_count: int = ROUTE_COUNT
 ) -> tuple[Route, ...]:
-    """The 148 routed operations, mechanically: the 22 resource-root prefixes
-    minus the 39 cuts (components/dispatcher.md §1.3). The count is asserted
-    (`expected_count` exists so a synthetic spec can exercise the cut rules),
-    so a spec bump that moves it fails generation instead of drifting scope."""
+    """The 155 routed operations, mechanically: the 22 resource-root prefixes
+    minus the 32 cuts (components/dispatcher.md §1.3), plus the 7 search
+    endpoints (Phase 22). The count is asserted (`expected_count` exists so a
+    synthetic spec can exercise the cut rules), so a spec bump that moves it
+    fails generation instead of drifting scope."""
     routes: list[Route] = []
     for path, path_item in full_spec["paths"].items():
         if "/".join(path.split("/")[:3]) not in ROOTS:
@@ -519,8 +520,6 @@ def derive_operations(
             if method not in ("get", "post", "delete"):
                 continue
             segments = [s for s in path.split("/") if s]
-            if len(segments) == 3 and segments[2] == "search" and method == "get":
-                continue
             if path.startswith("/v1/balance/history"):
                 continue
             if segments[1] == "products" and "features" in segments:

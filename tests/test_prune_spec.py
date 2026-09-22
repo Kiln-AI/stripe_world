@@ -198,12 +198,15 @@ def test_wrong_api_version_raises() -> None:
 # --- derive_operations: the 39 cuts -------------------------------------------
 
 
-def test_derive_operations_cuts_search_history_and_legacy_subresources() -> None:
+def test_derive_operations_cuts_history_and_legacy_subresources() -> None:
+    """Search endpoints are now included (Phase 22); only balance/history and
+    legacy customer sub-resources are cut."""
     spec = synthetic_spec()
-    derived = derive_operations(spec, expected_count=2)
+    derived = derive_operations(spec, expected_count=3)
     assert [(r.method, r.pattern) for r in derived] == [
         ("GET", "/v1/prices"),
         ("POST", "/v1/prices"),
+        ("GET", "/v1/prices/search"),
     ]
 
 

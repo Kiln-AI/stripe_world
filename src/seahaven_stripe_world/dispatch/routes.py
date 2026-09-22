@@ -1,4 +1,4 @@
-"""The routing table: the 148-operation scope of this world. Data, not code.
+"""The routing table: the 155-operation scope of this world. Data, not code.
 
 Every entry's `(method, pattern)` matches the pinned spec3.json verbatim,
 placeholder names included, and the spec pipeline validates that on every
@@ -46,6 +46,7 @@ from seahaven_stripe_world.resources import (
     products,
     promotion_codes,
     refunds,
+    search,
     setup_intents,
     subscription_items,
     subscription_schedules,
@@ -142,6 +143,15 @@ ALL: Final[tuple[Route, ...]] = (
         envelope="object",
         params=charges.CHARGE_CREATE,
         handler=charges.create,
+    ),
+    Route(
+        method="GET",
+        pattern="/v1/charges/search",
+        op_id="GetChargesSearch",
+        response_object="charge",
+        envelope="list",
+        params=search.CHARGES_SEARCH,
+        handler=search.search_charges,
     ),
     Route(
         method="GET",
@@ -403,6 +413,15 @@ ALL: Final[tuple[Route, ...]] = (
         params=customers.CUSTOMER_CREATE,
         resource=customers.SPEC,
         action="create",
+    ),
+    Route(
+        method="GET",
+        pattern="/v1/customers/search",
+        op_id="GetCustomersSearch",
+        response_object="customer",
+        envelope="list",
+        params=search.CUSTOMERS_SEARCH,
+        handler=search.search_customers,
     ),
     Route(
         method="GET",
@@ -677,6 +696,15 @@ ALL: Final[tuple[Route, ...]] = (
     Route(method="POST", pattern="/v1/invoices/create_preview", op_id="PostInvoicesCreatePreview"),
     Route(
         method="GET",
+        pattern="/v1/invoices/search",
+        op_id="GetInvoicesSearch",
+        response_object="invoice",
+        envelope="list",
+        params=search.INVOICES_SEARCH,
+        handler=search.search_invoices,
+    ),
+    Route(
+        method="GET",
         pattern="/v1/invoices/{invoice}",
         op_id="GetInvoicesInvoice",
         response_object="invoice",
@@ -818,6 +846,15 @@ ALL: Final[tuple[Route, ...]] = (
         envelope="object",
         params=payment_intents.PI_CREATE,
         handler=payment_intents.create,
+    ),
+    Route(
+        method="GET",
+        pattern="/v1/payment_intents/search",
+        op_id="GetPaymentIntentsSearch",
+        response_object="payment_intent",
+        envelope="list",
+        params=search.PAYMENT_INTENTS_SEARCH,
+        handler=search.search_payment_intents,
     ),
     Route(
         method="GET",
@@ -1030,6 +1067,15 @@ ALL: Final[tuple[Route, ...]] = (
     ),
     Route(
         method="GET",
+        pattern="/v1/prices/search",
+        op_id="GetPricesSearch",
+        response_object="price",
+        envelope="list",
+        params=search.PRICES_SEARCH,
+        handler=search.search_prices,
+    ),
+    Route(
+        method="GET",
         pattern="/v1/prices/{price}",
         op_id="GetPricesPrice",
         response_object="price",
@@ -1068,6 +1114,15 @@ ALL: Final[tuple[Route, ...]] = (
         envelope="object",
         params=products.PRODUCT_CREATE,
         handler=products.create,
+    ),
+    Route(
+        method="GET",
+        pattern="/v1/products/search",
+        op_id="GetProductsSearch",
+        response_object="product",
+        envelope="list",
+        params=search.PRODUCTS_SEARCH,
+        handler=search.search_products,
     ),
     Route(
         method="GET",
@@ -1389,6 +1444,15 @@ ALL: Final[tuple[Route, ...]] = (
         envelope="object",
         params=subscriptions.SUB_CREATE,
         handler=subscriptions.create,
+    ),
+    Route(
+        method="GET",
+        pattern="/v1/subscriptions/search",
+        op_id="GetSubscriptionsSearch",
+        response_object="subscription",
+        envelope="list",
+        params=search.SUBSCRIPTIONS_SEARCH,
+        handler=search.search_subscriptions,
     ),
     Route(
         method="GET",

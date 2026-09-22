@@ -334,7 +334,7 @@ def violations_in_body(body: Any, *, source: str) -> list[SchemaViolation]:
     def walk(node: Any, path: str) -> None:
         if isinstance(node, dict):
             discriminator = node.get("object")
-            if isinstance(discriminator, str) and discriminator != "list":
+            if isinstance(discriminator, str) and discriminator not in ("list", "search_result"):
                 if discriminator in BY_OBJECT or discriminator in DELETED_BY_OBJECT:
                     for violation in validate_object(node, source=source, path=path):
                         found[(violation.path, violation.problem)] = None
