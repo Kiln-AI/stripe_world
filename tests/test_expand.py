@@ -196,3 +196,183 @@ def test_a_dangling_reference_is_a_world_bug() -> None:
     ctx = cast(Any, FakeCtx())
     with pytest.raises(seahaven.WorldBug, match="dangling"):
         expand._fetch(ctx, resource.BY_OBJECT, edge, ["cus_missing"])
+
+
+# --- missing tests from §5.3 ------------------------------------------------------------------
+
+
+def test_unexpanded_reference_is_a_bare_id(instance: seahaven.Instance) -> None:
+    """Without `expand[]`, a reference field is a bare id string."""
+    cus = created(instance)
+    pi = instance.call(
+        "stripe_api_write",
+        method="POST",
+        path="/v1/payment_intents",
+        params={"amount": 1000, "currency": "usd", "customer": cus},
+    )["body"]
+    assert pi["customer"] == cus
+    assert isinstance(pi["customer"], str)
+
+
+def test_single_hop(instance: seahaven.Instance) -> None:
+    """`expand[]=customer` on a payment intent inflates the customer."""
+    cus = created(instance)
+    pi = instance.call(
+        "stripe_api_write",
+        method="POST",
+        path="/v1/payment_intents",
+        params={"amount": 1000, "currency": "usd", "customer": cus},
+    )["body"]
+    result = expand_on(instance, f"/v1/payment_intents/{pi['id']}", "customer")
+    assert result["status"] == 200
+    assert isinstance(result["body"]["customer"], dict)
+    assert result["body"]["customer"]["id"] == cus
+    assert result["body"]["customer"]["object"] == "customer"
+
+
+def test_recursive_hop(instance: seahaven.Instance) -> None:
+    """`payment_intent.customer` expands through two references."""
+    cus = created(instance)
+    pm = instance.call(
+        "stripe_api_write",
+        method="POST",
+        path="/v1/payment_methods",
+        params={"type": "card", "card": {"token": "tok_visa"}},
+    )["body"]["id"]
+    instance.call(
+        "stripe_api_write",
+        method="POST",
+        path=f"/v1/payment_methods/{pm}/attach",
+        params={"customer": cus},
+    )
+    pi = instance.call(
+        "stripe_api_write",
+        method="POST",
+        path="/v1/payment_intents",
+        params={
+            "amount": 1000,
+            "currency": "usd",
+            "customer": cus,
+            "payment_method": pm,
+            "confirm": True,
+        },
+    )["body"]
+    ch_id = pi["latest_charge"]
+    result = expand_on(instance, f"/v1/charges/{ch_id}", "payment_intent", "customer")
+    assert result["status"] == 200
+    assert isinstance(result["body"]["payment_intent"], dict)
+    assert isinstance(result["body"]["customer"], dict)
+    assert result["body"]["customer"]["id"] == cus
+
+
+def test_four_segments_allowed_on_a_list(instance: seahaven.Instance) -> None:
+    """The quoted deepest example: `data.payment_intent.customer.default_source`
+    on a charges list (§3.3.3)."""
+    cus = created(instance)
+    pm = instance.call(
+        "stripe_api_write",
+        method="POST",
+        path="/v1/payment_methods",
+        params={"type": "card", "card": {"token": "tok_visa"}},
+    )["body"]["id"]
+    instance.call(
+        "stripe_api_write",
+        method="POST",
+        path=f"/v1/payment_methods/{pm}/attach",
+        params={"customer": cus},
+    )
+    instance.call(
+        "stripe_api_write",
+        method="POST",
+        path="/v1/payment_intents",
+        params={
+            "amount": 500,
+            "currency": "usd",
+            "customer": cus,
+            "payment_method": pm,
+            "confirm": True,
+        },
+    )
+    result = instance.call(
+        "stripe_api_read",
+        path="/v1/charges",
+        params={"expand": ["data.payment_intent.customer.default_source"]},
+    )
+    assert result["status"] == 200
+    charge = result["body"]["data"][0]
+    assert isinstance(charge["payment_intent"], dict)
+    assert isinstance(charge["payment_intent"]["customer"], dict)
+
+
+def test_nested_list_needs_data(instance: seahaven.Instance) -> None:
+    """A nested list envelope requires `data.` before the child field:
+    `lines.discounts` errors because `discounts` is not `data`, while
+    `lines.data.discounts` passes validation."""
+    from seahaven_stripe_world.serialize.expand import validate_paths
+    from seahaven_stripe_world.stripe_errors import StripeApiError
+
+    # Without `data.`, the path is rejected at validation
+    with pytest.raises(StripeApiError, match="cannot be expanded"):
+        validate_paths(("lines.discounts",), object_name="invoice", is_list=False)
+
+    # With `data.`, the path is accepted
+    trie = validate_paths(("lines.data.discounts",), object_name="invoice", is_list=False)
+    assert "lines" in trie
+
+
+def test_expand_on_create(instance: seahaven.Instance) -> None:
+    """POST with `expand[]` sees the just-created object (§3.3.1)."""
+    result = instance.call(
+        "stripe_api_write",
+        method="POST",
+        path="/v1/customers",
+        params={"expand": ["default_source"]},
+    )
+    assert result["status"] == 200
+    # default_source is null; expansion of null stays null
+    assert result["body"]["default_source"] is None
+    assert result["body"]["object"] == "customer"
+
+
+def test_bad_path_on_create_writes_nothing(instance: seahaven.Instance) -> None:
+    """A bad expand path on a POST creates nothing: static validation
+    precedes the handler (§3.3.1)."""
+    result = instance.call(
+        "stripe_api_write",
+        method="POST",
+        path="/v1/customers",
+        params={"email": "nobad@example.test", "expand": ["bogus_field"]},
+    )
+    assert result["status"] == 400
+    assert instance.inspect().one("SELECT count(*) AS n FROM customers") == {"n": 0}
+
+
+def test_bad_path_on_create_is_not_cached(instance: seahaven.Instance) -> None:
+    """With an idempotency key, a bad expand path retracts the reservation
+    so the retry with a corrected path succeeds (pre_execution=True)."""
+    bad = instance.call(
+        "stripe_api_write",
+        method="POST",
+        path="/v1/customers",
+        params={"email": "retry@example.test", "expand": ["bogus_field"]},
+        idempotency_key="expand-bad-1",
+    )
+    assert bad["status"] == 400
+    # The key was not cached
+    ok = instance.call(
+        "stripe_api_write",
+        method="POST",
+        path="/v1/customers",
+        params={"email": "retry@example.test"},
+        idempotency_key="expand-bad-1",
+    )
+    assert ok["status"] == 200
+    assert ok["body"]["email"] == "retry@example.test"
+
+
+def test_expansion_writes_nothing(instance: seahaven.Instance) -> None:
+    """Expansion is strictly read-only: the change log gains nothing."""
+    cus_id = created(instance)
+    marker = len(instance.change_log())
+    expand_on(instance, f"/v1/customers/{cus_id}", "default_source")
+    assert len(instance.change_log()) == marker

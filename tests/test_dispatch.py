@@ -11,7 +11,7 @@ pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
 
 def test_the_return_shape_is_status_and_body(instance: seahaven.Instance) -> None:
     result = instance.call("stripe_api_read", path="/v1/customers")
-    assert set(result) == {"status", "body"}
+    assert set(result) == {"status", "body", "headers"}
     assert isinstance(result["status"], int)
 
 
@@ -25,7 +25,7 @@ def test_a_stripe_error_never_escapes_as_an_exception(instance: seahaven.Instanc
         {"path": "/v1/customers", "params": {"limit": 0}},
     ):
         result = instance.call("stripe_api_read", **call)
-        assert isinstance(result, dict) and set(result) == {"status", "body"}
+        assert isinstance(result, dict) and set(result) == {"status", "body", "headers"}
 
 
 def test_an_unwired_route_is_a_world_bug(instance: seahaven.Instance) -> None:

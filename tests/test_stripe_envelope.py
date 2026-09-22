@@ -44,7 +44,7 @@ def test_a_raised_error_is_rendered_and_rolls_the_call_back(probe, monkeypatch) 
         result = instance.call("call_stripe", method="POST", path="/v1/probe/refuse")
         assert result["status"] == 400
         assert result["body"]["error"]["code"] == "parameter_missing"
-        assert set(result) == {"status", "body"}
+        assert set(result) == {"status", "body", "headers"}
         assert instance.change_log() == []
 
 
@@ -74,18 +74,18 @@ def test_the_error_envelope_omits_null_fields(probe, monkeypatch) -> None:
     world = probe(dispatch_tool())
     with world.instance(None, now=NOW) as instance:
         result = instance.call("call_stripe", method="POST", path="/v1/probe/unknown")
-        assert result == {
-            "status": 400,
-            "body": {
-                "error": {
-                    "type": "invalid_request_error",
-                    "code": "parameter_unknown",
-                    "param": "nope",
-                    "message": "Received unknown parameter: nope",
-                    "doc_url": "https://stripe.com/docs/error-codes/parameter-unknown",
-                }
-            },
+        assert result["status"] == 400
+        assert result["body"] == {
+            "error": {
+                "type": "invalid_request_error",
+                "code": "parameter_unknown",
+                "param": "nope",
+                "message": "Received unknown parameter: nope",
+                "doc_url": "https://stripe.com/docs/error-codes/parameter-unknown",
+            }
         }
+        assert "headers" in result
+        assert result["headers"]["Stripe-Version"] == "2026-08-26.dahlia"
 
 
 def test_the_discovery_tools_pass_through_untouched() -> None:

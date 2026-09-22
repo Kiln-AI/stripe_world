@@ -1790,10 +1790,10 @@ STRUCTURAL_DIFFERENCES: list[str] = [
     "Search result freshness: real Stripe search lags writes; this world's "
     "search is exact (functional spec §3.3). Not exercised before the search "
     "phase; declared here so the difference is on record before it exists.",
-    "The stripe-version response header: the real API echoes it and the tool "
-    "return here is {status, body} with no header channel — an agent using "
-    "Stripe's own MCP tools sees JSON, not HTTP, on both sides (functional "
-    "spec §6.5).",
+    "Stripe-Version, Request-Id and Idempotency-Key are returned in a "
+    "`headers` key on the tool response rather than as real HTTP headers: "
+    "this world has no HTTP layer (cross_cutting §6 entry 19, §7.4). An "
+    "agent using Stripe's own MCP tools sees JSON, not HTTP, on both sides.",
     "A malformed Stripe-Version is a request-header fault this world cannot "
     "express: one version is served, the version is not an agent-facing "
     "parameter, and the recorded behavior lives in cassette 03 rather than "
@@ -2145,6 +2145,74 @@ STRUCTURAL_DIFFERENCES: list[str] = [
     "enumeration — a real docs/spec divergence. The docs win for the "
     "gating list and tests/billing/test_dunning.py pins the divergence "
     "by name.",
+    # --- Phase 18 (cross_cutting §6 entries 2-21, minus those already above) ---
+    "Idempotency key scope: a key reused on a different endpoint is an "
+    "`idempotency_error`, not a fresh key that silently executes "
+    "(cross_cutting §7.2 settles this reading of functional_spec §6.1). "
+    "The settling scenario is same key on two endpoints.",
+    "409 `idempotency_key_in_use` carries `type: 'idempotency_error'`: "
+    "the wire `type` for 409 is unobserved (the in-flight condition is "
+    "not reachable against the real API in normal test-mode use). "
+    "cross_cutting §6 entry 3.",
+    "`expand[]` array order is part of the idempotency request hash: "
+    "reordering expand paths with the same key is a mismatch. Applied "
+    "uniformly from the canonicalisation rule (cross_cutting §3.1.2). "
+    "Settling scenario: same key, reordered `expand[]`.",
+    "A cursor naming a soft-deleted object resolves as a positional "
+    "marker (cross_cutting §3.2.4): the object is gone but its created "
+    "timestamp and id anchor the page boundary. Stripe's docs are silent "
+    "on this case. Settling scenario: create two, delete the older, "
+    "`starting_after=<deleted>`.",
+    "An unresolvable cursor (id that was never created) is 404 "
+    "`resource_missing`: inferred from one adjacent observation. "
+    "Settling scenario: `starting_after=cus_doesnotexist`.",
+    "`has_more` follows the direction of travel on an `ending_before` "
+    "page: inferred from client termination behavior (cross_cutting "
+    "§3.2.5). Settling scenario: walk backwards to the newest page.",
+    "`parameters_exclusive` with no `param` on both-cursors: the error "
+    "code is real; its `param` field is unobserved. Settling scenario: "
+    "send both `starting_after` and `ending_before`.",
+    "Exact `limit`-out-of-range message: the real API clamps limit to "
+    "[1, 100] and the message is not captured. Settling scenario: "
+    "`limit=0`.",
+    "Five-segment expand on a retrieve is rejected: the documented "
+    "four-segment depth example is list-side only, and the retrieve "
+    "depth limit is inferred. Settling scenario: `expand[]=a.b.c.d.e` "
+    "on a retrieve.",
+    "Exact depth-exceeded expand message: the message text is not "
+    "captured anywhere. Settling scenario: as above.",
+    "Expand errors carry no `code` and no `param`: the one complete "
+    "wire body carries neither (cross_cutting §3.3.5). Settling "
+    "scenario: any bad expand path.",
+    "`data.previous_attributes` present only where a handler computes "
+    "it: Stripe presumably always has previous-state tracking; this "
+    "world carries it only for events whose handler explicitly passes "
+    "the diff (cross_cutting §3.4.3). Settling scenario: any "
+    "`*.updated` event from the billing engine.",
+    "`event.request.id` is never null in this world: no automatic "
+    "operations fire under a frozen clock, so every event is tied to "
+    "the request that caused it. Structural — no settling scenario.",
+    "`doc_url` form `https://stripe.com/docs/error-codes/<hyphenated-"
+    "code>`: form corroborated by multiple probes but not exhaustively "
+    "verified for every error code. Settling scenario: any coded error.",
+    "`request_log_url` never emitted: there is no dashboard in this "
+    "world. Already on the architecture's list and carried as the "
+    "`**.request_log_url` predicated path entry above.",
+    '402 `param` defaults to `"payment_method"`: plausible from the '
+    "real API's behavior but unverified for every decline shape. "
+    "Settling scenario: any decline.",
+    "`api_error` is not reachable from live behavior: the type exists "
+    "in the error enum and is produced by `internal()`, but no "
+    "exercised code path raises it (cross_cutting §3.5.5). Structural.",
+    "Recorded requests always carry an idempotency key (stripe-python "
+    "auto-generates one on every POST), so the recorder cannot produce "
+    "a keyless POST. The replayer must not treat a missing key as a "
+    "difference (cross_cutting §6 entry 20).",
+    "Objects created within one frozen instant list in seeded-random id "
+    "order: the ordering is `(created DESC, id DESC)` and all `created` "
+    "timestamps are identical under the frozen clock, so id order (which "
+    "is seeded-random) determines the page (cross_cutting §3.2.2). "
+    "Structural until the `seq` column decision is taken (§8.2).",
 ]
 
 # --- Matching --------------------------------------------------------------------

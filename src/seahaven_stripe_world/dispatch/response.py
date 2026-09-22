@@ -14,9 +14,9 @@ the per-call transaction — not here. A `StripeApiError` raised anywhere under
 propagates out of the tool function, Seahaven's transaction rolls back, and
 the middleware renders the envelope. That is `components/cross_cutting.md`
 §3.5.3's correction of the architecture, and the mechanism that makes "raise
-loses" true without a savepoint. The wire shape is two keys, `{status, body}`,
-per functional spec §2.3; the proposed third `headers` key is §7.4's flagged
-and undecided change and is deliberately absent.
+loses" true without a savepoint. The wire shape is three keys,
+`{status, body, headers}` — `cross_cutting.md` §7.4's recommended resolution,
+taken in Phase 18; `headers` is constructed by `stripe_envelope` from `ctx`.
 """
 
 from collections.abc import Callable, Mapping

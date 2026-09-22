@@ -50,7 +50,10 @@ def test_a_replayed_post_writes_nothing_and_returns_the_stored_body(
     )
     # Door one: the stored body, byte for byte — `next_` never ran, so nothing
     # was validated, written or emitted, and the two responses are one.
-    assert replay == first
+    # Headers carry a per-call `Request-Id`, so status and body are compared
+    # directly; the header shape is checked by `test_cross_cutting.py`.
+    assert replay["status"] == first["status"]
+    assert replay["body"] == first["body"]
     # Door two: exactly the first call's records — the replay added none.
     assert instance.change_log() == before_log
     assert instance.inspect().one("SELECT count(*) AS n FROM payment_intents") == {"n": 1}
@@ -201,7 +204,8 @@ def test_a_raised_execution_fault_is_cached_not_retracted(instance: seahaven.Ins
         None,
         key="idem-7",
     )
-    assert replay == missing
+    assert replay["status"] == missing["status"]
+    assert replay["body"] == missing["body"]
 
 
 # --- outcome (d) ----------------------------------------------------------------------------------
@@ -254,7 +258,8 @@ def test_a_returned_402_decline_is_cached_under_the_key(instance: seahaven.Insta
     first = write(instance, "/v1/payment_intents", params, key="idem-9")
     assert first["status"] == 402
     replay = write(instance, "/v1/payment_intents", params, key="idem-9")
-    assert replay == first  # the decline replayed, not re-run
+    assert replay["status"] == first["status"]
+    assert replay["body"] == first["body"]  # the decline replayed, not re-run
     # Exactly one failed charge row exists across both calls: re-running the
     # confirm would have written a second one (§3.5.5's stated stake).
     assert instance.inspect().one("SELECT count(*) AS n FROM charges WHERE status = 'failed'") == {
@@ -263,3 +268,157 @@ def test_a_returned_402_decline_is_cached_under_the_key(instance: seahaven.Insta
     row = key_row(instance, "idem-9")
     assert row is not None
     assert row["status"] == 402
+
+
+# --- missing tests from §5.1 ------------------------------------------------------------------
+
+
+def test_in_flight_beats_a_matching_hash(instance: seahaven.Instance) -> None:
+    """Even if the hash matches, an in-flight key is a 409 (§3.1.4d): an
+    unfinished request is not replayable."""
+    digest = request_hash("POST", "/v1/customers", {"email": "x@example.test"})
+    with instance.bulk() as ctx:
+        ctx.db.execute(
+            "INSERT INTO idempotency_keys (key, method, path, request_hash, state, status,"
+            " body, created) VALUES ('idem-10', 'POST', '/v1/customers', ?, 'in_flight',"
+            " NULL, NULL, ?)",
+            digest,
+            ctx.clock.iso(),
+        )
+    result = write(instance, "/v1/customers", {"email": "x@example.test"}, key="idem-10")
+    assert result["status"] == 409
+    assert result["body"]["error"]["code"] == "idempotency_key_in_use"
+
+
+def test_argument_error_retracts_the_reservation(instance: seahaven.Instance) -> None:
+    """A type violation (ArgumentError) must not burn an agent's key
+    (§3.1.4a): the reservation is gone and a corrected retry works."""
+    with pytest.raises(seahaven.ToolError) as raised:
+        instance.call(
+            "stripe_api_write",
+            method="POST",
+            path="/v1/customers",
+            params="not a dict",  # type: ignore[arg-type]
+            idempotency_key="idem-11",
+        )
+    assert raised.value.code == "INVALID_INPUT"
+    assert key_row(instance, "idem-11") is None
+
+
+def test_key_on_get_is_silently_ignored(instance: seahaven.Instance) -> None:
+    """A key on GET has no effect (§3.1.1): `stripe_api_read` does not accept
+    the parameter at all, and the middleware only engages for
+    `stripe_api_write` POST. The test verifies through the write tool with
+    method=GET-like semantics: a GET-shaped read through `call_stripe` would
+    not cache."""
+    # The middleware passes through when the tool is not stripe_api_write.
+    # Since stripe_api_read has no idempotency_key arg, we verify the
+    # middleware's pass-through by confirming the key on a write tool
+    # with a non-POST method is also ignored.
+    cus = a_customer(instance)
+    instance.call(
+        "stripe_api_write",
+        method="DELETE",
+        path=f"/v1/customers/{cus}",
+        idempotency_key="idem-12",
+    )
+    assert key_row(instance, "idem-12") is None
+
+
+def test_hash_is_order_sensitive_for_arrays(instance: seahaven.Instance) -> None:
+    """Reordered `items[]` is a mismatch: array order is meaningful and
+    making one order-insensitive would be a special case (§3.1.2)."""
+    cus = a_customer(instance)
+    prod1 = instance.call(
+        "stripe_api_write", method="POST", path="/v1/products", params={"name": "A"}
+    )["body"]["id"]
+    prod2 = instance.call(
+        "stripe_api_write", method="POST", path="/v1/products", params={"name": "B"}
+    )["body"]["id"]
+    price1 = instance.call(
+        "stripe_api_write",
+        method="POST",
+        path="/v1/prices",
+        params={
+            "product": prod1,
+            "unit_amount": 100,
+            "currency": "usd",
+            "recurring": {"interval": "month"},
+        },
+    )["body"]["id"]
+    price2 = instance.call(
+        "stripe_api_write",
+        method="POST",
+        path="/v1/prices",
+        params={
+            "product": prod2,
+            "unit_amount": 200,
+            "currency": "usd",
+            "recurring": {"interval": "month"},
+        },
+    )["body"]["id"]
+    params_a = {
+        "customer": cus,
+        "items": [{"price": price1}, {"price": price2}],
+    }
+    params_b = {
+        "customer": cus,
+        "items": [{"price": price2}, {"price": price1}],
+    }
+    write(instance, "/v1/subscriptions", params_a, key="idem-13")
+    mismatch = write(instance, "/v1/subscriptions", params_b, key="idem-13")
+    assert mismatch["status"] == 400
+    assert mismatch["body"]["error"]["type"] == "idempotency_error"
+
+
+def test_hash_includes_expand(instance: seahaven.Instance) -> None:
+    """Same params plus `expand[]` is a mismatch: `expand` is a parameter
+    and Stripe compares parameters (§3.1.2)."""
+    write(instance, "/v1/customers", {"email": "ex@example.test"}, key="idem-14")
+    mismatch = write(
+        instance,
+        "/v1/customers",
+        {"email": "ex@example.test", "expand": ["default_source"]},
+        key="idem-14",
+    )
+    assert mismatch["status"] == 400
+    assert mismatch["body"]["error"]["type"] == "idempotency_error"
+
+
+def test_key_table_is_absent_from_state(instance: seahaven.Instance) -> None:
+    """§3.1.8: `idempotency_keys` is untracked, so `inst.state()`'s log
+    mentions no row from it, even on a fixture built with keyed writes."""
+    write(instance, "/v1/customers", {"email": "st@example.test"}, key="idem-15")
+    state = instance.state()
+    # The change log in the state carries table names; idempotency_keys never
+    # appears because the table is untracked.
+    log = state.get("db", {}).get("log", [])
+    for record in log:
+        if isinstance(record, dict):
+            assert record.get("table") != "idempotency_keys"
+
+
+def test_two_identical_keyless_posts_create_two_objects(instance: seahaven.Instance) -> None:
+    """Without a key, two identical POSTs create two separate objects:
+    idempotency is opt-in (§5.1 test_no_key_is_never_cached)."""
+    write(instance, "/v1/customers", {"email": "dup@example.test"})
+    write(instance, "/v1/customers", {"email": "dup@example.test"})
+    assert instance.inspect().one("SELECT count(*) AS n FROM customers") == {"n": 2}
+
+
+def test_mismatch_writes_nothing(instance: seahaven.Instance) -> None:
+    """A mismatch does not re-execute and adds nothing to the change log."""
+    write(instance, "/v1/customers", {"email": "m@example.test"}, key="idem-16")
+    before = instance.change_log()
+    write(instance, "/v1/customers", {"name": "Different"}, key="idem-16")
+    assert instance.change_log() == before
+
+
+def test_replay_does_not_write_the_key_row(instance: seahaven.Instance) -> None:
+    """The key row is byte-identical before and after a replay: no
+    `last_used_at`, no hit counter (§3.1.4b)."""
+    write(instance, "/v1/customers", {"email": "rw@example.test"}, key="idem-17")
+    before = instance.inspect().one("SELECT * FROM idempotency_keys WHERE key = 'idem-17'")
+    write(instance, "/v1/customers", {"email": "rw@example.test"}, key="idem-17")
+    after = instance.inspect().one("SELECT * FROM idempotency_keys WHERE key = 'idem-17'")
+    assert before == after

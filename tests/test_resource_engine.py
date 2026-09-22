@@ -481,9 +481,9 @@ def test_a_raised_handler_rolls_back_and_a_returned_failure_commits(probe, monke
         declined = instance.call(
             "call_stripe", method="POST", path=f"/v1/customers/{cus}/probe_decline"
         )
-        assert declined == {
-            "status": 402,
-            "body": {"error": {"type": "card_error", "message": "Your card was declined."}},
+        assert declined["status"] == 402
+        assert declined["body"] == {
+            "error": {"type": "card_error", "message": "Your card was declined."}
         }
         assert instance.inspect().one(
             "SELECT count(*) AS n FROM probe_notes WHERE id = 'note_kept'"

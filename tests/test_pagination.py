@@ -239,3 +239,114 @@ def test_listing_writes_nothing(instance: seahaven.Instance) -> None:
     result = list_customers(instance, starting_after="cus_missing")
     assert result["status"] == 400
     assert len(instance.change_log()) == marker
+
+
+# --- missing tests from §5.2 ------------------------------------------------------------------
+
+
+def test_default_limit_is_ten(instance: seahaven.Instance) -> None:
+    """Absent `limit` defaults to 10."""
+    for i in range(12):
+        create(instance, f"c{i:02}")
+    page = list_customers(instance)["body"]
+    assert len(page["data"]) == 10
+    assert page["has_more"] is True
+
+
+def test_limit_bounds_are_clamped(instance: seahaven.Instance) -> None:
+    """The live API clamps `limit` into [1, 100] rather than rejecting
+    (settled by Phase 5 cassettes): `limit=0` returns 1 item, `limit=101`
+    returns at most 100, both 200."""
+    for i in range(3):
+        create(instance, f"c{i}")
+    # limit=0 is clamped to 1
+    result = list_customers(instance, limit=0)
+    assert result["status"] == 200
+    assert len(result["body"]["data"]) == 1
+    # limit=101 is clamped to 100
+    result = list_customers(instance, limit=101)
+    assert result["status"] == 200
+    assert len(result["body"]["data"]) == 3  # only 3 exist, all returned
+    # Explicit valid bounds
+    for good in (1, 100):
+        result = list_customers(instance, limit=good)
+        assert result["status"] == 200
+
+
+def test_walk_backward_covers_every_row_exactly_once(instance: seahaven.Instance) -> None:
+    """The mirror of the forward walk: `ending_before` pages cover every
+    row exactly once. Start from the oldest (walk from bottom up)."""
+    ids = [create(instance, f"c{i:02}") for i in range(7)]
+    newest_first = list(reversed(ids))
+
+    # Walk forward to get the oldest cursor, then walk back up
+    # First, get the last page's last item to walk backward from
+    seen: list[str] = []
+    # Start from the very oldest by getting the last item through forward walk
+    all_items = list_customers(instance, limit=100)["body"]["data"]
+    oldest = all_items[-1]["id"]
+
+    # Walk backward from oldest, collecting all items above it
+    cursor = oldest
+    for _ in range(10):
+        page = list_customers(instance, ending_before=cursor, limit=3)["body"]
+        if not page["data"]:
+            break
+        seen.extend(item["id"] for item in page["data"])
+        cursor = page["data"][0]["id"]  # the newest on this page
+
+    # We collected everything except the oldest (used as cursor)
+    seen.append(oldest)
+    assert sorted(seen) == sorted(newest_first)
+
+
+def test_both_cursors_is_parameters_exclusive(instance: seahaven.Instance) -> None:
+    """Sending both `starting_after` and `ending_before` is a 400."""
+    a = create(instance, "a")
+    b = create(instance, "b")
+    result = list_customers(instance, starting_after=a, ending_before=b)
+    assert result["status"] == 400
+    assert "starting_after" in result["body"]["error"]["message"]
+    assert "ending_before" in result["body"]["error"]["message"]
+
+
+def test_cursor_resolution_ignores_list_filters(instance: seahaven.Instance) -> None:
+    """A cursor on a customer whose email does not match the filter still
+    resolves: a cursor is a coordinate, not a membership test (§3.2.3)."""
+    a = create(instance, "alice")
+    instance.call(
+        "stripe_api_write",
+        method="POST",
+        path=f"/v1/customers/{a}",
+        params={"email": "alice@example.test"},
+    )
+    b = create(instance, "bob")
+    instance.call(
+        "stripe_api_write",
+        method="POST",
+        path=f"/v1/customers/{b}",
+        params={"email": "bob@example.test"},
+    )
+    # Cursor on bob, filter for alice: should resolve bob as coordinate
+    # and return page of alice (if she is older than bob).
+    result = instance.call(
+        "stripe_api_read",
+        path="/v1/customers",
+        params={"starting_after": b, "email": "alice@example.test"},
+    )
+    assert result["status"] == 200
+    # Alice should appear since she was created before bob
+    found = [item["id"] for item in result["body"]["data"]]
+    assert a in found
+
+
+def test_url_is_the_concrete_path_including_nested(instance: seahaven.Instance) -> None:
+    """The list envelope's `url` is the concrete path, including nested lists."""
+    create(instance, "root")
+    page = list_customers(instance)["body"]
+    assert page["url"] == "/v1/customers"
+    # A nested list's url carries the parent id
+    cus = page["data"][0]["id"]
+    result = instance.call("stripe_api_read", path=f"/v1/customers/{cus}/balance_transactions")
+    assert result["status"] == 200
+    assert result["body"]["url"] == f"/v1/customers/{cus}/balance_transactions"

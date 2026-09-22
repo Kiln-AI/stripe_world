@@ -675,7 +675,7 @@ def create(ctx: seahaven.Ctx, req: Request) -> dict[str, Any]:
             }
         ]
         current_phase = _current_phase_for(built_phases, now_unix)
-    elif "phases" in params and params["phases"]:
+    elif params.get("phases"):
         # Build phases from the parameter
         start_date = params.get("start_date") or now
         built_phases = _build_phases(ctx, params["phases"], now=now, start_date=start_date)

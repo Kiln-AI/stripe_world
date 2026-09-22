@@ -265,3 +265,91 @@ def test_list_url_in_envelope(instance: seahaven.Instance) -> None:
     events = _read(instance, "/v1/events")
     assert events["status"] == 200
     assert events["body"]["url"] == "/v1/events"
+
+
+# -- cross-cutting event tests from §5.4 ------------------------------------
+
+
+def test_unknown_type_is_a_world_bug() -> None:
+    """An unknown event type is a WorldBug, not a ToolError (§3.4.4)."""
+    import seahaven_stripe_world
+    from seahaven_stripe_world.resources.events import emit_event
+
+    with seahaven_stripe_world.world.instance(None, now=BLANK_NOW) as inst, inst.bulk() as ctx:
+        ctx.state["_request"] = {"id": "req_test", "idempotency_key": None}
+        with pytest.raises(seahaven.WorldBug, match="unknown event type"):
+            emit_event(ctx, type="bogus.nonexistent", obj={"id": "x", "object": "x"})
+
+
+def test_data_object_is_the_snapshot(instance: seahaven.Instance) -> None:
+    """The event's data.object is the snapshot at the time of emission, not
+    the object's current state (§3.4.3)."""
+    cus = _create_customer(instance, "Before")
+    _write(instance, f"/v1/customers/{cus['id']}", {"name": "After"})
+    # The customer.created event still shows the name at creation time
+    events = _read(instance, "/v1/events", {"type": "customer.created"})
+    assert events["status"] == 200
+    evt = events["body"]["data"][0]
+    assert evt["data"]["object"]["name"] == "Before"
+    # Current state shows the updated name
+    current = _read(instance, f"/v1/customers/{cus['id']}")
+    assert current["body"]["name"] == "After"
+
+
+def test_rolled_back_call_emits_no_event(instance: seahaven.Instance) -> None:
+    """A handler that raises loses its writes, including its events: the
+    insert rolls back with everything else (§3.4.2)."""
+    before = _read(instance, "/v1/events", {"limit": 100})
+    before_count = len(before["body"]["data"])
+    # A bad-expand POST to customers raises pre-execution, nothing commits
+    _write(instance, "/v1/customers", {"email": "fail@example.test", "expand": ["bogus"]})
+    after = _read(instance, "/v1/events", {"limit": 100})
+    assert len(after["body"]["data"]) == before_count
+
+
+def test_events_ordered_by_seq_within_one_instant(instance: seahaven.Instance) -> None:
+    """Events emitted in one call list in emission order, not random id
+    order (§3.4.5): the `seq` column provides a total order under the
+    frozen clock."""
+    # Creating a customer emits customer.created
+    _create_customer(instance, "First")
+    # Creating another customer emits another customer.created
+    _create_customer(instance, "Second")
+    events = _read(instance, "/v1/events", {"type": "customer.created"})
+    assert events["status"] == 200
+    data = events["body"]["data"]
+    # Newest first: "Second" appears before "First"
+    assert data[0]["data"]["object"]["name"] == "Second"
+    assert data[1]["data"]["object"]["name"] == "First"
+
+
+def test_no_event_update_or_delete_route(instance: seahaven.Instance) -> None:
+    """Events are immutable: the route table has no update or delete for
+    events (§3.4.5)."""
+    from seahaven_stripe_world.dispatch.router import ROUTER
+
+    assert ROUTER.resolve("POST", "/v1/events/{id}") is None
+    assert ROUTER.resolve("DELETE", "/v1/events/{id}") is None
+
+
+def test_every_emitted_type_is_in_the_closed_set() -> None:
+    """Every `emit_event` literal in `resources/` and `billing/` is in
+    `event_types.py`'s closed set (§3.4.4)."""
+    import re
+    from pathlib import Path
+
+    from seahaven_stripe_world.spec import EVENT_TYPES
+
+    src = Path(__file__).resolve().parent.parent / "src" / "seahaven_stripe_world"
+    emitted: set[str] = set()
+    for subdir in ("resources", "billing"):
+        for py in sorted((src / subdir).rglob("*.py")):
+            if "__pycache__" in str(py):
+                continue
+            text = py.read_text()
+            # Find all emit_event calls with type= keyword
+            for match in re.finditer(r'emit_event\([^)]*type\s*=\s*["\']([^"\']+)["\']', text):
+                emitted.add(match.group(1))
+    assert emitted, "no emit_event calls found — something is wrong"
+    unknown = emitted - EVENT_TYPES
+    assert unknown == set(), f"event types not in the closed set: {unknown}"

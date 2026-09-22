@@ -81,7 +81,7 @@ Each still touches only its own tables.
 
 ### Completion
 
-- [ ] **Phase 18: Idempotency, expansion and cross-cutting sweep.** The middleware and the expansion
+- [x] **Phase 18: Idempotency, expansion and cross-cutting sweep.** The middleware and the expansion
       resolver against the whole surface, not one slice. Some of this lands opportunistically earlier;
       this phase is where it is made uniform and the cross-cutting tests become exhaustive.
 - [ ] **Phase 19: Fixtures.** `small` and `large`, timeline simulation, fork-cost assertion.

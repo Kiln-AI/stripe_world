@@ -217,7 +217,7 @@ def test_create_with_future_start_stays_not_started(instance: seahaven.Instance)
 
 def test_create_without_phases_stays_not_started(instance: seahaven.Instance) -> None:
     """Creating a schedule without phases results in not_started."""
-    cus, _, price = setup_catalog(instance)
+    cus, _, _price = setup_catalog(instance)
     body = call(
         instance,
         "POST",
@@ -401,7 +401,7 @@ def test_update_default_settings(instance: seahaven.Instance) -> None:
 
 def test_update_refuses_terminal_statuses(instance: seahaven.Instance) -> None:
     """A canceled schedule cannot be updated."""
-    cus, _, price = setup_catalog(instance)
+    cus, _, _price = setup_catalog(instance)
     body = call(
         instance,
         "POST",
@@ -424,7 +424,7 @@ def test_update_refuses_terminal_statuses(instance: seahaven.Instance) -> None:
 
 def test_cancel_not_started(instance: seahaven.Instance) -> None:
     """Canceling a not_started schedule transitions to canceled."""
-    cus, _, price = setup_catalog(instance)
+    cus, _, _price = setup_catalog(instance)
     body = call(
         instance,
         "POST",
@@ -482,7 +482,7 @@ def test_cancel_active_with_prorate_and_invoice_now(instance: seahaven.Instance)
 
 
 def test_cancel_refuses_already_canceled(instance: seahaven.Instance) -> None:
-    cus, _, price = setup_catalog(instance)
+    cus, _, _price = setup_catalog(instance)
     body = call(
         instance,
         "POST",
@@ -587,7 +587,7 @@ def test_release_without_preserve_cancel_date_clears_it(instance: seahaven.Insta
 
 def test_release_refuses_not_started(instance: seahaven.Instance) -> None:
     """Only an active schedule can be released."""
-    cus, _, price = setup_catalog(instance)
+    cus, _, _price = setup_catalog(instance)
     body = call(
         instance,
         "POST",
@@ -644,7 +644,7 @@ def test_events_are_emitted(instance: seahaven.Instance) -> None:
 
 
 def test_unknown_parameter_refused(instance: seahaven.Instance) -> None:
-    cus, _, price = setup_catalog(instance)
+    cus, _, _price = setup_catalog(instance)
     result = call(
         instance,
         "POST",
