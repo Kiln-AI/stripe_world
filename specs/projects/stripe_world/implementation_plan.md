@@ -93,7 +93,7 @@ Each still touches only its own tables.
 - [x] **Phase 22: Search.** The seven endpoints, the query-language parser, seven field allowlists,
       FTS5, the `page`/`next_page` paginator. Approved to proceed directly — no separate gate phase;
       a gate isn't a phase.
-- [ ] **Phase 23: Documentation and findings.** README, world `AGENTS.md`, and the recommendations
+- [x] **Phase 23: Documentation and findings.** README, world `AGENTS.md`, and the recommendations
       document distilled from `SEAHAVEN_FINDINGS.md`. The findings log itself is written continuously
       from Phase 1, never reconstructed here.
 

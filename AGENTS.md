@@ -28,10 +28,11 @@ Errors are ToolError subclasses in errors.py; the error handler is the only plac
 
 ## About this world
 
-StripeAPI is a faithful, stateful, forkable replica of Stripe's Billing and Payments core: SQLite
-state behind the Stripe MCP surface (`stripe_api_search`, `stripe_api_details`,
-`stripe_api_read`, `stripe_api_write`, `get_stripe_account_info`). Not affiliated with Stripe; Stripe's field names, enum
-values and id prefixes are functional API vocabulary under the source material's MIT licence.
+StripeAPI is a faithful, stateful, forkable replica of Stripe's Billing and Payments core: 155
+routed operations across 24 SQLite tables behind the five-tool Stripe MCP surface
+(`stripe_api_search`, `stripe_api_details`, `stripe_api_read`, `stripe_api_write`,
+`get_stripe_account_info`). Not affiliated with Stripe; Stripe's field names, enum values and id
+prefixes are functional API vocabulary under the source material's MIT licence.
 The design lives in `specs/projects/stripe_world/`; the friction log is `SEAHAVEN_FINDINGS.md`
 and every workaround in the code carries a comment linking to its entry there.
 
@@ -50,6 +51,13 @@ and every workaround in the code carries a comment linking to its entry there.
   return it, never raise it. Seahaven errors (`errors.py`) are authoring mistakes: an unusable
   `method`, a malformed parameter object. Raise loses the writes, return keeps them.
 - **JSON TEXT columns** are written only through `_json.dumps`, so fixture bytes are reproducible.
+- **Search** uses FTS5 external-content virtual tables with per-resource field allowlists and a
+  `page`/`next_page` paginator distinct from the cursor paginator on list endpoints.
+- **Conformance** is validated by replaying 19 cassettes (committed, redacted) recorded against the
+  real Stripe API, plus schema conformance of every returned object against `spec3.min.json`. CI
+  replays only; re-recording needs a test-mode key and `api.stripe.com` egress.
+- **Fixtures.** Only `empty` ships today (schema, no rows). The `small` and `large` fixtures are
+  deferred, as is the eval suite.
 - **This repo is the world checkout**: `pyproject.toml` and `src/seahaven_stripe_world/` at the root, beside
   `specs/` and `research/`. The framework is not vendored here: the bare `seahaven` requirement
   resolves through `[tool.uv.sources]` to `github.com/Kiln-AI/Seahaven` at a pinned full commit
@@ -59,6 +67,24 @@ and every workaround in the code carries a comment linking to its entry there.
   HTTPS read access to it cannot sync (the failure surfaces inside `uv sync` as a git auth error).
   `pydantic` is pinned to 2.12.3 per `SEAHAVEN_FINDINGS.md` Entry 1; do not remove the pin without
   reading that entry.
+
+## Code layout
+
+- `src/seahaven_stripe_world/dispatch/routes.py` — the 155-entry routing table. Every operation is
+  here; discovery filters `spec3.min.json` through it.
+- `src/seahaven_stripe_world/dispatch/resource.py` — the `ResourceSpec` engine: CRUD generation and
+  cursor pagination. 76 operations are generated; 79 are hand-written.
+- `src/seahaven_stripe_world/resources/` — one module per resource. Each declares a `ResourceSpec`
+  and its hand-written actions (state transitions, resource-specific reads).
+- `src/seahaven_stripe_world/billing/` — behavior spanning resources: `subscription_lifecycle.py`
+  (eight-status machine), `invoicing.py` (invoice status machine), `proration.py`,
+  `dunning.py`, `ledger.py` (balance transactions).
+- `src/seahaven_stripe_world/search/` — FTS5 executor, query parser, per-resource field specs.
+- `src/seahaven_stripe_world/middleware/` — `error_handler.py` (outermost),
+  `stripe_envelope.py` (catches `StripeApiError`, renders the envelope),
+  `idempotency.py` (innermost, inside the envelope).
+- `tests/conformance/` — cassette replay, the allowed-differences declaration, and cassettes.
+- `tests/schema_conformance/` — OpenAPI-spec validation of every response body.
 
 ## Stripe MCP Usage
 
