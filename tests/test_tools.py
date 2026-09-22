@@ -1,4 +1,4 @@
-"""The four tools as an agent meets them: the contract of each face."""
+"""The tools as an agent meets them: the contract of each face."""
 
 import pytest
 import seahaven
@@ -62,7 +62,13 @@ def test_call_stripe_reaches_every_verb(instance: seahaven.Instance) -> None:
 def test_the_tool_descriptions_name_no_sibling_tool() -> None:
     """Lint `SH206`'s rule, asserted: a prefixing host renames tools without
     rewriting descriptions, so no description may carry a sibling's name."""
-    names = ["stripe_api_read", "stripe_api_write", "stripe_api_search", "stripe_api_details"]
+    names = [
+        "stripe_api_read",
+        "stripe_api_write",
+        "stripe_api_search",
+        "stripe_api_details",
+        "get_stripe_account_info",
+    ]
     descriptions = {name: seahaven_world_tool_description(name) for name in names}
     for name, description in descriptions.items():
         for other in names:
@@ -230,6 +236,31 @@ def test_the_wired_surface_is_small_and_named() -> None:
         "GetTaxRatesTaxRate",
         "PostTaxRatesTaxRate",
     ]
+
+
+def test_account_info_returns_account_object(instance: seahaven.Instance) -> None:
+    """The fifth tool: a static account object with billing-relevant fields."""
+    result = instance.call("get_stripe_account_info")
+    assert result["object"] == "account"
+    assert result["id"].startswith("acct_")
+    assert result["charges_enabled"] is True
+    assert result["payouts_enabled"] is True
+    assert result["default_currency"] == "usd"
+    assert result["country"] == "US"
+    assert result["type"] == "standard"
+    assert result["details_submitted"] is True
+    assert isinstance(result["business_profile"], dict)
+    assert isinstance(result["capabilities"], dict)
+    assert isinstance(result["settings"], dict)
+    assert isinstance(result["metadata"], dict)
+    assert isinstance(result["created"], int)
+
+
+def test_account_info_is_idempotent(instance: seahaven.Instance) -> None:
+    """Two calls return identical results -- the account is static."""
+    first = instance.call("get_stripe_account_info")
+    second = instance.call("get_stripe_account_info")
+    assert first == second
 
 
 def _all_routes():

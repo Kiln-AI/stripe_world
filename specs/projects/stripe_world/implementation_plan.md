@@ -89,7 +89,7 @@ Each still touches only its own tables.
       the world ships.
 - [ ] **Phase 20: Evals (deferred).** Ten to twenty tasks with SQL reward functions, headline
       first. Deferred past this run; revisit before the world ships.
-- [ ] **Phase 21: `get_stripe_account_info`.** P2. Cuttable.
+- [x] **Phase 21: `get_stripe_account_info`.** P2. Cuttable.
 - [ ] **Phase 22: Search.** The seven endpoints, the query-language parser, seven field allowlists,
       FTS5, the `page`/`next_page` paginator. Approved to proceed directly — no separate gate phase;
       a gate isn't a phase.

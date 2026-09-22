@@ -29,8 +29,8 @@ Errors are ToolError subclasses in errors.py; the error handler is the only plac
 ## About this world
 
 StripeAPI is a faithful, stateful, forkable replica of Stripe's Billing and Payments core: SQLite
-state behind the four-tool Stripe MCP surface (`stripe_api_search`, `stripe_api_details`,
-`stripe_api_read`, `stripe_api_write`). Not affiliated with Stripe; Stripe's field names, enum
+state behind the Stripe MCP surface (`stripe_api_search`, `stripe_api_details`,
+`stripe_api_read`, `stripe_api_write`, `get_stripe_account_info`). Not affiliated with Stripe; Stripe's field names, enum
 values and id prefixes are functional API vocabulary under the source material's MIT licence.
 The design lives in `specs/projects/stripe_world/`; the friction log is `SEAHAVEN_FINDINGS.md`
 and every workaround in the code carries a comment linking to its entry there.

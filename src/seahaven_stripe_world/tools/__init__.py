@@ -5,6 +5,6 @@ here, so a tool module that exists but was never registered cannot go
 unnoticed.
 """
 
-from seahaven_stripe_world.tools import api
+from seahaven_stripe_world.tools import account, api
 
-__all__ = ["api"]
+__all__ = ["account", "api"]
