@@ -84,15 +84,16 @@ Each still touches only its own tables.
 - [x] **Phase 18: Idempotency, expansion and cross-cutting sweep.** The middleware and the expansion
       resolver against the whole surface, not one slice. Some of this lands opportunistically earlier;
       this phase is where it is made uniform and the cross-cutting tests become exhaustive.
-- [ ] **Phase 19: Fixtures.** `small` and `large`, timeline simulation, fork-cost assertion.
-      Deliberately late — see §Fixtures below.
-- [ ] **Phase 20: Evals.** Ten to twenty tasks with SQL reward functions, headline first.
+- [ ] **Phase 19: Fixtures (deferred).** `small` and `large`, timeline simulation, fork-cost
+      assertion. Deliberately late — see §Fixtures below. Deferred past this run; revisit before
+      the world ships.
+- [ ] **Phase 20: Evals (deferred).** Ten to twenty tasks with SQL reward functions, headline
+      first. Deferred past this run; revisit before the world ships.
 - [ ] **Phase 21: `get_stripe_account_info`.** P2. Cuttable.
-- [ ] **Phase 22: STOP — confirm before starting search.** An explicit gate, per the functional
-      spec §3.3.
-- [ ] **Phase 23: Search.** The seven endpoints, the query-language parser, seven field allowlists,
-      FTS5, the `page`/`next_page` paginator.
-- [ ] **Phase 24: Documentation and findings.** README, world `AGENTS.md`, and the recommendations
+- [ ] **Phase 22: Search.** The seven endpoints, the query-language parser, seven field allowlists,
+      FTS5, the `page`/`next_page` paginator. Approved to proceed directly — no separate gate phase;
+      a gate isn't a phase.
+- [ ] **Phase 23: Documentation and findings.** README, world `AGENTS.md`, and the recommendations
       document distilled from `SEAHAVEN_FINDINGS.md`. The findings log itself is written continuously
       from Phase 1, never reconstructed here.
 

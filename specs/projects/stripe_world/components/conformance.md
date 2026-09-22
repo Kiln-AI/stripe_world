@@ -463,7 +463,7 @@ Two behavioral differences do **not** fit the per-field model and are declared i
 section of the same file (`STRUCTURAL_DIFFERENCES: list[str]`, prose entries, reviewed the same way):
 idempotency-key retention (real Stripe evicts a key after a ≥24h floor; this world's keys never expire
 because the clock never advances — functional spec §6.1) and search result freshness (real Stripe
-search lags writes; this world's is exact — functional spec §3.3, not yet exercised pre-Phase 23).
+search lags writes; this world's is exact — functional spec §3.3, not yet exercised pre-Phase 22).
 Neither can be expressed as "path X differs" because neither ever produces an observable diff *within
 a single instance's frozen lifetime* — they are differences in a dimension (elapsed real time) that
 this harness's replay never has, and the file says so explicitly rather than pretending the field-level
