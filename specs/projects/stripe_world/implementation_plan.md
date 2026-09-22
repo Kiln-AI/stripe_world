@@ -76,7 +76,7 @@ Each still touches only its own tables.
 - [x] **Phase 15: Credit notes and customer balance.** `credit_notes`,
       `customer_balance_transactions`, the three settlement channels.
 - [x] **Phase 16: Subscription schedules.** Scoped-down `phases`.
-- [ ] **Phase 17: Events.** Emission across every earlier slice, backfilled, plus `/v1/events`.
+- [x] **Phase 17: Events.** Emission across every earlier slice, backfilled, plus `/v1/events`.
       Late on purpose: it needs every mutation that exists.
 
 ### Completion

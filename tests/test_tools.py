@@ -90,11 +90,12 @@ def test_the_wired_surface_is_small_and_named() -> None:
     five subscription_items), the subscription-schedules phase's six
     (two generated reads, four hand-written state transitions), the
     invoices phase's twenty (fifteen invoices -- `create_preview` and
-    `attach_payment` stay unwired -- plus five invoiceitems), and the
+    `attach_payment` stay unwired -- plus five invoiceitems), the
     credit-notes-and-customer-balance phase's twelve (eight credit_notes,
-    four customer_balance_transactions). The rest are routed data awaiting
-    their resource phases, and calling one is an honest `INTERNAL` naming
-    the op (see `test_dispatch.py`)."""
+    four customer_balance_transactions), and the events phase's two
+    (list and retrieve). The rest are routed data awaiting their resource
+    phases, and calling one is an honest `INTERNAL` naming the op (see
+    `test_dispatch.py`)."""
     wired = [route.op_id for route in _all_routes() if route.params is not None]
     assert wired == [
         "GetBalance",
@@ -141,6 +142,8 @@ def test_the_wired_surface_is_small_and_named() -> None:
         "GetDisputesDispute",
         "PostDisputesDispute",
         "PostDisputesDisputeClose",
+        "GetEvents",
+        "GetEventsId",
         "GetInvoiceitems",
         "PostInvoiceitems",
         "GetInvoiceitemsInvoiceitem",

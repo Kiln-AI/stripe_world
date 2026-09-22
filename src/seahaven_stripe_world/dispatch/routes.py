@@ -36,6 +36,7 @@ from seahaven_stripe_world.resources import (
     customer_balance_transactions,
     customers,
     disputes,
+    events,
     invoiceitems,
     invoices,
     payment_intents,
@@ -580,9 +581,27 @@ ALL: Final[tuple[Route, ...]] = (
         params=disputes.DISPUTE_CLOSE,
         handler=disputes.close,
     ),
-    # events
-    Route(method="GET", pattern="/v1/events", op_id="GetEvents"),
-    Route(method="GET", pattern="/v1/events/{id}", op_id="GetEventsId"),
+    # events -- read-only; no create/update/delete from the API. Both
+    # handlers are hand-written: the list's type wildcard, types array, and
+    # delivery_success quirk sit outside the engine's ListFilter vocabulary.
+    Route(
+        method="GET",
+        pattern="/v1/events",
+        op_id="GetEvents",
+        response_object="event",
+        envelope="list",
+        params=events.EVENT_LIST,
+        handler=events.list_,
+    ),
+    Route(
+        method="GET",
+        pattern="/v1/events/{id}",
+        op_id="GetEventsId",
+        response_object="event",
+        envelope="object",
+        params=events.EVENT_RETRIEVE,
+        handler=events.retrieve,
+    ),
     # invoiceitems — hard delete (the three-key stub, recorded), the
     # pending-null-test list, and the recorded Invoice Item 404 family
     Route(
