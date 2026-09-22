@@ -1,13 +1,11 @@
--- The billing tables (Phases 12–13; DDL verbatim from components/data_model.md §5).
+-- The billing tables (Phases 12–16; DDL verbatim from components/data_model.md §5).
 --
--- `subscription_schedules` and `credit_notes` join this file in their own
--- phases (16 and 15). `subscriptions.schedule` is therefore a bare column
--- until Phase 16 joins its REFERENCES clause — the Phase 8→11 deferral
--- precedent. `invoices` and `customer_balance_transactions` landed with
--- Phase 12 because that phase's subscription create writes both: the first
--- invoice is inseparable from the subscription that mints it, and
--- finalization applies the customer balance. `invoiceitems` (Phase 13) is
--- the pending-item store the invoice sweep reads.
+-- `invoices` and `customer_balance_transactions` landed with Phase 12
+-- because that phase's subscription create writes both: the first invoice
+-- is inseparable from the subscription that mints it, and finalization
+-- applies the customer balance. `invoiceitems` (Phase 13) is the
+-- pending-item store the invoice sweep reads. `credit_notes` landed with
+-- Phase 15, and `subscription_schedules` with Phase 16.
 
 CREATE TABLE subscriptions (
     id                          TEXT PRIMARY KEY,
@@ -41,8 +39,7 @@ CREATE TABLE subscriptions (
     pending_invoice_item_interval TEXT CHECK (pending_invoice_item_interval IS NULL OR (json_valid(pending_invoice_item_interval) AND json_type(pending_invoice_item_interval) = 'object')),
     pending_setup_intent        TEXT REFERENCES setup_intents (id),
     pending_update              TEXT CHECK (pending_update IS NULL OR (json_valid(pending_update) AND json_type(pending_update) = 'object')),
-    -- Phase 16 joins the subscription_schedules REFERENCES clause
-    schedule                    TEXT,
+    schedule                    TEXT REFERENCES subscription_schedules (id),
     start_date                  TEXT NOT NULL,
     status                      TEXT NOT NULL CHECK (status IN
                                     ('active','canceled','incomplete','incomplete_expired','past_due',
@@ -277,3 +274,32 @@ CREATE TABLE credit_notes (
 CREATE UNIQUE INDEX credit_notes_by_seq  ON credit_notes (x_seq DESC);
 CREATE INDEX credit_notes_by_customer ON credit_notes (customer, x_seq DESC);
 CREATE INDEX credit_notes_by_invoice  ON credit_notes (invoice, x_seq DESC);
+
+-- Phase 16: subscription_schedules. DDL verbatim from components/data_model.md §5.
+-- `phases` is the scoped-down array: each element carries items, start_date,
+-- end_date, iterations, trial, discounts, proration_behavior, collection_method
+-- and metadata, not the full 21-property phase schema. Timestamps inside it are
+-- Unix seconds (data_model §3.10).
+
+CREATE TABLE subscription_schedules (
+    id                    TEXT PRIMARY KEY,
+    x_seq                 INTEGER NOT NULL,
+    created               TEXT NOT NULL,
+    billing_mode          TEXT NOT NULL DEFAULT 'classic' CHECK (billing_mode IN ('classic', 'flexible')),
+    canceled_at           TEXT,
+    completed_at          TEXT,
+    current_phase         TEXT CHECK (current_phase IS NULL OR (json_valid(current_phase) AND json_type(current_phase) = 'object')),
+    customer              TEXT NOT NULL REFERENCES customers (id),
+    default_settings      TEXT NOT NULL CHECK (json_valid(default_settings) AND json_type(default_settings) = 'object'),
+    end_behavior          TEXT NOT NULL CHECK (end_behavior IN ('cancel', 'none', 'release', 'renew')),
+    metadata              TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata) AND json_type(metadata) = 'object'),
+    phases                TEXT NOT NULL CHECK (json_valid(phases) AND json_type(phases) = 'array'),
+    released_at           TEXT,
+    released_subscription TEXT,
+    status                TEXT NOT NULL CHECK (status IN ('active', 'canceled', 'completed', 'not_started', 'released')),
+    subscription          TEXT REFERENCES subscriptions (id)
+) STRICT;
+
+CREATE UNIQUE INDEX subscription_schedules_by_seq      ON subscription_schedules (x_seq DESC);
+CREATE INDEX subscription_schedules_by_customer     ON subscription_schedules (customer, x_seq DESC);
+CREATE INDEX subscription_schedules_by_subscription ON subscription_schedules (subscription);

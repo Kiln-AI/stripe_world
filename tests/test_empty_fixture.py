@@ -50,6 +50,7 @@ def test_an_instance_of_empty_has_the_schema_and_no_rows(instance: seahaven.Inst
         "refunds",
         "setup_intents",
         "subscription_items",
+        "subscription_schedules",
         "subscriptions",
         "tax_rates",
     ]
@@ -71,6 +72,7 @@ def test_an_instance_of_empty_has_the_schema_and_no_rows(instance: seahaven.Inst
         "payouts",
         "subscriptions",
         "subscription_items",
+        "subscription_schedules",
         "invoices",
         "credit_notes",
         "customer_balance_transactions",

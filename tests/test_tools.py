@@ -87,12 +87,14 @@ def test_the_wired_surface_is_small_and_named() -> None:
     setup-intents phase's seven, the ledger-and-payouts phase's nine
     (one balance, two balance_transactions, six payouts), the
     subscriptions phase's eleven (six subscriptions including `/resume`,
-    five subscription_items), the invoices phase's twenty (fifteen
-    invoices — `create_preview` and `attach_payment` stay unwired — plus
-    five invoiceitems), and the credit-notes-and-customer-balance phase's
-    twelve (eight credit_notes, four customer_balance_transactions). The rest
-    are routed data awaiting their resource phases, and calling one is an
-    honest `INTERNAL` naming the op (see `test_dispatch.py`)."""
+    five subscription_items), the subscription-schedules phase's six
+    (two generated reads, four hand-written state transitions), the
+    invoices phase's twenty (fifteen invoices -- `create_preview` and
+    `attach_payment` stay unwired -- plus five invoiceitems), and the
+    credit-notes-and-customer-balance phase's twelve (eight credit_notes,
+    four customer_balance_transactions). The rest are routed data awaiting
+    their resource phases, and calling one is an honest `INTERNAL` naming
+    the op (see `test_dispatch.py`)."""
     wired = [route.op_id for route in _all_routes() if route.params is not None]
     assert wired == [
         "GetBalance",
@@ -208,6 +210,12 @@ def test_the_wired_surface_is_small_and_named() -> None:
         "GetSubscriptionItemsItem",
         "PostSubscriptionItemsItem",
         "DeleteSubscriptionItemsItem",
+        "GetSubscriptionSchedules",
+        "PostSubscriptionSchedules",
+        "GetSubscriptionSchedulesSchedule",
+        "PostSubscriptionSchedulesSchedule",
+        "PostSubscriptionSchedulesScheduleCancel",
+        "PostSubscriptionSchedulesScheduleRelease",
         "GetSubscriptions",
         "PostSubscriptions",
         "GetSubscriptionsSubscriptionExposedId",
