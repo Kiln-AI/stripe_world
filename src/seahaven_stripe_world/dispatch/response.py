@@ -61,6 +61,10 @@ class Request:
     metadata: Any | None  # a MetadataUpdate, when the operation accepts one
     page: Page | None
     idempotency_key: str | None
+    # Search-only: ``expand[]=total_count`` opts into computing and returning
+    # ``total_count`` in the search-result envelope (functional_spec §6.2).
+    # Set by params.py when the expand list includes ``total_count``.
+    include_total_count: bool = False
 
 
 @dataclass(frozen=True, slots=True)

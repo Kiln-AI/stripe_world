@@ -1,4 +1,4 @@
-"""The routing table's invariants: the 148 count is the scope tripwire, and the
+"""The routing table's invariants: the 155 count is the scope tripwire, and the
 table is the single source of which operations exist anywhere in this world
 (architecture.md §3.1).
 """
@@ -21,9 +21,9 @@ def route_keys(table: tuple[routes.Route, ...]) -> set[tuple[str, str]]:
     return {(route.method, route.pattern) for route in table}
 
 
-def test_route_count_is_148() -> None:
-    """The scope-drift tripwire: becomes 155 when search lands (§3.3)."""
-    assert len(routes.ALL) == 148
+def test_route_count_is_155() -> None:
+    """The scope-drift tripwire: 155 after search landed (§3.3)."""
+    assert len(routes.ALL) == 155
 
 
 def test_method_pattern_pairs_are_unique() -> None:
@@ -52,7 +52,7 @@ def test_patterns_are_v1_paths_with_identifier_placeholders() -> None:
 
 
 def test_legacy_alias_families_are_routed() -> None:
-    """The eight legacy aliases the 148 includes (dispatcher.md §3.1.3), plus
+    """The eight legacy aliases the 155 includes (dispatcher.md §3.1.3), plus
     the read-only payment_methods alias and the embedded-discount endpoints."""
     keys = route_keys(routes.ALL)
     for method, pattern in [
@@ -78,11 +78,21 @@ def test_legacy_alias_families_are_routed() -> None:
 
 
 def test_cut_operations_are_absent() -> None:
-    """The 39 cuts (§3.2/§3.3): search, legacy sub-resources, features,
-    balance/history — none of them may appear in the table."""
+    """The 32 cuts (§3.2): legacy sub-resources, features, balance/history —
+    none of them may appear in the table.  The 7 search endpoints landed in
+    Phase 22 and are no longer cuts."""
     keys = route_keys(routes.ALL)
-    assert ("GET", "/v1/customers/search") not in keys
-    assert ("GET", "/v1/subscriptions/search") not in keys
+    # Search endpoints are now present — verify they ARE in the table.
+    for resource in (
+        "charges",
+        "customers",
+        "invoices",
+        "payment_intents",
+        "prices",
+        "products",
+        "subscriptions",
+    ):
+        assert ("GET", f"/v1/{resource}/search") in keys
     assert ("GET", "/v1/balance/history") not in keys
     assert ("GET", "/v1/balance/history/{id}") not in keys
     for sub in ("sources", "cards", "bank_accounts", "tax_ids", "cash_balance"):

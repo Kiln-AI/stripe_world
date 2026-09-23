@@ -1,10 +1,10 @@
-created_at: '2026-09-22T18:12:21.528Z'
+created_at: '2026-09-22T20:04:03.480Z'
 description: Schema only. Start here to write history, or to test setup flows.
-file_sha256: c8f1bac2623e718862d5340fafb9aee41067140ad4450b173801f5da6e4ce624
+file_sha256: c32f6a55fe05be97ddd4cf324350af5518a86256e3b3f7b86f3858271190716b
 format_version: 1
 id: empty
 now: '2026-09-01T14:00:00.000Z'
 parent_id: null
-schema_hash: 0692e21b19751a10d791c4727e3799fac355c4d0617b9384215f773071852697
+schema_hash: db47e63cc10be6773ea1c35a9519e93eb9a145afe0de17d14caf521bf58e87f0
 world: seahaven_stripe_world
 world_version: 0.1.0
