@@ -7,20 +7,20 @@ zeroes `valid` — all pinned by the Phase 7 live probes at
 import pytest
 import seahaven
 
-from conftest import BLANK_NOW
+from conftest import BLANK_NOW, api_read, api_write
 from seahaven_stripe_world.errors import StripeToolError
 
 pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
 
 
 def create(instance: seahaven.Instance, **params: object) -> dict:
-    return instance.call("stripe_api_write", method="POST", path="/v1/coupons", params=params)
+    return api_write(instance, "POST", "/v1/coupons", dict(params))
 
 
 def call(instance: seahaven.Instance, method: str, path: str, params: dict | None = None):
     if method == "GET":
-        return instance.call("stripe_api_read", path=path, params=params)
-    return instance.call("stripe_api_write", method=method, path=path, params=params)
+        return api_read(instance, path, params)
+    return api_write(instance, method, path, params)
 
 
 def test_percent_coupon_defaults(instance: seahaven.Instance) -> None:
@@ -131,9 +131,7 @@ def test_caller_supplied_id_round_trips_and_dupe_refuses(instance: seahaven.Inst
 def test_applies_to_and_currency_options_are_stored_not_emitted(
     instance: seahaven.Instance,
 ) -> None:
-    prod = instance.call(
-        "stripe_api_write", method="POST", path="/v1/products", params={"name": "P"}
-    )
+    prod = api_write(instance, "POST", "/v1/products", {"name": "P"})
     body = create(
         instance,
         amount_off=500,

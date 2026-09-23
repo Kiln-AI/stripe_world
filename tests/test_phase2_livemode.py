@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 import seahaven
 
-from conftest import BLANK_NOW
+from conftest import BLANK_NOW, api_read, api_write, extract_path_params
 from seahaven_stripe_world.errors import StripeToolError
 from seahaven_stripe_world.serialize.fields import NO_LIVEMODE_OBJECTS
 from seahaven_stripe_world.startup import ACCOUNT_ID
@@ -26,10 +26,34 @@ SRC_DIR = Path(__file__).resolve().parent.parent / "src" / "seahaven_stripe_worl
 # --- helpers ----------------------------------------------------------------
 
 
-def call(instance: seahaven.Instance, method: str, path: str, params: dict | None = None):
-    if method == "GET":
-        return instance.call("stripe_api_read", path=path, params=params)
-    return instance.call("stripe_api_write", method=method, path=path, params=params)
+def call(
+    instance: seahaven.Instance,
+    method: str,
+    path: str,
+    params: dict | None = None,
+    *,
+    livemode: bool = True,
+):
+    if livemode is True:
+        # Default path uses conftest helpers (livemode=True).
+        if method == "GET":
+            return api_read(instance, path, params)
+        return api_write(instance, method, path, params)
+    # Sandbox path: resolve op_id and pass livemode=False directly.
+    from seahaven_stripe_world.dispatch.router import ROUTER
+
+    route = ROUTER.resolve(method, path)
+    assert route is not None, f"no {method} route for {path}"
+    merged = dict(params or {})
+    merged.update(extract_path_params(route.pattern, path))
+    tool_name = "stripe_api_read" if method == "GET" else "stripe_api_write"
+    return instance.call(
+        tool_name,
+        stripe_api_operation_id=route.op_id,
+        parameters=merged,
+        stripe_context=ACCOUNT_ID,
+        livemode=False,
+    )
 
 
 # --- source-grep guard -----------------------------------------------------
@@ -70,7 +94,7 @@ def test_livemode_false_on_sandbox_instance() -> None:
     """An instance started with ``livemode=False`` produces objects with
     ``livemode=False``."""
     with world.instance(None, now=BLANK_NOW, startup={"livemode": False}) as inst:
-        body = call(inst, "POST", "/v1/customers", {"email": "sandbox@test"})
+        body = call(inst, "POST", "/v1/customers", {"email": "sandbox@test"}, livemode=False)
         assert body["livemode"] is False
 
 
@@ -152,6 +176,6 @@ def test_invoiceitem_error_derives_livemode_sandbox() -> None:
     ``livemode=false``."""
     with world.instance(None, now=BLANK_NOW, startup={"livemode": False}) as inst:
         with pytest.raises(StripeToolError) as exc_info:
-            call(inst, "GET", "/v1/invoiceitems/ii_nope")
+            call(inst, "GET", "/v1/invoiceitems/ii_nope", livemode=False)
         assert exc_info.value.status == 404
         assert "livemode=false" in exc_info.value.stripe_body["error"]["message"]

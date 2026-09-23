@@ -4,7 +4,7 @@ through the real four-tool chain (`components/dispatcher.md` §6)."""
 import pytest
 import seahaven
 
-from conftest import BLANK_NOW, dispatch_tool
+from conftest import BLANK_NOW, api_read, api_write, dispatch_tool
 from seahaven_stripe_world.dispatch.response import ApiResponse
 from seahaven_stripe_world.errors import StripeToolError
 
@@ -34,7 +34,7 @@ def _clean_by_object():
 
 
 def create(instance: seahaven.Instance, **params: object) -> dict:
-    return instance.call("stripe_api_write", method="POST", path="/v1/customers", params=params)
+    return api_write(instance, "POST", "/v1/customers", params)
 
 
 def test_crud_round_trip(instance: seahaven.Instance) -> None:
@@ -42,18 +42,16 @@ def test_crud_round_trip(instance: seahaven.Instance) -> None:
     assert created["object"] == "customer"
     cus = created["id"]
 
-    retrieved = instance.call("stripe_api_read", path=f"/v1/customers/{cus}")
+    retrieved = api_read(instance, f"/v1/customers/{cus}")
     assert retrieved == created  # the create answers what a retrieve answers
 
-    updated = instance.call(
-        "stripe_api_write", method="POST", path=f"/v1/customers/{cus}", params={"name": "Ada L."}
-    )
+    updated = api_write(instance, "POST", f"/v1/customers/{cus}", {"name": "Ada L."})
     assert updated["name"] == "Ada L."
 
-    listed = instance.call("stripe_api_read", path="/v1/customers")
+    listed = api_read(instance, "/v1/customers")
     assert [item["id"] for item in listed["data"]] == [cus]
 
-    deleted = instance.call("stripe_api_write", method="DELETE", path=f"/v1/customers/{cus}")
+    deleted = api_write(instance, "DELETE", f"/v1/customers/{cus}")
     assert deleted == {"id": cus, "object": "customer", "deleted": True}
 
 
@@ -107,22 +105,22 @@ def test_soft_delete_is_still_retrievable_and_filtered_from_lists(
 ) -> None:
     gone = create(instance, name="gone")
     staying = create(instance, name="staying")
-    instance.call("stripe_api_write", method="DELETE", path=f"/v1/customers/{gone['id']}")
+    api_write(instance, "DELETE", f"/v1/customers/{gone['id']}")
 
-    stub = instance.call("stripe_api_read", path=f"/v1/customers/{gone['id']}")
+    stub = api_read(instance, f"/v1/customers/{gone['id']}")
     assert stub["deleted"] is True
 
-    listed = instance.call("stripe_api_read", path="/v1/customers")
+    listed = api_read(instance, "/v1/customers")
     assert [item["id"] for item in listed["data"]] == [staying["id"]]
 
 
 def test_update_absent_means_unchanged(instance: seahaven.Instance) -> None:
     created = create(instance, email="keep@example.test", name="Keep", description="kept")
-    updated = instance.call(
-        "stripe_api_write",
-        method="POST",
-        path=f"/v1/customers/{created['id']}",
-        params={"name": "Changed"},
+    updated = api_write(
+        instance,
+        "POST",
+        f"/v1/customers/{created['id']}",
+        {"name": "Changed"},
     )
     assert updated["name"] == "Changed"
     assert updated["email"] == "keep@example.test"
@@ -131,11 +129,11 @@ def test_update_absent_means_unchanged(instance: seahaven.Instance) -> None:
 
 def test_update_of_a_missing_row_is_resource_missing(instance: seahaven.Instance) -> None:
     with pytest.raises(StripeToolError) as exc_info:
-        instance.call(
-            "stripe_api_write",
-            method="POST",
-            path="/v1/customers/cus_missing",
-            params={"name": "x"},
+        api_write(
+            instance,
+            "POST",
+            "/v1/customers/cus_missing",
+            {"name": "x"},
         )
     assert exc_info.value.status == 404
     assert exc_info.value.stripe_body["error"]["code"] == "resource_missing"
@@ -146,22 +144,16 @@ def test_list_filters(instance: seahaven.Instance) -> None:
 
     one = create(instance, email="one@example.test")
     create(instance, email="two@example.test")
-    listed = instance.call(
-        "stripe_api_read", path="/v1/customers", params={"email": "one@example.test"}
-    )
+    listed = api_read(instance, "/v1/customers", {"email": "one@example.test"})
     assert [item["id"] for item in listed["data"]] == [one["id"]]
     assert listed["url"] == "/v1/customers"
 
     # A `created` range that excludes the frozen instant excludes everything.
     before = _time.to_unix(BLANK_NOW) - 3600
-    empty = instance.call(
-        "stripe_api_read", path="/v1/customers", params={"created": {"lt": before}}
-    )
+    empty = api_read(instance, "/v1/customers", {"created": {"lt": before}})
     assert empty["data"] == []
     # …and one that includes it includes the rows.
-    present = instance.call(
-        "stripe_api_read", path="/v1/customers", params={"created": {"gte": before}}
-    )
+    present = api_read(instance, "/v1/customers", {"created": {"gte": before}})
     assert len(present["data"]) == 2
 
 
@@ -170,17 +162,15 @@ def test_list_is_reverse_chronological_under_a_frozen_clock(instance: seahaven.I
     timestamp, not the seeded-random id — is what makes the order creation
     order (`components/data_model.md` §3.11)."""
     ids = [create(instance, name=f"c{i}")["id"] for i in range(3)]
-    listed = instance.call("stripe_api_read", path="/v1/customers")
+    listed = api_read(instance, "/v1/customers")
     assert [item["id"] for item in listed["data"]] == list(reversed(ids))
 
 
 def test_generated_writes_emit_their_events(instance: seahaven.Instance) -> None:
     created = create(instance, name="eventful")
     cus = created["id"]
-    instance.call(
-        "stripe_api_write", method="POST", path=f"/v1/customers/{cus}", params={"name": "e2"}
-    )
-    instance.call("stripe_api_write", method="DELETE", path=f"/v1/customers/{cus}")
+    api_write(instance, "POST", f"/v1/customers/{cus}", {"name": "e2"})
+    api_write(instance, "DELETE", f"/v1/customers/{cus}")
 
     rows = instance.inspect().rows("SELECT type, data FROM events ORDER BY x_seq")
     assert [row["type"] for row in rows] == [
@@ -217,10 +207,8 @@ def test_delete_emits_after_the_write_and_the_snapshot_has_no_deleted_key(
 
     created = create(instance, name="gone soon")
     cus = created["id"]
-    instance.call(
-        "stripe_api_write", method="POST", path=f"/v1/customers/{cus}", params={"name": "gone"}
-    )
-    instance.call("stripe_api_write", method="DELETE", path=f"/v1/customers/{cus}")
+    api_write(instance, "POST", f"/v1/customers/{cus}", {"name": "gone"})
+    api_write(instance, "DELETE", f"/v1/customers/{cus}")
 
     rows = instance.inspect().rows("SELECT type, data FROM events ORDER BY x_seq")
     assert [row["type"] for row in rows] == [

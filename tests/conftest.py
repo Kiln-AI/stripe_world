@@ -17,6 +17,7 @@ import seahaven
 
 from schema_conformance import capture
 from seahaven_stripe_world.middleware.error_handler import error_handler
+from seahaven_stripe_world.middleware.idempotency import idempotency
 from seahaven_stripe_world.middleware.stripe_envelope import stripe_envelope
 from seahaven_stripe_world.startup import ACCOUNT_ID
 from seahaven_stripe_world.world import world
@@ -30,6 +31,10 @@ FIXTURE_NOW = "2026-09-01T14:00:00.000Z"
 # later be frozen at, chosen once here and never touched again.
 # `test_fixtures.py` asserts the two literals cannot drift apart.
 BLANK_NOW = "2026-09-01T14:00:00.000Z"
+
+# The default context parameters for test calls.
+# All tests run against the default account in live mode.
+_DEFAULT_LIVEMODE = True
 
 
 @pytest.fixture
@@ -64,9 +69,11 @@ def probe(tmp_path: Path) -> Callable[..., seahaven.World]:
             fixtures_dir=tmp_path / "fixtures",
             work_dir=tmp_path / "work",
             state_format="seahaven.state/1",
+            untracked_tables=("counters", "idempotency_keys"),
         )
         built.middleware(error_handler)
         built.middleware(stripe_envelope)
+        built.middleware(idempotency)
 
         @built.instance_startup
         def _probe_startup(ctx: seahaven.Ctx, **_kwargs: object) -> None:
@@ -103,10 +110,109 @@ def dispatch_tool() -> Any:
         method: Literal["GET", "POST", "DELETE"],
         path: str,
         params: dict | None = None,
+        idempotency_key: str | None = None,
     ) -> object:
-        return call_stripe(ctx, method, path, params)
+        return call_stripe(ctx, method, path, params, idempotency_key=idempotency_key)
 
     return seahaven.Tool.from_function(call, name="call_stripe", description="the dispatcher probe")
+
+
+# --- Test helpers for the new tool signatures --------------------------------
+# Translate old-style (method, path, params) to new-style
+# (stripe_api_operation_id, parameters, stripe_context, livemode).
+
+
+def _resolve_op_id(method: str, path: str) -> str:
+    """Look up the operation ID for a (method, path) pair."""
+    from seahaven_stripe_world.dispatch.router import ROUTER
+
+    match = ROUTER.resolve(method, path)
+    assert match is not None, f"no route for {method} {path}"
+    return match.op_id
+
+
+def extract_path_params(pattern: str, path: str) -> dict[str, str]:
+    """Extract path parameter values by comparing pattern to concrete path."""
+    pattern_parts = pattern.split("/")
+    path_parts = path.split("/")
+    params: dict[str, str] = {}
+    for ppart, cpart in zip(pattern_parts, path_parts, strict=False):
+        if ppart.startswith("{") and ppart.endswith("}"):
+            params[ppart[1:-1]] = cpart
+    return params
+
+
+def api_read(
+    instance: seahaven.Instance,
+    path: str,
+    params: dict[str, Any] | None = None,
+) -> Any:
+    """Test helper: stripe_api_read with the new operation-id signature."""
+    from seahaven_stripe_world.dispatch.router import ROUTER
+
+    route = ROUTER.resolve("GET", path)
+    assert route is not None, f"no GET route for {path}"
+    merged = dict(params or {})
+    merged.update(extract_path_params(route.pattern, path))
+    return instance.call(
+        "stripe_api_read",
+        stripe_api_operation_id=route.op_id,
+        parameters=merged,
+        stripe_context=ACCOUNT_ID,
+        livemode=_DEFAULT_LIVEMODE,
+    )
+
+
+def api_write(
+    instance: seahaven.Instance,
+    method: str,
+    path: str,
+    params: dict[str, Any] | None = None,
+) -> Any:
+    """Test helper: stripe_api_write with the new operation-id signature."""
+    from seahaven_stripe_world.dispatch.router import ROUTER
+
+    route = ROUTER.resolve(method, path)
+    assert route is not None, f"no {method} route for {path}"
+    merged = dict(params or {})
+    merged.update(extract_path_params(route.pattern, path))
+    return instance.call(
+        "stripe_api_write",
+        stripe_api_operation_id=route.op_id,
+        parameters=merged,
+        stripe_context=ACCOUNT_ID,
+        livemode=_DEFAULT_LIVEMODE,
+    )
+
+
+def api_search(
+    instance: seahaven.Instance,
+    intent: str,
+    resource: str,
+    limit: int = 5,
+) -> Any:
+    """Test helper: stripe_api_search with the new signature."""
+    return instance.call(
+        "stripe_api_search",
+        intent=intent,
+        resource=resource,
+        stripe_context=ACCOUNT_ID,
+        livemode=_DEFAULT_LIVEMODE,
+        limit=limit,
+    )
+
+
+def api_details(
+    instance: seahaven.Instance,
+    operation_id: str,
+) -> Any:
+    """Test helper: stripe_api_details with the new signature."""
+    return instance.call(
+        "stripe_api_details",
+        stripe_api_operation_id=operation_id,
+        stripe_context=ACCOUNT_ID,
+        livemode=_DEFAULT_LIVEMODE,
+    )
 
 
 @pytest.fixture(autouse=True)

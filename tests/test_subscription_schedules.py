@@ -5,7 +5,7 @@ pinned by the Phase 16 implementation (scoped-down phases model)."""
 import pytest
 import seahaven
 
-from conftest import BLANK_NOW
+from conftest import BLANK_NOW, api_read, api_write
 from seahaven_stripe_world.errors import StripeToolError
 
 pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
@@ -13,8 +13,8 @@ pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
 
 def call(instance: seahaven.Instance, method: str, path: str, params: dict | None = None):
     if method == "GET":
-        return instance.call("stripe_api_read", path=path, params=params)
-    return instance.call("stripe_api_write", method=method, path=path, params=params)
+        return api_read(instance, path, params)
+    return api_write(instance, method, path, params)
 
 
 def setup_catalog(instance: seahaven.Instance) -> tuple[str, str, str]:
@@ -656,26 +656,16 @@ def test_unknown_parameter_refused(instance: seahaven.Instance) -> None:
     assert exc_info.value.stripe_body["error"]["code"] == "parameter_unknown"
 
 
-# --- the idempotent create --------------------------------------------------------
+# --- duplicate create (idempotency tested via call_stripe in test_idempotency) ----
 
 
-def test_the_idempotent_create_replays(instance: seahaven.Instance) -> None:
+def test_two_creates_produce_two_schedules(instance: seahaven.Instance) -> None:
+    """Without an idempotency key (removed from the MCP surface in Phase 5),
+    two identical creates produce two distinct schedules."""
     cus, _, price = setup_catalog(instance)
     params = {"customer": cus, "phases": [{"items": [{"price": price}]}]}
-    first = instance.call(
-        "stripe_api_write",
-        method="POST",
-        path="/v1/subscription_schedules",
-        params=params,
-        idempotency_key="sched-once",
-    )
-    second = instance.call(
-        "stripe_api_write",
-        method="POST",
-        path="/v1/subscription_schedules",
-        params=params,
-        idempotency_key="sched-once",
-    )
-    assert second["id"] == first["id"]
+    first = api_write(instance, "POST", "/v1/subscription_schedules", params)
+    second = api_write(instance, "POST", "/v1/subscription_schedules", params)
+    assert second["id"] != first["id"]
     count = instance.inspect().one("SELECT count(*) AS n FROM subscription_schedules")
-    assert count == {"n": 1}
+    assert count == {"n": 2}

@@ -34,10 +34,10 @@ discover later.
 | EC-04 | Response headers (`Stripe-Version`, `Request-Id`) visible in our world; real MCP surfaces none | envelope | trivial | closed |
 | TS-13, DT-02 | Search output missing `{openapi_spec_version, data}` wrapper; ours returns bare list | tool-surface, discovery | trivial | open |
 | TS-14, DT-03 | Search results missing `id` (operation ID) and optional `llm_context` fields | tool-surface, discovery | trivial | open |
-| TS-08 | `stripe_api_read` description text doesn't match (references paths, not operation IDs) | tool-surface | trivial | open |
-| TS-09 | `stripe_api_search` description text doesn't match (keyword search vs intent+resource) | tool-surface | trivial | open |
-| TS-24 | `stripe_api_write` description text doesn't match | tool-surface | trivial | open |
-| TS-25 | `stripe_api_details` description text doesn't match | tool-surface | trivial | open |
+| TS-08 | `stripe_api_read` description text doesn't match (references paths, not operation IDs) | tool-surface | trivial | closed |
+| TS-09 | `stripe_api_search` description text doesn't match (keyword search vs intent+resource) | tool-surface | trivial | closed |
+| TS-24 | `stripe_api_write` description text doesn't match | tool-surface | trivial | closed |
+| TS-25 | `stripe_api_details` description text doesn't match | tool-surface | trivial | closed |
 | AS-01 | Customer ID suffix is 24 chars; real is 14. `prod_` and `si_` also 14 (Format A) | account-stats | trivial | closed |
 | AS-03 | Account object missing `controller`, `external_accounts`, `requirements`, `future_requirements`, `tos_acceptance` | account-stats | trivial | closed |
 | AS-04 | Account `capabilities` should be `{}` on a fresh sandbox, not `{"card_payments":"active",...}` | account-stats | trivial | closed |
@@ -49,13 +49,13 @@ discover later.
 | TS-15, DT-14 | Details response has 12 keys (`id`, `tags`, `keywords`, `required_permissions`, ...); ours has 6 with `operation_id` not `id` | tool-surface, discovery | moderate | open |
 | TS-16, DT-15 | Details parameters grouped as `{path:{}, query:{}, body:{}}` dicts; ours is a flat list | tool-surface, discovery | moderate | open |
 | TS-18, DT-04 | Path placeholders normalized to `{id}` everywhere; ours uses `{customer}`, `{invoice}`, etc. | tool-surface, discovery | moderate | open |
-| TS-06, DT-01 | Search tool takes `intent` + `resource` + `limit`; ours takes free-text `query` | tool-surface, discovery | moderate | open |
+| TS-06, DT-01 | Search tool takes `intent` + `resource` + `limit`; ours takes free-text `query` | tool-surface, discovery | moderate | closed |
 | TS-02 | `get_stripe_account_info` does not exist on real MCP; real uses `list_available_accounts_or_orgs` | tool-surface | moderate | open |
 | TS-03 | `list_available_accounts_or_orgs` missing; it gates every other tool (provides `stripe_context`/`livemode`) | tool-surface | moderate | open |
 | AR-01 | Out-of-scope paths with product-activation errors (Issuing, etc.) get 404 "Unrecognized"; should be permission-style error | absence-refusal | moderate | open |
 | AR-02 | Out-of-scope paths that succeed on real Stripe (Checkout, Payment Links, etc.) get 404; should be permission error | absence-refusal | moderate | open |
 | AS-02 | Structured IDs (Format B) embed a 10-char account fragment at a fixed position; ours are fully random | account-stats | moderate | closed |
-| TS-04, TS-05, TS-07, TS-26, DT-13 | Read/write/details tools use `stripe_api_operation_id` + `stripe_context` + `livemode`; ours use `method` + `path` | tool-surface, discovery | hard | open |
+| TS-04, TS-05, TS-07, TS-26, DT-13 | Read/write/details tools use `stripe_api_operation_id` + `stripe_context` + `livemode`; ours use `method` + `path` | tool-surface, discovery | hard | closed |
 | TS-01 | Tool count: real MCP has 10 tools; ours has 5 (6 missing, 1 extra) | tool-surface | hard | not-a-tell |
 | AR-05, AR-06, DT-06, DT-07, DT-08, DT-09, DT-10, DT-11, DT-12, DT-19, DT-25 | Discovery covers entire Stripe API (Issuing, Connect, Checkout, Treasury, Tax, v2, ...); ours covers only 148 ops | absence-refusal, discovery | hard | open |
 | EC-03, AR-08 | `idempotency_key` not exposed through MCP (it's an HTTP header); ours accepts it as tool parameter | envelope, absence-refusal | decision | closed |

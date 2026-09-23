@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import seahaven
 
-from conftest import BLANK_NOW
+from conftest import BLANK_NOW, api_details, api_read, api_search
 from seahaven_stripe_world.discovery import index
 from seahaven_stripe_world.dispatch import routes
 from seahaven_stripe_world.dispatch.params import body_of
@@ -32,7 +32,7 @@ def test_search_operations_are_visible() -> None:
 
 
 def test_search_is_deterministic_with_a_total_order() -> None:
-    assert index.search("refund a charge") == index.search("refund a charge")
+    assert index.search("refund", "charge") == index.search("refund", "charge")
     # The tie-break is (method, path), unique across the routed set.
     scored = [op for op in index.INDEX]
     keys = [(op.method, op.path) for op in scored]
@@ -40,58 +40,47 @@ def test_search_is_deterministic_with_a_total_order() -> None:
 
 
 def test_search_quality_spot_checks() -> None:
-    for query, wanted in (
-        ("cancel a subscription", "cancel"),
-        ("void invoice", "void"),
-        ("refund a charge", "refund"),
-        ("list customers", "/v1/customers"),
-        ("create a coupon", "coupon"),
+    for intent, resource, wanted in (
+        ("cancel", "subscription", "cancel"),
+        ("void", "invoice", "void"),
+        ("refund", "charge", "refund"),
+        ("list", "customers", "/v1/customers"),
+        ("create", "coupon", "coupon"),
     ):
-        results = index.search(query)
-        assert results, query
+        results = index.search(intent, resource)
+        assert results, (intent, resource)
         assert any(
             wanted in result["path"] or wanted in result["summary"].lower()
             for result in results[:3]
-        ), (query, results[:3])
+        ), (intent, resource, results[:3])
 
 
-def test_search_returns_at_most_ten() -> None:
-    assert len(index.search("the")) <= 10
+def test_search_returns_at_most_limit() -> None:
+    assert len(index.search("the", "", limit=10)) <= 10
+    assert len(index.search("the", "", limit=5)) <= 5
 
 
 def test_a_zero_result_query_is_an_empty_list(instance: seahaven.Instance) -> None:
-    assert instance.call("stripe_api_search", query="zzzqqqxyzzy") == []
+    assert api_search(instance, "zzzqqqxyzzy", "zzzqqqxyzzy") == []
 
 
-def test_an_empty_query_is_a_tool_error(instance: seahaven.Instance) -> None:
-    for query in ("", "   ", "!"):
-        with pytest.raises(seahaven.ToolError) as raised:
-            instance.call("stripe_api_search", query=query)
-        assert raised.value.code == "INVALID_SEARCH_QUERY"
+def test_an_empty_query_returns_empty_list(instance: seahaven.Instance) -> None:
+    """Empty intent and resource return an empty list (no error)."""
+    assert api_search(instance, "", "") == []
 
 
-def test_details_for_a_concrete_path_resolves_to_the_pattern(
+def test_details_returns_operation_info(
     instance: seahaven.Instance,
 ) -> None:
-    documented = instance.call("stripe_api_details", method="GET", path="/v1/customers/cus_1")
+    documented = api_details(instance, "GetCustomersCustomer")
     assert documented["path"] == "/v1/customers/{customer}"
     assert documented["operation_id"] == "GetCustomersCustomer"
 
 
-def test_details_for_an_unknown_path_is_a_tool_error(instance: seahaven.Instance) -> None:
+def test_details_for_an_unknown_operation_is_a_tool_error(instance: seahaven.Instance) -> None:
     with pytest.raises(seahaven.ToolError) as raised:
-        instance.call("stripe_api_details", method="GET", path="/v1/widgets")
+        api_details(instance, "GetWidgets")
     assert raised.value.code == "UNKNOWN_OPERATION"
-
-
-def test_details_refuses_a_non_routed_verb(instance: seahaven.Instance) -> None:
-    """`PATCH` never reaches the tool: the `Literal` annotation refuses it, and
-    the error handler restates the framework's refusal as this world's
-    `INVALID_INPUT` — the fourth method is an authoring mistake, not a Stripe
-    request (functional spec §2.3)."""
-    with pytest.raises(seahaven.ToolError) as raised:
-        instance.call("stripe_api_details", method="PATCH", path="/v1/customers")
-    assert raised.value.code == "INVALID_INPUT"
 
 
 def test_wired_details_document_exactly_the_enforced_allowlist(
@@ -104,7 +93,7 @@ def test_wired_details_document_exactly_the_enforced_allowlist(
     is rejected and nothing enforced is undocumented."""
     from seahaven_stripe_world.dispatch.router import ROUTER
 
-    documented = instance.call("stripe_api_details", method="POST", path="/v1/customers")
+    documented = api_details(instance, "PostCustomers")
     spec_parameters = {parameter["name"] for parameter in documented["parameters"]}
     route = ROUTER.resolve("POST", "/v1/customers")
     assert route is not None and route.params is not None
@@ -122,7 +111,7 @@ def test_wired_details_document_exactly_the_enforced_allowlist(
     # The list route's query surface: the list filters plus the pagination
     # parameters and `expand` it accepts — and not `test_clock`, which the
     # spec serves and the dispatcher rejects.
-    listed = instance.call("stripe_api_details", method="GET", path="/v1/customers")
+    listed = api_details(instance, "GetCustomers")
     names = {parameter["name"] for parameter in listed["parameters"]}
     assert names == {
         "created",
@@ -133,13 +122,13 @@ def test_wired_details_document_exactly_the_enforced_allowlist(
         "starting_after",
     }
     with pytest.raises(StripeToolError) as exc_info:
-        instance.call("stripe_api_read", path="/v1/customers", params={"test_clock": "ts_1"})
+        api_read(instance, "/v1/customers", {"test_clock": "ts_1"})
     assert exc_info.value.status == 400
     assert exc_info.value.stripe_body["error"]["param"] == "test_clock"
 
 
 def test_nesting_depth_is_one_level(instance: seahaven.Instance) -> None:
-    documented = instance.call("stripe_api_details", method="POST", path="/v1/customers")
+    documented = api_details(instance, "PostCustomers")
     for parameter in documented["parameters"]:
         for key in ("fields", "item_fields"):
             for nested in parameter.get(key, ()):
@@ -148,7 +137,7 @@ def test_nesting_depth_is_one_level(instance: seahaven.Instance) -> None:
 
 
 def test_descriptions_are_one_sentence(instance: seahaven.Instance) -> None:
-    documented = instance.call("stripe_api_details", method="POST", path="/v1/customers")
+    documented = api_details(instance, "PostCustomers")
 
     def sentences(text: str) -> int:
         return text.count(". ")
@@ -163,18 +152,16 @@ def test_details_response_size_budget() -> None:
     A *wired* operation is filtered to its `ParamSpec` and fits comfortably;
     an unwired one serves the spec verbatim until its resource phase lands,
     so its guard is the interim one and tightens as the slices do."""
-    wired = [
-        (route.method, route.pattern)
-        for route in routes.ALL
-        if route.params is not None and route.method == "POST"
-    ]
+    wired = [route for route in routes.ALL if route.params is not None and route.method == "POST"]
     assert wired  # the throwaway customers slice, at minimum
-    for method, path in wired:
-        documented = index.details(method, path)
+    for route in wired:
+        documented = index.details(route.op_id)
         assert documented is not None
-        assert len(json.dumps(documented)) < 10_000, (method, path)
+        assert len(json.dumps(documented)) < 10_000, (route.method, route.pattern)
     for method, path in (("POST", "/v1/subscriptions"), ("POST", "/v1/invoices")):
-        documented = index.details(method, path)
+        op = index.BY_KEY.get((method, path))
+        assert op is not None, f"missing {method} {path}"
+        documented = index.details(op.operation_id)
         assert documented is not None
         assert len(json.dumps(documented)) < 25_000, (method, path)
 

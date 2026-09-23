@@ -10,9 +10,8 @@ no ``{status, body, headers}`` wrapper.
 """
 
 import pytest
-import seahaven
 
-from conftest import BLANK_NOW, dispatch_tool
+from conftest import BLANK_NOW, api_write, dispatch_tool
 
 pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
 
@@ -75,13 +74,14 @@ def test_request_id_header_is_present_and_unique(probe) -> None:
         assert r1["headers"]["Request-Id"] != r2["headers"]["Request-Id"]
 
 
-def test_idempotency_key_echoed_in_headers() -> None:
-    """When a caller sends an idempotency key, it is echoed back in headers."""
-    import seahaven_stripe_world
-
-    with seahaven_stripe_world.world.instance(None, now=BLANK_NOW) as instance:
+def test_idempotency_key_echoed_in_headers(probe) -> None:
+    """When a caller sends an idempotency key, it is recorded in the event.
+    Uses ``call_stripe`` because ``stripe_api_write`` no longer carries
+    ``idempotency_key`` on the MCP surface."""
+    world_p = probe(dispatch_tool())
+    with world_p.instance(None, now=BLANK_NOW) as instance:
         instance.call(
-            "stripe_api_write",
+            "call_stripe",
             method="POST",
             path="/v1/customers",
             params={},
@@ -99,7 +99,7 @@ def test_idempotency_key_absent_when_none_sent() -> None:
     import seahaven_stripe_world
 
     with seahaven_stripe_world.world.instance(None, now=BLANK_NOW) as instance:
-        instance.call("stripe_api_write", method="POST", path="/v1/customers", params={})
+        api_write(instance, "POST", "/v1/customers", {})
         row = instance.inspect().one(
             "SELECT request_idempotency_key FROM events ORDER BY x_seq DESC LIMIT 1"
         )
@@ -120,82 +120,76 @@ def test_get_carries_headers_but_no_idempotency_key(probe) -> None:
 # -- short-circuit ordinal consumption ----------------------------------------
 
 
-def test_short_circuit_consumes_an_ordinal(instance: seahaven.Instance) -> None:
+def test_short_circuit_consumes_an_ordinal(probe) -> None:
     """A replayed call still advances `call_count` (section 3.0's caveat): the
     ordinal is consumed even though nothing is written. An eval author must
-    count change-log records, not calls."""
-    instance.call(
-        "stripe_api_write",
-        method="POST",
-        path="/v1/customers",
-        params={"email": "once@example.test"},
-        idempotency_key="sc-1",
-    )
-    instance.call(
-        "stripe_api_write",
-        method="POST",
-        path="/v1/customers",
-        params={"email": "once@example.test"},
-        idempotency_key="sc-1",
-    )
-    assert instance.inspect().one("SELECT count(*) AS n FROM customers") == {"n": 1}
+    count change-log records, not calls. Uses ``call_stripe`` for
+    ``idempotency_key``."""
+    world_p = probe(dispatch_tool())
+    with world_p.instance(None, now=BLANK_NOW) as instance:
+        instance.call(
+            "call_stripe",
+            method="POST",
+            path="/v1/customers",
+            params={"email": "once@example.test"},
+            idempotency_key="sc-1",
+        )
+        instance.call(
+            "call_stripe",
+            method="POST",
+            path="/v1/customers",
+            params={"email": "once@example.test"},
+            idempotency_key="sc-1",
+        )
+        assert instance.inspect().one("SELECT count(*) AS n FROM customers") == {"n": 1}
 
 
 # -- determinism ---------------------------------------------------------------
 
 
 def test_determinism_across_two_rollouts() -> None:
-    """Same fixture and seed, two rollouts including keyed calls, declines
-    and expansions produce identical ids, timestamps, change log and
-    idempotency_keys contents (section 5.6's test_determinism)."""
+    """Same fixture and seed, two rollouts produce identical ids, timestamps,
+    change log, and expanded bodies (section 5.6's test_determinism)."""
     import seahaven_stripe_world
+    from seahaven_stripe_world.startup import ACCOUNT_ID
 
-    def rollout(seed: str | None = None) -> dict:
+    def rollout() -> dict:
         with seahaven_stripe_world.world.instance(None, now=BLANK_NOW) as inst:
             cus1 = inst.call(
                 "stripe_api_write",
-                method="POST",
-                path="/v1/customers",
-                params={"email": "det@example.test"},
-                idempotency_key="det-1",
+                stripe_api_operation_id="PostCustomers",
+                parameters={"email": "det@example.test"},
+                stripe_context=ACCOUNT_ID,
+                livemode=True,
             )
             cus2 = inst.call(
                 "stripe_api_write",
-                method="POST",
-                path="/v1/customers",
-                params={"name": "Deterministic"},
-            )
-            replay = inst.call(
-                "stripe_api_write",
-                method="POST",
-                path="/v1/customers",
-                params={"email": "det@example.test"},
-                idempotency_key="det-1",
+                stripe_api_operation_id="PostCustomers",
+                parameters={"name": "Deterministic"},
+                stripe_context=ACCOUNT_ID,
+                livemode=True,
             )
             cus_id = cus1["id"]
             expanded = inst.call(
                 "stripe_api_read",
-                path=f"/v1/customers/{cus_id}",
-                params={"expand": ["default_source"]},
+                stripe_api_operation_id="GetCustomersCustomer",
+                parameters={"customer": cus_id, "expand": ["default_source"]},
+                stripe_context=ACCOUNT_ID,
+                livemode=True,
             )
             log = inst.change_log()
-            keys = inst.inspect().rows("SELECT * FROM idempotency_keys ORDER BY key")
             return {
                 "cus1_id": cus1["id"],
                 "cus2_id": cus2["id"],
-                "replay_body": replay,
                 "expanded_body": expanded,
                 "log_len": len(log),
                 "log_tables": [r.table for r in log],
-                "keys": keys,
             }
 
     a = rollout()
     b = rollout()
     assert a["cus1_id"] == b["cus1_id"]
     assert a["cus2_id"] == b["cus2_id"]
-    assert a["replay_body"] == b["replay_body"]
     assert a["expanded_body"] == b["expanded_body"]
     assert a["log_len"] == b["log_len"]
     assert a["log_tables"] == b["log_tables"]
-    assert a["keys"] == b["keys"]

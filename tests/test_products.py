@@ -7,20 +7,20 @@ carries the difference, not the serializer."""
 import pytest
 import seahaven
 
-from conftest import BLANK_NOW
+from conftest import BLANK_NOW, api_read, api_write
 from seahaven_stripe_world.errors import StripeToolError
 
 pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
 
 
 def create(instance: seahaven.Instance, **params: object) -> dict:
-    return instance.call("stripe_api_write", method="POST", path="/v1/products", params=params)
+    return api_write(instance, "POST", "/v1/products", dict(params))
 
 
 def call(instance: seahaven.Instance, method: str, path: str, params: dict | None = None):
     if method == "GET":
-        return instance.call("stripe_api_read", path=path, params=params)
-    return instance.call("stripe_api_write", method=method, path=path, params=params)
+        return api_read(instance, path, params)
+    return api_write(instance, method, path, params)
 
 
 def test_create_defaults(instance: seahaven.Instance) -> None:
@@ -154,11 +154,11 @@ def test_list_filters(instance: seahaven.Instance) -> None:
 
 def test_a_product_with_prices_refuses_its_delete(instance: seahaven.Instance) -> None:
     product = create(instance, name="priced")
-    instance.call(
-        "stripe_api_write",
-        method="POST",
-        path="/v1/prices",
-        params={"currency": "usd", "unit_amount": 100, "product": product["id"]},
+    api_write(
+        instance,
+        "POST",
+        "/v1/prices",
+        {"currency": "usd", "unit_amount": 100, "product": product["id"]},
     )
     with pytest.raises(StripeToolError) as exc_info:
         call(instance, "DELETE", f"/v1/products/{product['id']}")

@@ -12,15 +12,35 @@ from conftest import BLANK_NOW
 from seahaven_stripe_world.errors import StripeToolError
 from seahaven_stripe_world.middleware.idempotency import request_hash
 
-pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
+
+@pytest.fixture
+def instance(probe):
+    from conftest import dispatch_tool
+
+    w = probe(dispatch_tool())
+    with w.instance(None, now=BLANK_NOW) as inst:
+        yield inst
 
 
 def write(
     instance: seahaven.Instance, path: str, params: dict | None = None, key: str | None = None
 ):
-    return instance.call(
-        "stripe_api_write", method="POST", path=path, params=params, idempotency_key=key
+    """POST through ``call_stripe``; returns the bare body on success.
+
+    Raises ``StripeToolError`` on 4xx/5xx so idempotency-error assertions
+    (mismatch, key-in-use) stay unchanged from the original ``stripe_api_write``
+    tests.  The raw-HTTP envelope returns errors instead of raising; this
+    helper re-raises them.
+    """
+    result = instance.call(
+        "call_stripe", method="POST", path=path, params=params, idempotency_key=key
     )
+    body = result["body"]
+    status = result["status"]
+    if status >= 400:
+        error = body.get("error", {})
+        raise StripeToolError(error.get("message", "error"), status=status, stripe_body=body)
+    return body
 
 
 def key_row(instance: seahaven.Instance, key: str) -> dict | None:
@@ -29,10 +49,13 @@ def key_row(instance: seahaven.Instance, key: str) -> dict | None:
     )
 
 
+def call_raw(instance: seahaven.Instance, method: str, path: str, **kwargs: object) -> dict:
+    """Call ``call_stripe`` on the probe world and return the bare body."""
+    return instance.call("call_stripe", method=method, path=path, **kwargs)["body"]
+
+
 def a_customer(instance: seahaven.Instance, email: str = "idem@example.test") -> str:
-    return instance.call(
-        "stripe_api_write", method="POST", path="/v1/customers", params={"email": email}
-    )["id"]
+    return call_raw(instance, "POST", "/v1/customers", params={"email": email})["id"]
 
 
 # --- the short-circuit: outcome (b), §3.1.8's two doors -------------------------------------------
@@ -119,12 +142,8 @@ def test_a_key_is_scoped_to_the_endpoint(instance: seahaven.Instance) -> None:
 def test_delete_does_not_honour_the_key(instance: seahaven.Instance) -> None:
     one = a_customer(instance, "gone@example.test")
     two = a_customer(instance, "gone2@example.test")
-    first = instance.call(
-        "stripe_api_write", method="DELETE", path=f"/v1/customers/{one}", idempotency_key="idem-5"
-    )
-    second = instance.call(
-        "stripe_api_write", method="DELETE", path=f"/v1/customers/{two}", idempotency_key="idem-5"
-    )
+    first = call_raw(instance, "DELETE", f"/v1/customers/{one}", idempotency_key="idem-5")
+    second = call_raw(instance, "DELETE", f"/v1/customers/{two}", idempotency_key="idem-5")
     # Re-executed, not replayed: the second answer names the second customer.
     assert first["id"] == one
     assert second["id"] == two
@@ -147,7 +166,7 @@ def test_a_non_string_path_is_the_frameworks_refusal_not_a_db_error(
     nothing."""
     with pytest.raises(seahaven.ToolError) as raised:
         instance.call(
-            "stripe_api_write",
+            "call_stripe",
             method="POST",
             path=None,  # type: ignore[arg-type]
             params={"email": "x@example.test"},
@@ -237,10 +256,10 @@ def test_an_in_flight_key_answers_409(instance: seahaven.Instance) -> None:
 
 def test_a_returned_402_decline_is_cached_under_the_key(instance: seahaven.Instance) -> None:
     cus = a_customer(instance, "declined@example.test")
-    declined = instance.call(
-        "stripe_api_write",
-        method="POST",
-        path="/v1/payment_methods",
+    declined = call_raw(
+        instance,
+        "POST",
+        "/v1/payment_methods",
         params={
             "type": "card",
             "card": {"number": "4000000000000341", "exp_month": 9, "exp_year": 2027},
@@ -298,7 +317,7 @@ def test_argument_error_retracts_the_reservation(instance: seahaven.Instance) ->
     (§3.1.4a): the reservation is gone and a corrected retry works."""
     with pytest.raises(seahaven.ToolError) as raised:
         instance.call(
-            "stripe_api_write",
+            "call_stripe",
             method="POST",
             path="/v1/customers",
             params="not a dict",  # type: ignore[arg-type]
@@ -309,22 +328,14 @@ def test_argument_error_retracts_the_reservation(instance: seahaven.Instance) ->
 
 
 def test_key_on_get_is_silently_ignored(instance: seahaven.Instance) -> None:
-    """A key on GET has no effect (§3.1.1): `stripe_api_read` does not accept
-    the parameter at all, and the middleware only engages for
-    `stripe_api_write` POST. The test verifies through the write tool with
-    method=GET-like semantics: a GET-shaped read through `call_stripe` would
-    not cache."""
-    # The middleware passes through when the tool is not stripe_api_write.
-    # Since stripe_api_read has no idempotency_key arg, we verify the
-    # middleware's pass-through by confirming the key on a write tool
-    # with a non-POST method is also ignored.
+    """A key on GET has no effect (§3.1.1): ``stripe_api_read`` does not accept
+    the parameter at all, and the middleware only engages for ``call_stripe``
+    POST.  The test verifies through ``call_stripe`` with a DELETE (non-POST)
+    method: the key is silently ignored."""
+    # The middleware passes through when the method is not POST.
+    # A DELETE through call_stripe with idempotency_key must not cache.
     cus = a_customer(instance)
-    instance.call(
-        "stripe_api_write",
-        method="DELETE",
-        path=f"/v1/customers/{cus}",
-        idempotency_key="idem-12",
-    )
+    call_raw(instance, "DELETE", f"/v1/customers/{cus}", idempotency_key="idem-12")
     assert key_row(instance, "idem-12") is None
 
 
@@ -332,34 +343,25 @@ def test_hash_is_order_sensitive_for_arrays(instance: seahaven.Instance) -> None
     """Reordered `items[]` is a mismatch: array order is meaningful and
     making one order-insensitive would be a special case (§3.1.2)."""
     cus = a_customer(instance)
-    pm = instance.call(
-        "stripe_api_write",
-        method="POST",
-        path="/v1/payment_methods",
+    pm = call_raw(
+        instance,
+        "POST",
+        "/v1/payment_methods",
         params={"type": "card", "card": {"token": "tok_visa"}},
     )["id"]
-    instance.call(
-        "stripe_api_write",
-        method="POST",
-        path=f"/v1/payment_methods/{pm}/attach",
-        params={"customer": cus},
-    )
-    instance.call(
-        "stripe_api_write",
-        method="POST",
-        path=f"/v1/customers/{cus}",
+    call_raw(instance, "POST", f"/v1/payment_methods/{pm}/attach", params={"customer": cus})
+    call_raw(
+        instance,
+        "POST",
+        f"/v1/customers/{cus}",
         params={"invoice_settings": {"default_payment_method": pm}},
     )
-    prod1 = instance.call(
-        "stripe_api_write", method="POST", path="/v1/products", params={"name": "A"}
-    )["id"]
-    prod2 = instance.call(
-        "stripe_api_write", method="POST", path="/v1/products", params={"name": "B"}
-    )["id"]
-    price1 = instance.call(
-        "stripe_api_write",
-        method="POST",
-        path="/v1/prices",
+    prod1 = call_raw(instance, "POST", "/v1/products", params={"name": "A"})["id"]
+    prod2 = call_raw(instance, "POST", "/v1/products", params={"name": "B"})["id"]
+    price1 = call_raw(
+        instance,
+        "POST",
+        "/v1/prices",
         params={
             "product": prod1,
             "unit_amount": 100,
@@ -367,10 +369,10 @@ def test_hash_is_order_sensitive_for_arrays(instance: seahaven.Instance) -> None
             "recurring": {"interval": "month"},
         },
     )["id"]
-    price2 = instance.call(
-        "stripe_api_write",
-        method="POST",
-        path="/v1/prices",
+    price2 = call_raw(
+        instance,
+        "POST",
+        "/v1/prices",
         params={
             "product": prod2,
             "unit_amount": 200,

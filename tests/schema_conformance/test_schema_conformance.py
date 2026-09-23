@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 import seahaven
 
-from conftest import BLANK_NOW
+from conftest import BLANK_NOW, api_read, api_write
 from schema_conformance import capture
 from schema_conformance.validate import (
     DELETED_BY_OBJECT,
@@ -75,9 +75,9 @@ def test_a_live_customer_validates(
 ) -> None:
     """A whole create-read-list round trip through the registered tools
     validates clean — and the hook captured it without the test opting in."""
-    created = instance.call("stripe_api_write", method="POST", path="/v1/customers", params={})
-    read = instance.call("stripe_api_read", path=f"/v1/customers/{created['id']}")
-    listed = instance.call("stripe_api_read", path="/v1/customers")
+    created = api_write(instance, "POST", "/v1/customers", {})
+    read = api_read(instance, f"/v1/customers/{created['id']}")
+    listed = api_read(instance, "/v1/customers")
     assert validate_object(created, source="live") == []
     assert violations_in_body(read, source="live") == []
     assert violations_in_body(listed, source="live") == []
@@ -94,7 +94,7 @@ def test_a_deleted_stub_validates(instance: seahaven.Instance) -> None:
     from seahaven_stripe_world.errors import StripeToolError
 
     with pytest.raises(StripeToolError) as exc_info:
-        instance.call("stripe_api_write", method="DELETE", path="/v1/customers/cus_1")
+        api_write(instance, "DELETE", "/v1/customers/cus_1")
     assert exc_info.value.status == 404
     assert violations_in_body(exc_info.value.stripe_body, source="live") == []
     assert (

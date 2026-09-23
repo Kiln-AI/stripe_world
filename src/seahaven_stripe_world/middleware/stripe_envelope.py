@@ -48,6 +48,9 @@ API_VERSION: Final = "2026-08-26.dahlia"
 _MCP_TOOLS = frozenset(("stripe_api_read", "stripe_api_write"))
 
 #: The raw-HTTP face that keeps the ``{status, body, headers}`` shape.
+#: ``call_stripe`` is deliberately unregistered on the production world
+#: (functional spec section 2.5) but test callers register it on probe
+#: worlds; this set is what the ``_raw_envelope`` path matches against.
 _RAW_TOOLS = frozenset(("call_stripe",))
 
 #: Every tool that carries an HTTP-shaped response — the union the
@@ -73,15 +76,24 @@ def _headers(ctx: seahaven.Ctx) -> dict[str, str]:
     return headers
 
 
-def _render_tool_error(body: dict, *, status: int) -> StripeToolError:
+def _render_tool_error(body: dict, *, status: int, op_id: str | None = None) -> StripeToolError:
     """Build the agent-visible error string from a Stripe error envelope.
 
     The format -- ``Stripe API error: {message}`` -- matches the real MCP
-    server's rendering (functional spec section 4.5).
+    server's rendering (functional spec section 4.5).  The guidance suffix
+    naming ``stripe_api_details`` is appended when an operation ID is known
+    (measured on ``resource_missing`` and parameter faults, absent from the
+    operation gate).
     """
     error = body.get("error", {})
     message = error.get("message", "An error occurred")
-    return StripeToolError(f"Stripe API error: {message}", status=status, stripe_body=body)
+    rendered = f"Stripe API error: {message}"
+    if op_id:
+        rendered += (
+            f"\n\nUse stripe_api_details with stripe_api_operation_id: "
+            f'"{op_id}" to see all required and optional parameters.'
+        )
+    return StripeToolError(rendered, status=status, stripe_body=body)
 
 
 def _mint_request(ctx: seahaven.Ctx, call: seahaven.Call) -> None:
@@ -106,14 +118,15 @@ def stripe_envelope(ctx: seahaven.Ctx, call: seahaven.Call, next_: Handler) -> A
 def _mcp_envelope(ctx: seahaven.Ctx, call: seahaven.Call, next_: Handler) -> Any:
     """MCP shape: bare body on 2xx, ``StripeToolError`` on anything else."""
     _mint_request(ctx, call)
+    op_id = call.arguments.get("stripe_api_operation_id")
     try:
         result = next_(ctx, call)
     except StripeApiError as error:
-        raise _render_tool_error(error.envelope(), status=error.status) from None
+        raise _render_tool_error(error.envelope(), status=error.status, op_id=op_id) from None
     if isinstance(result, ApiResponse):
         if result.status < 400:
             return result.body
-        raise _render_tool_error(result.body, status=result.status)
+        raise _render_tool_error(result.body, status=result.status, op_id=op_id)
     return result
 
 

@@ -9,7 +9,7 @@ own shape (``object``, ``data``, ``has_more``, ``next_page``, ``total_count``,
 import pytest
 import seahaven
 
-from conftest import BLANK_NOW
+from conftest import BLANK_NOW, api_read, api_write
 from seahaven_stripe_world.errors import StripeToolError
 from seahaven_stripe_world.search.parser import Combinator, Operator, ParseError, parse
 
@@ -22,12 +22,12 @@ pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
 
 
 def _write(instance: seahaven.Instance, path: str, **params: object) -> dict:
-    return instance.call("stripe_api_write", method="POST", path=path, params=params)
+    return api_write(instance, "POST", path, dict(params))
 
 
 def _search(instance: seahaven.Instance, path: str, query: str, **extra: object) -> dict:
     params: dict = {"query": query, **extra}
-    return instance.call("stripe_api_read", path=path, params=params)
+    return api_read(instance, path, params)
 
 
 # ---------------------------------------------------------------------------
@@ -134,14 +134,12 @@ class TestSearchEnvelope:
 
     def test_search_missing_query_is_400(self, instance: seahaven.Instance) -> None:
         with pytest.raises(StripeToolError) as exc_info:
-            instance.call("stripe_api_read", path="/v1/products/search", params={})
+            api_read(instance, "/v1/products/search", {})
         assert exc_info.value.status == 400
 
     def test_search_invalid_query_is_400(self, instance: seahaven.Instance) -> None:
         with pytest.raises(StripeToolError) as exc_info:
-            instance.call(
-                "stripe_api_read", path="/v1/products/search", params={"query": "status>"}
-            )
+            api_read(instance, "/v1/products/search", {"query": "status>"})
         assert exc_info.value.status == 400
 
 
@@ -178,20 +176,12 @@ class TestProductsSearch:
 
     def test_substring_too_short(self, instance: seahaven.Instance) -> None:
         with pytest.raises(StripeToolError) as exc_info:
-            instance.call(
-                "stripe_api_read",
-                path="/v1/products/search",
-                params={"query": 'name~"ab"'},
-            )
+            api_read(instance, "/v1/products/search", {"query": 'name~"ab"'})
         assert exc_info.value.status == 400
 
     def test_unknown_field_is_400(self, instance: seahaven.Instance) -> None:
         with pytest.raises(StripeToolError) as exc_info:
-            instance.call(
-                "stripe_api_read",
-                path="/v1/products/search",
-                params={"query": 'nonexistent:"val"'},
-            )
+            api_read(instance, "/v1/products/search", {"query": 'nonexistent:"val"'})
         assert exc_info.value.status == 400
 
 
@@ -409,10 +399,8 @@ class TestSearchPagination:
 
     def test_invalid_page_cursor_is_400(self, instance: seahaven.Instance) -> None:
         with pytest.raises(StripeToolError) as exc_info:
-            instance.call(
-                "stripe_api_read",
-                path="/v1/products/search",
-                params={"query": 'name:"x"', "page": "bogus-not-base64"},
+            api_read(
+                instance, "/v1/products/search", {"query": 'name:"x"', "page": "bogus-not-base64"}
             )
         assert exc_info.value.status == 400
 
@@ -554,11 +542,7 @@ class TestExpandTotalCountGating:
     def test_total_count_rejected_on_list_endpoint(self, instance: seahaven.Instance) -> None:
         """Non-search list endpoints must return 400 for expand[]=total_count."""
         with pytest.raises(StripeToolError) as exc_info:
-            instance.call(
-                "stripe_api_read",
-                path="/v1/products",
-                params={"expand": ["total_count"]},
-            )
+            api_read(instance, "/v1/products", {"expand": ["total_count"]})
         assert exc_info.value.status == 400
 
     def test_total_count_accepted_on_search_endpoint(self, instance: seahaven.Instance) -> None:
@@ -596,10 +580,8 @@ class TestCursorFingerprint:
 
         # Replay that cursor against a different query — must fail.
         with pytest.raises(StripeToolError) as exc_info:
-            instance.call(
-                "stripe_api_read",
-                path="/v1/products/search",
-                params={"query": 'name:"FpTest Beta"', "page": cursor},
+            api_read(
+                instance, "/v1/products/search", {"query": 'name:"FpTest Beta"', "page": cursor}
             )
         assert exc_info.value.status == 400
 
@@ -629,10 +611,10 @@ class TestCursorFingerprint:
 
         # Replay with same FTS term but different numeric filter — must fail.
         with pytest.raises(StripeToolError) as exc_info:
-            instance.call(
-                "stripe_api_read",
-                path="/v1/customers/search",
-                params={"query": 'name:"FpSql Widget" AND created>9999999999', "page": cursor},
+            api_read(
+                instance,
+                "/v1/customers/search",
+                {"query": 'name:"FpSql Widget" AND created>9999999999', "page": cursor},
             )
         assert exc_info.value.status == 400
 
@@ -642,20 +624,20 @@ class TestSearchRejectsListCursors:
 
     def test_starting_after_rejected(self, instance: seahaven.Instance) -> None:
         with pytest.raises(StripeToolError) as exc_info:
-            instance.call(
-                "stripe_api_read",
-                path="/v1/products/search",
-                params={"query": 'name:"anything"', "starting_after": "prod_fake"},
+            api_read(
+                instance,
+                "/v1/products/search",
+                {"query": 'name:"anything"', "starting_after": "prod_fake"},
             )
         assert exc_info.value.status == 400
         assert "starting_after" in exc_info.value.stripe_body["error"].get("message", "")
 
     def test_ending_before_rejected(self, instance: seahaven.Instance) -> None:
         with pytest.raises(StripeToolError) as exc_info:
-            instance.call(
-                "stripe_api_read",
-                path="/v1/products/search",
-                params={"query": 'name:"anything"', "ending_before": "prod_fake"},
+            api_read(
+                instance,
+                "/v1/products/search",
+                {"query": 'name:"anything"', "ending_before": "prod_fake"},
             )
         assert exc_info.value.status == 400
         assert "ending_before" in exc_info.value.stripe_body["error"].get("message", "")

@@ -10,8 +10,9 @@ presents to agents.
 import pytest
 import seahaven
 
-from conftest import BLANK_NOW, dispatch_tool
+from conftest import BLANK_NOW, api_read, api_write, dispatch_tool
 from seahaven_stripe_world.errors import StripeToolError
+from seahaven_stripe_world.startup import ACCOUNT_ID
 
 NOW = BLANK_NOW
 
@@ -101,11 +102,22 @@ def test_the_discovery_tools_pass_through_untouched() -> None:
     import seahaven_stripe_world
 
     with seahaven_stripe_world.world.instance(None, now=NOW) as instance:
-        results = instance.call("stripe_api_search", query="customer")
+        results = instance.call(
+            "stripe_api_search",
+            intent="list",
+            resource="customer",
+            stripe_context=ACCOUNT_ID,
+            livemode=True,
+        )
         assert isinstance(results, list) and results
-        assert set(results[0]) == {"method", "path", "summary"}
+        assert set(results[0]) == {"id", "method", "path", "summary"}
 
-        documented = instance.call("stripe_api_details", method="GET", path="/v1/customers")
+        documented = instance.call(
+            "stripe_api_details",
+            stripe_api_operation_id="GetCustomers",
+            stripe_context=ACCOUNT_ID,
+            livemode=True,
+        )
         assert set(documented) == {
             "method",
             "path",
@@ -116,18 +128,25 @@ def test_the_discovery_tools_pass_through_untouched() -> None:
         }
 
 
-def test_the_request_id_is_minted_per_call_and_carries_the_key() -> None:
-    import seahaven_stripe_world
-
-    with seahaven_stripe_world.world.instance(None, now=NOW) as instance:
+def test_the_request_id_is_minted_per_call_and_carries_the_key(probe, monkeypatch) -> None:
+    """Request ids are minted per call.  The idempotency key round-trip is
+    tested through ``call_stripe`` — the MCP surface no longer carries the
+    ``idempotency_key`` parameter."""
+    world = probe(dispatch_tool())
+    with world.instance(None, now=NOW) as instance:
         instance.call(
-            "stripe_api_write",
+            "call_stripe",
             method="POST",
             path="/v1/customers",
             params={},
             idempotency_key="ik_123",
         )
-        instance.call("stripe_api_write", method="POST", path="/v1/customers", params={})
+        instance.call(
+            "call_stripe",
+            method="POST",
+            path="/v1/customers",
+            params={},
+        )
         rows = instance.inspect().rows(
             "SELECT request_id, request_idempotency_key FROM events ORDER BY x_seq"
         )
@@ -157,7 +176,7 @@ def test_mcp_success_returns_bare_body() -> None:
     import seahaven_stripe_world
 
     with seahaven_stripe_world.world.instance(None, now=NOW) as instance:
-        result = instance.call("stripe_api_write", method="POST", path="/v1/customers", params={})
+        result = api_write(instance, "POST", "/v1/customers", {})
         assert isinstance(result, dict)
         assert result["object"] == "customer"
         # No wrapper keys.
@@ -173,7 +192,7 @@ def test_mcp_error_raises_stripe_tool_error() -> None:
 
     with seahaven_stripe_world.world.instance(None, now=NOW) as instance:
         with pytest.raises(StripeToolError) as exc_info:
-            instance.call("stripe_api_read", path="/v1/customers/cus_nope")
+            api_read(instance, "/v1/customers/cus_nope")
         assert exc_info.value.status == 404
         assert "Stripe API error:" in exc_info.value.message
         assert "No such customer" in exc_info.value.message
@@ -186,33 +205,33 @@ def test_a_402_decline_raises_but_keeps_the_rows() -> None:
     import seahaven_stripe_world
 
     with seahaven_stripe_world.world.instance(None, now=NOW) as instance:
-        cus = instance.call(
-            "stripe_api_write",
-            method="POST",
-            path="/v1/customers",
-            params={"email": "dec@example.test"},
+        cus = api_write(
+            instance,
+            "POST",
+            "/v1/customers",
+            {"email": "dec@example.test"},
         )["id"]
-        pm = instance.call(
-            "stripe_api_write",
-            method="POST",
-            path="/v1/payment_methods",
-            params={
+        pm = api_write(
+            instance,
+            "POST",
+            "/v1/payment_methods",
+            {
                 "type": "card",
                 "card": {"number": "4000000000000341", "exp_month": 9, "exp_year": 2027},
             },
         )["id"]
-        instance.call(
-            "stripe_api_write",
-            method="POST",
-            path=f"/v1/payment_methods/{pm}/attach",
-            params={"customer": cus},
+        api_write(
+            instance,
+            "POST",
+            f"/v1/payment_methods/{pm}/attach",
+            {"customer": cus},
         )
         with pytest.raises(StripeToolError) as exc_info:
-            instance.call(
-                "stripe_api_write",
-                method="POST",
-                path="/v1/payment_intents",
-                params={
+            api_write(
+                instance,
+                "POST",
+                "/v1/payment_intents",
+                {
                     "amount": 1000,
                     "currency": "usd",
                     "customer": cus,

@@ -10,7 +10,7 @@ and the retrieve-by-id path.
 import pytest
 import seahaven
 
-from conftest import BLANK_NOW
+from conftest import BLANK_NOW, api_read, api_write, dispatch_tool
 from seahaven_stripe_world.errors import StripeToolError
 
 pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
@@ -20,22 +20,15 @@ pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
 
 
 def _read(instance: seahaven.Instance, path: str, params: dict | None = None) -> dict:
-    return instance.call("stripe_api_read", path=path, params=params)
+    return api_read(instance, path, params)
 
 
 def _write(
     instance: seahaven.Instance,
     path: str,
     params: dict | None = None,
-    idempotency_key: str | None = None,
 ) -> dict:
-    return instance.call(
-        "stripe_api_write",
-        method="POST",
-        path=path,
-        params=params,
-        **({"idempotency_key": idempotency_key} if idempotency_key else {}),
-    )
+    return api_write(instance, "POST", path, params)
 
 
 def _create_customer(instance: seahaven.Instance, name: str = "Test") -> dict:
@@ -83,12 +76,24 @@ def test_event_previous_attributes(instance: seahaven.Instance) -> None:
     assert evt["data"]["object"]["name"] == "After"
 
 
-def test_event_request_field_with_idempotency_key(instance: seahaven.Instance) -> None:
-    """event.request.idempotency_key is populated when the call had one."""
-    _write(instance, "/v1/customers", {"name": "Keyed"}, idempotency_key="key-123")
-    events = _read(instance, "/v1/events", {"type": "customer.created"})
-    evt = events["data"][0]
-    assert evt["request"]["idempotency_key"] == "key-123"
+def test_event_request_field_with_idempotency_key(probe) -> None:
+    """event.request.idempotency_key is populated when the call had one.
+    Uses ``call_stripe`` because ``stripe_api_write`` no longer carries
+    ``idempotency_key`` on the MCP surface."""
+    world_p = probe(dispatch_tool())
+    with world_p.instance(None, now=BLANK_NOW) as instance:
+        instance.call(
+            "call_stripe",
+            method="POST",
+            path="/v1/customers",
+            params={"name": "Keyed"},
+            idempotency_key="key-123",
+        )
+        row = instance.inspect().one(
+            "SELECT request_idempotency_key FROM events ORDER BY x_seq DESC LIMIT 1"
+        )
+        assert row is not None
+        assert row["request_idempotency_key"] == "key-123"
 
 
 # -- list filtering ------------------------------------------------------------

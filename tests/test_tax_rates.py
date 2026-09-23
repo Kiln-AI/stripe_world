@@ -5,7 +5,7 @@ boolean filters — pinned by the Phase 7 live probes at `2026-08-26.dahlia`."""
 import pytest
 import seahaven
 
-from conftest import BLANK_NOW
+from conftest import BLANK_NOW, api_read, api_write
 from seahaven_stripe_world.errors import StripeToolError
 
 pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
@@ -15,13 +15,13 @@ def create(instance: seahaven.Instance, **params: object) -> dict:
     params.setdefault("display_name", "CA sales tax")
     params.setdefault("inclusive", False)
     params.setdefault("percentage", 8.875)
-    return instance.call("stripe_api_write", method="POST", path="/v1/tax_rates", params=params)
+    return api_write(instance, "POST", "/v1/tax_rates", params)
 
 
 def call(instance: seahaven.Instance, method: str, path: str, params: dict | None = None):
     if method == "GET":
-        return instance.call("stripe_api_read", path=path, params=params)
-    return instance.call("stripe_api_write", method=method, path=path, params=params)
+        return api_read(instance, path, params)
+    return api_write(instance, method, path, params)
 
 
 def test_create_defaults_and_read_only_fields(instance: seahaven.Instance) -> None:

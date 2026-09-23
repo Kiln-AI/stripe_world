@@ -6,32 +6,30 @@ refusal — Phase 7 live probes at `2026-08-26.dahlia`."""
 import pytest
 import seahaven
 
-from conftest import BLANK_NOW
+from conftest import BLANK_NOW, api_read, api_write
 from seahaven_stripe_world.errors import StripeToolError
 
 pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
 
 
 def coupon(instance: seahaven.Instance) -> str:
-    result = instance.call(
-        "stripe_api_write",
-        method="POST",
-        path="/v1/coupons",
-        params={"amount_off": 500, "currency": "usd", "duration": "once"},
+    result = api_write(
+        instance,
+        "POST",
+        "/v1/coupons",
+        {"amount_off": 500, "currency": "usd", "duration": "once"},
     )
     return result["id"]
 
 
 def create(instance: seahaven.Instance, **params: object) -> dict:
-    return instance.call(
-        "stripe_api_write", method="POST", path="/v1/promotion_codes", params=params
-    )
+    return api_write(instance, "POST", "/v1/promotion_codes", params)
 
 
 def call(instance: seahaven.Instance, method: str, path: str, params: dict | None = None):
     if method == "GET":
-        return instance.call("stripe_api_read", path=path, params=params)
-    return instance.call("stripe_api_write", method=method, path=path, params=params)
+        return api_read(instance, path, params)
+    return api_write(instance, method, path, params)
 
 
 def test_create_nests_the_coupon_under_promotion(instance: seahaven.Instance) -> None:
@@ -189,9 +187,7 @@ def test_customer_and_expires_at_validations(instance: seahaven.Instance) -> Non
 
 
 def test_update_and_filter(instance: seahaven.Instance) -> None:
-    customer = instance.call(
-        "stripe_api_write", method="POST", path="/v1/customers", params={"email": "p7@example.test"}
-    )
+    customer = api_write(instance, "POST", "/v1/customers", {"email": "p7@example.test"})
     coupon_id = coupon(instance)
     body = create(
         instance,

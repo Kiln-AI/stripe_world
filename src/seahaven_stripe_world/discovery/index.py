@@ -1,11 +1,11 @@
 """The discovery layer's runtime module: the routed-operation catalogue.
 
 Loads `spec3.min.json` once, at import, and answers the two discovery tools:
-keyword search over `path` / `operationId` / `summary` / `description`, and
-parameter documentation for one operation. Framework-agnostic on purpose — no
+search over `intent` + `resource` terms, and parameter documentation for
+one operation by its operation ID.  Framework-agnostic on purpose — no
 `seahaven` import, no `ctx` — so it is unit-testable as plain Python, with
-`tools/api.py` owning the translation of its `ValueError` and `None` into this
-world's Seahaven error shapes (`components/discovery.md` §2).
+`tools/api.py` owning the translation of its `None` into this world's
+Seahaven error shapes.
 
 The index is the route table's shadow, not a second list: its key set is
 `routes.ALL`'s, and the drift test asserts both directions. An operation that
@@ -19,12 +19,10 @@ from typing import Any, Final
 
 from seahaven_stripe_world.spec import spec_document
 
-__all__ = ["BY_KEY", "INDEX", "Operation", "details", "search"]
+__all__ = ["BY_KEY", "BY_OP_ID", "INDEX", "Operation", "details", "search"]
 
-#: Fixed, not agent-configurable: the tool's signature is `query` alone
-#: (`components/discovery.md` §7), and ten results keep a worst-case response
-#: under a kilobyte.
-LIMIT: Final = 10
+#: Fixed: ten results keep a worst-case response under a kilobyte.
+DEFAULT_LIMIT: Final = 5
 
 EXACT_WEIGHT: Final[dict[str, int]] = {"path": 6, "operation_id": 5, "summary": 4, "description": 2}
 SUBSTR_WEIGHT: Final[dict[str, int]] = {
@@ -54,7 +52,12 @@ class Operation:
     lower: dict[str, str]
 
     def result(self) -> dict[str, str]:
-        return {"method": self.method, "path": self.path, "summary": self.summary}
+        return {
+            "id": self.operation_id,
+            "method": self.method,
+            "path": self.path,
+            "summary": self.summary,
+        }
 
 
 def _first_sentence(text: str) -> str:
@@ -121,7 +124,7 @@ def _props_of(schema: dict[str, Any]) -> dict[str, Any]:
 def _render_object_fields(schema: dict[str, Any]) -> list[dict[str, Any]]:
     """Exactly one level of an object parameter's own fields, then stop —
     `payment_settings` shows its keys; three levels down collapses to
-    `"type": "object"` (`components/discovery.md` §8b)."""
+    `"type": "object"`."""
     return [
         _param_doc(name, prop, False, prop.get("description", ""))
         for name, prop in _props_of(schema).items()
@@ -194,7 +197,11 @@ def _build_operation(method: str, path: str, operation: dict[str, Any]) -> Opera
     )
 
 
-def _load_index() -> tuple[tuple[Operation, ...], dict[tuple[str, str], Operation]]:
+def _load_index() -> tuple[
+    tuple[Operation, ...],
+    dict[tuple[str, str], Operation],
+    dict[str, Operation],
+]:
     raw = spec_document()
     operations = tuple(
         _build_operation(method.upper(), path, item)
@@ -202,25 +209,27 @@ def _load_index() -> tuple[tuple[Operation, ...], dict[tuple[str, str], Operatio
         for method, item in path_item.items()
         if method in ("get", "post", "delete")
     )
-    return operations, {(op.method, op.path): op for op in operations}
+    by_key = {(op.method, op.path): op for op in operations}
+    by_op_id = {op.operation_id: op for op in operations}
+    return operations, by_key, by_op_id
 
 
-INDEX, BY_KEY = _load_index()
+INDEX, BY_KEY, BY_OP_ID = _load_index()
 
 
-def search(query: str) -> list[dict[str, str]]:
-    """Ranked operations for a keyword query.
+def search(intent: str, resource: str, *, limit: int = DEFAULT_LIMIT) -> list[dict[str, str]]:
+    """Ranked operations for an intent+resource query.
 
-    Exact-token matches outrank substring matches, so `"cancel a subscription"`
-    is not outscored by a path that merely contains the substring. The
-    tie-break `(-score, method, path)` is a total order — `(method, path)` is
-    unique across the routed set — so results never depend on iteration order.
-    Raises `ValueError` for a query with no tokens: that is a malformed call,
-    not a legitimate "match everything".
+    Combines ``intent`` and ``resource`` terms for scoring.  Exact-token
+    matches outrank substring matches.  The tie-break
+    ``(-score, method, path)`` is a total order so results never depend on
+    iteration order.
     """
-    terms = [term for term in _TOKEN_SPLIT.split(query.lower()) if term]
+    terms = [
+        term for word in (intent, resource) for term in _TOKEN_SPLIT.split(word.lower()) if term
+    ]
     if not terms:
-        raise ValueError("empty search query")
+        return []
     scored: list[tuple[int, Operation]] = []
     for operation in INDEX:
         score = 0
@@ -235,17 +244,13 @@ def search(query: str) -> list[dict[str, str]]:
         if score > 0:
             scored.append((score, operation))
     scored.sort(key=lambda pair: (-pair[0], pair[1].method, pair[1].path))
-    return [operation.result() for _, operation in scored[:LIMIT]]
+    return [operation.result() for _, operation in scored[:limit]]
 
 
-def details(method: str, path: str) -> dict[str, Any] | None:
-    """The parameter documentation for one routed operation, or `None` for an
-    unrouted `(method, path)` — including a syntactically valid Stripe path
-    this world cut."""
-    upper = method.upper()
-    if upper not in _VERBS:
-        return None
-    operation = BY_KEY.get((upper, path))
+def details(operation_id: str) -> dict[str, Any] | None:
+    """The parameter documentation for one operation by its operation ID,
+    or ``None`` for an operation not in the routed set."""
+    operation = BY_OP_ID.get(operation_id)
     if operation is None:
         return None
     return {

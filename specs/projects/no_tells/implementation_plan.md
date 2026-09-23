@@ -58,7 +58,7 @@ A phase is not done until its register rows have dispositions and the full check
       which asserts `{status, body}` throughout. Tool signatures are untouched here on purpose: this
       isolates the one change with transaction semantics behind it. `call_stripe` keeps
       `ApiResponse`, since it bypasses middleware.
-- [ ] **Phase 5: The four API tools.** New signatures with operation-id addressing and the context
+- [x] **Phase 5: The four API tools.** New signatures with operation-id addressing and the context
       parameters, `_descriptions.py` verbatim, `_context.py` validation and its two refusals.
       Surface conformance goes green for these four.
 - [ ] **Phase 6: The account tools.** `list_available_accounts_or_orgs` as a projection of Phase 2's

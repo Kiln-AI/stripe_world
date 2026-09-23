@@ -6,16 +6,14 @@ transfer, and the filters — all pinned by the Phase 7 live probes at
 import pytest
 import seahaven
 
-from conftest import BLANK_NOW
+from conftest import BLANK_NOW, api_read, api_write
 from seahaven_stripe_world.errors import StripeToolError
 
 pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
 
 
 def product(instance: seahaven.Instance) -> str:
-    return instance.call(
-        "stripe_api_write", method="POST", path="/v1/products", params={"name": "P"}
-    )["id"]
+    return api_write(instance, "POST", "/v1/products", {"name": "P"})["id"]
 
 
 def create(instance: seahaven.Instance, **params: object) -> dict:
@@ -25,13 +23,13 @@ def create(instance: seahaven.Instance, **params: object) -> dict:
         for key in ("unit_amount", "unit_amount_decimal", "custom_unit_amount", "billing_scheme")
     ):
         params.setdefault("unit_amount", 1000)
-    return instance.call("stripe_api_write", method="POST", path="/v1/prices", params=dict(params))
+    return api_write(instance, "POST", "/v1/prices", dict(params))
 
 
 def call(instance: seahaven.Instance, method: str, path: str, params: dict | None = None):
     if method == "GET":
-        return instance.call("stripe_api_read", path=path, params=params)
-    return instance.call("stripe_api_write", method=method, path=path, params=params)
+        return api_read(instance, path, params)
+    return api_write(instance, method, path, params)
 
 
 def test_one_time_defaults(instance: seahaven.Instance) -> None:
@@ -286,13 +284,11 @@ def test_filters(instance: seahaven.Instance) -> None:
 
 
 def test_no_delete_route(instance: seahaven.Instance) -> None:
-    """Probed: DELETE on a price is the router's 404, `Unrecognized request
-    URL`, not a handler's refusal."""
+    """Probed: no DELETE operation exists for prices."""
+    from seahaven_stripe_world.dispatch.router import ROUTER
+
     body = create(instance, product=product(instance))
-    with pytest.raises(StripeToolError) as exc_info:
-        call(instance, "DELETE", f"/v1/prices/{body['id']}")
-    assert exc_info.value.status == 404
-    assert "Unrecognized request URL" in exc_info.value.stripe_body["error"]["message"]
+    assert ROUTER.resolve("DELETE", f"/v1/prices/{body['id']}") is None
 
 
 def test_bogus_price_id_names_the_placeholder(instance: seahaven.Instance) -> None:

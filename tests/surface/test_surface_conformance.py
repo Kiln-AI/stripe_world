@@ -108,6 +108,21 @@ def _compare_schema(tool_name: str, real: dict[str, Any], actual_schema: dict[st
             assert actual_prop.get("examples") == real_prop["examples"], (
                 f"{tool_name}.{prop_name}: examples differ"
             )
+        # Nested properties (e.g. human_confirmation.approval_token)
+        if "properties" in real_prop:
+            actual_nested = actual_prop.get("properties", {})
+            assert set(actual_nested.keys()) == set(real_prop["properties"].keys()), (
+                f"{tool_name}.{prop_name}: nested property keys differ.\n"
+                f"  Expected: {sorted(real_prop['properties'].keys())}\n"
+                f"  Got:      {sorted(actual_nested.keys())}"
+            )
+            for nested_name, nested_real in real_prop["properties"].items():
+                nested_actual = actual_nested[nested_name]
+                if "type" in nested_real:
+                    assert nested_actual.get("type") == nested_real["type"], (
+                        f"{tool_name}.{prop_name}.{nested_name}: type differs. "
+                        f"Expected {nested_real['type']!r}, got {nested_actual.get('type')!r}"
+                    )
 
 
 # --- Data file sanity ---------------------------------------------------------
@@ -152,10 +167,32 @@ def test_full_spec_committed() -> None:
     assert sha == expected, f"spec3.json sha256 {sha} != expected {expected}"
 
 
+# --- Registered tool set guard ------------------------------------------------
+
+# The tools registered today; Phase 6 adds list_available_accounts_or_orgs
+# and manage_stripe_accounts, Phase 7 adds stripe_analytics.  Extend this
+# set as each phase lands.
+_EXPECTED_NOW = {
+    "stripe_api_read",
+    "stripe_api_write",
+    "stripe_api_search",
+    "stripe_api_details",
+    "get_stripe_account_info",
+}
+
+
+def test_registered_tool_set_matches_expected() -> None:
+    """No unintended tool registration (e.g. ``call_stripe``, which is
+    deliberately unregistered per functional spec section 2.5)."""
+    tools = _world_tools()
+    # controller_run_sql is a framework tool, not ours.
+    ours = {n for n in tools if n != "controller_run_sql"}
+    assert ours == _EXPECTED_NOW
+
+
 # --- Per-tool surface conformance (xfailed until the tools are rebuilt) --------
 
 
-@pytest.mark.xfail(strict=True, reason="tool not yet rebuilt — Phase 5")
 def test_ts_04_read_takes_operation_id() -> None:
     """TS-04: stripe_api_read uses stripe_api_operation_id, not path."""
     tools = _world_tools()
@@ -166,7 +203,6 @@ def test_ts_04_read_takes_operation_id() -> None:
     _compare_schema("stripe_api_read", real, tool.schema)
 
 
-@pytest.mark.xfail(strict=True, reason="tool not yet rebuilt — Phase 5")
 def test_ts_05_write_takes_operation_id() -> None:
     """TS-05: stripe_api_write uses stripe_api_operation_id, not method+path."""
     tools = _world_tools()
@@ -177,7 +213,6 @@ def test_ts_05_write_takes_operation_id() -> None:
     _compare_schema("stripe_api_write", real, tool.schema)
 
 
-@pytest.mark.xfail(strict=True, reason="tool not yet rebuilt — Phase 5")
 def test_ts_06_search_takes_intent_resource() -> None:
     """TS-06/DT-01: stripe_api_search takes intent+resource+limit, not query."""
     tools = _world_tools()
@@ -188,7 +223,6 @@ def test_ts_06_search_takes_intent_resource() -> None:
     _compare_schema("stripe_api_search", real, tool.schema)
 
 
-@pytest.mark.xfail(strict=True, reason="tool not yet rebuilt — Phase 5")
 def test_ts_07_details_takes_operation_id() -> None:
     """TS-07/DT-13: stripe_api_details takes stripe_api_operation_id."""
     tools = _world_tools()
@@ -232,7 +266,6 @@ def test_ts_21_analytics_registered() -> None:
     _compare_schema("stripe_analytics", real, tool.schema)
 
 
-@pytest.mark.xfail(strict=True, reason="tool description not yet rebuilt — Phase 6")
 def test_ts_08_read_description_matches() -> None:
     """TS-08: stripe_api_read description matches the real server's."""
     tools = _world_tools()
@@ -240,7 +273,6 @@ def test_ts_08_read_description_matches() -> None:
     assert tools["stripe_api_read"].description == real["description"]
 
 
-@pytest.mark.xfail(strict=True, reason="tool description not yet rebuilt — Phase 5")
 def test_ts_24_write_description_matches() -> None:
     """TS-24: stripe_api_write description matches the real server's."""
     tools = _world_tools()
@@ -248,7 +280,6 @@ def test_ts_24_write_description_matches() -> None:
     assert tools["stripe_api_write"].description == real["description"]
 
 
-@pytest.mark.xfail(strict=True, reason="tool description not yet rebuilt — Phase 5")
 def test_ts_09_search_description_matches() -> None:
     """TS-09: stripe_api_search description matches the real server's."""
     tools = _world_tools()
@@ -256,7 +287,6 @@ def test_ts_09_search_description_matches() -> None:
     assert tools["stripe_api_search"].description == real["description"]
 
 
-@pytest.mark.xfail(strict=True, reason="tool description not yet rebuilt — Phase 5")
 def test_ts_25_details_description_matches() -> None:
     """TS-25: stripe_api_details description matches the real server's."""
     tools = _world_tools()

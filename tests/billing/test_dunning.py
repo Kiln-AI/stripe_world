@@ -6,7 +6,7 @@ end-of-schedule outcomes — plus the frozen-clock facts pinned as tests
 import pytest
 import seahaven
 
-from conftest import BLANK_NOW
+from conftest import BLANK_NOW, api_read, api_write
 from seahaven_stripe_world.billing import dunning
 from seahaven_stripe_world.errors import StripeToolError
 from seahaven_stripe_world.spec.enums import DECLINE_CODES
@@ -136,8 +136,8 @@ def _armed(instance: seahaven.Instance) -> tuple[str, str]:
 
 def call(instance: seahaven.Instance, method: str, path: str, params: dict | None = None):
     if method == "GET":
-        return instance.call("stripe_api_read", path=path, params=params)
-    return instance.call("stripe_api_write", method=method, path=path, params=params)
+        return api_read(instance, path, params)
+    return api_write(instance, method, path, params)
 
 
 def one_row(instance: seahaven.Instance, sql: str, *params):

@@ -5,7 +5,7 @@ pinned by the Phase 8 probes and cassette 04 at `2026-08-26.dahlia`."""
 import pytest
 import seahaven
 
-from conftest import BLANK_NOW
+from conftest import BLANK_NOW, api_read, api_write
 from seahaven_stripe_world.errors import StripeToolError
 
 pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
@@ -13,8 +13,8 @@ pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
 
 def call(instance: seahaven.Instance, method: str, path: str, params: dict | None = None):
     if method == "GET":
-        return instance.call("stripe_api_read", path=path, params=params)
-    return instance.call("stripe_api_write", method=method, path=path, params=params)
+        return api_read(instance, path, params)
+    return api_write(instance, method, path, params)
 
 
 def confirmed_intent(instance: seahaven.Instance, amount: int = 4900) -> tuple[str, str, dict]:

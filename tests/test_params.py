@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 import seahaven
 
-from conftest import BLANK_NOW
+from conftest import BLANK_NOW, api_read, api_write
 from seahaven_stripe_world.dispatch.params import Param, ParamSpec, bind
 from seahaven_stripe_world.dispatch.response import Request
 from seahaven_stripe_world.dispatch.routes import Route
@@ -22,11 +22,11 @@ pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
 
 
 def read(instance: seahaven.Instance, path: str, params: dict | None = None) -> dict:
-    return instance.call("stripe_api_read", path=path, params=params)
+    return api_read(instance, path, params)
 
 
 def write(instance: seahaven.Instance, path: str, params: dict | None = None) -> dict:
-    return instance.call("stripe_api_write", method="POST", path=path, params=params)
+    return api_write(instance, "POST", path, params)
 
 
 def test_unknown_parameter_is_rejected(instance: seahaven.Instance) -> None:
@@ -285,11 +285,11 @@ def test_metadata_refused_where_unsupported(instance: seahaven.Instance) -> None
     DELETE, which accepts nothing at all (`expand=False`, no body)."""
     created = write(instance, "/v1/customers", {})
     with pytest.raises(StripeToolError) as exc_info:
-        instance.call(
-            "stripe_api_write",
-            method="DELETE",
-            path=f"/v1/customers/{created['id']}",
-            params={"metadata": {"a": "1"}},
+        api_write(
+            instance,
+            "DELETE",
+            f"/v1/customers/{created['id']}",
+            {"metadata": {"a": "1"}},
         )
     assert exc_info.value.status == 400
     assert exc_info.value.stripe_body["error"]["param"] == "metadata"

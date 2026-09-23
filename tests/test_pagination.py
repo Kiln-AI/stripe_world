@@ -3,21 +3,19 @@
 import pytest
 import seahaven
 
-from conftest import BLANK_NOW
+from conftest import BLANK_NOW, api_read, api_write
 from seahaven_stripe_world.errors import StripeToolError
 
 pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
 
 
 def create(instance: seahaven.Instance, name: str) -> str:
-    result = instance.call(
-        "stripe_api_write", method="POST", path="/v1/customers", params={"name": name}
-    )
+    result = api_write(instance, "POST", "/v1/customers", {"name": name})
     return result["id"]
 
 
 def list_customers(instance: seahaven.Instance, **params: object) -> dict:
-    return instance.call("stripe_api_read", path="/v1/customers", params=params)
+    return api_read(instance, "/v1/customers", params)
 
 
 def test_envelope_has_exactly_four_keys(instance: seahaven.Instance) -> None:
@@ -219,7 +217,7 @@ def test_deleted_cursor_resolves_and_excludes_the_object(instance: seahaven.Inst
     oldest = create(instance, "oldest")
     middle = create(instance, "middle")
     create(instance, "newest")
-    instance.call("stripe_api_write", method="DELETE", path=f"/v1/customers/{middle}")
+    api_write(instance, "DELETE", f"/v1/customers/{middle}")
 
     # The deleted row's coordinate still cuts the page: below it sits the
     # oldest row, and the deleted row itself never appears.
@@ -312,25 +310,25 @@ def test_cursor_resolution_ignores_list_filters(instance: seahaven.Instance) -> 
     """A cursor on a customer whose email does not match the filter still
     resolves: a cursor is a coordinate, not a membership test (§3.2.3)."""
     a = create(instance, "alice")
-    instance.call(
-        "stripe_api_write",
-        method="POST",
-        path=f"/v1/customers/{a}",
-        params={"email": "alice@example.test"},
+    api_write(
+        instance,
+        "POST",
+        f"/v1/customers/{a}",
+        {"email": "alice@example.test"},
     )
     b = create(instance, "bob")
-    instance.call(
-        "stripe_api_write",
-        method="POST",
-        path=f"/v1/customers/{b}",
-        params={"email": "bob@example.test"},
+    api_write(
+        instance,
+        "POST",
+        f"/v1/customers/{b}",
+        {"email": "bob@example.test"},
     )
     # Cursor on bob, filter for alice: should resolve bob as coordinate
     # and return page of alice (if she is older than bob).
-    result = instance.call(
-        "stripe_api_read",
-        path="/v1/customers",
-        params={"starting_after": b, "email": "alice@example.test"},
+    result = api_read(
+        instance,
+        "/v1/customers",
+        {"starting_after": b, "email": "alice@example.test"},
     )
     # Alice should appear since she was created before bob
     found = [item["id"] for item in result["data"]]
@@ -344,5 +342,5 @@ def test_url_is_the_concrete_path_including_nested(instance: seahaven.Instance) 
     assert page["url"] == "/v1/customers"
     # A nested list's url carries the parent id
     cus = page["data"][0]["id"]
-    result = instance.call("stripe_api_read", path=f"/v1/customers/{cus}/balance_transactions")
+    result = api_read(instance, f"/v1/customers/{cus}/balance_transactions")
     assert result["url"] == f"/v1/customers/{cus}/balance_transactions"

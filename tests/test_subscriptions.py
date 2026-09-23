@@ -5,7 +5,7 @@ by the Phase 12 probes and cassette 12 at `2026-08-26.dahlia`."""
 import pytest
 import seahaven
 
-from conftest import BLANK_NOW
+from conftest import BLANK_NOW, api_read, api_write
 from seahaven_stripe_world.errors import StripeToolError
 
 pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
@@ -13,8 +13,8 @@ pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
 
 def call(instance: seahaven.Instance, method: str, path: str, params: dict | None = None):
     if method == "GET":
-        return instance.call("stripe_api_read", path=path, params=params)
-    return instance.call("stripe_api_write", method=method, path=path, params=params)
+        return api_read(instance, path, params)
+    return api_write(instance, method, path, params)
 
 
 def setup_catalog(instance: seahaven.Instance) -> tuple[str, str, str]:
@@ -489,27 +489,65 @@ def test_cancel_at_period_end_merges_a_supplied_cancellation_details(
     assert details["reason"] == "cancellation_requested"
 
 
-def test_the_idempotent_create_replays(instance: seahaven.Instance) -> None:
-    """The keyed POST: the middleware's four outcomes, on this slice."""
-    cus, _, price = setup_catalog(instance)
-    params = {"customer": cus, "items": [{"price": price}]}
-    first = instance.call(
-        "stripe_api_write",
-        method="POST",
-        path="/v1/subscriptions",
-        params=params,
-        idempotency_key="sub-once",
-    )
-    second = instance.call(
-        "stripe_api_write",
-        method="POST",
-        path="/v1/subscriptions",
-        params=params,
-        idempotency_key="sub-once",
-    )
-    assert second["id"] == first["id"]
-    count = instance.inspect().one("SELECT count(*) AS n FROM subscriptions")
-    assert count == {"n": 1}
+def test_the_idempotent_create_replays(probe) -> None:
+    """The keyed POST through ``call_stripe`` (the only face that still
+    carries ``idempotency_key`` after Phase 5)."""
+    from conftest import dispatch_tool
+
+    world_p = probe(dispatch_tool())
+    with world_p.instance(None, now=BLANK_NOW) as inst:
+        cs = inst.call("call_stripe", method="POST", path="/v1/customers", params={})
+        cus = cs["body"]["id"]
+        pm = inst.call(
+            "call_stripe",
+            method="POST",
+            path="/v1/payment_methods",
+            params={"type": "card", "card": {"token": "tok_visa"}},
+        )["body"]["id"]
+        inst.call(
+            "call_stripe",
+            method="POST",
+            path=f"/v1/payment_methods/{pm}/attach",
+            params={"customer": cus},
+        )
+        inst.call(
+            "call_stripe",
+            method="POST",
+            path=f"/v1/customers/{cus}",
+            params={"invoice_settings": {"default_payment_method": pm}},
+        )
+        prod = inst.call("call_stripe", method="POST", path="/v1/products", params={"name": "Sub"})[
+            "body"
+        ]["id"]
+        price = inst.call(
+            "call_stripe",
+            method="POST",
+            path="/v1/prices",
+            params={
+                "product": prod,
+                "unit_amount": 2000,
+                "currency": "usd",
+                "recurring": {"interval": "month"},
+            },
+        )["body"]["id"]
+        params = {"customer": cus, "items": [{"price": price}]}
+        first = inst.call(
+            "call_stripe",
+            method="POST",
+            path="/v1/subscriptions",
+            params=params,
+            idempotency_key="sub-once",
+        )
+        second = inst.call(
+            "call_stripe",
+            method="POST",
+            path="/v1/subscriptions",
+            params=params,
+            idempotency_key="sub-once",
+        )
+        assert second["body"]["id"] == first["body"]["id"]
+        count = inst.inspect().one("SELECT count(*) AS n FROM subscriptions")
+        assert count == {"n": 1}
 
 
 # --- proration (Phase 14, cassette 01) ---------------------------------------------------

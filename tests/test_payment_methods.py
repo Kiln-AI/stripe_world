@@ -9,7 +9,7 @@ import json
 import pytest
 import seahaven
 
-from conftest import BLANK_NOW
+from conftest import BLANK_NOW, api_read, api_write
 from seahaven_stripe_world.errors import StripeToolError
 
 pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
@@ -17,8 +17,8 @@ pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
 
 def call(instance: seahaven.Instance, method: str, path: str, params: dict | None = None):
     if method == "GET":
-        return instance.call("stripe_api_read", path=path, params=params)
-    return instance.call("stripe_api_write", method=method, path=path, params=params)
+        return api_read(instance, path, params)
+    return api_write(instance, method, path, params)
 
 
 def create_card(instance: seahaven.Instance, **card: object) -> dict:
@@ -362,7 +362,7 @@ def test_attach_after_customer_delete_refuses_the_tombstone(
     (recorded in cassette 06 step 24), never a silent 200 onto a tombstone."""
     cus = customer(instance)
     pm = create_card(instance, token="tok_visa")
-    instance.call("stripe_api_write", method="DELETE", path=f"/v1/customers/{cus}")
+    api_write(instance, "DELETE", f"/v1/customers/{cus}")
 
     with pytest.raises(StripeToolError) as exc_info:
         call(instance, "POST", f"/v1/payment_methods/{pm['id']}/attach", {"customer": cus})
