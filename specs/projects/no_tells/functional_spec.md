@@ -172,12 +172,14 @@ Two different causes, and they should not be lumped together:
   and this account is presumably not enrolled. Note that preview labels do not predict availability
   in either direction: `stripe_analytics` is labelled *Private preview* in the docs and is live for
   us.
-- **`get_stripe_account_info` looks superseded, not gated.** It carries no preview label, and the
-  two tools that appear in its place are both account-and-session tools. The live server has moved
-  from a single-account model — where "retrieve the account" is meaningful — to a multi-account
-  session model, where the agent first lists the accounts it can reach and then names one on every
-  call through `stripe_context`. The documented tool descriptions mention no `stripe_context` at
-  all, which dates them to before that change.
+- **`get_stripe_account_info` is surface-dependent, not globally gone.** The catalogue
+  enumeration (2026-09-23, commit `cda174d`) used a **secret-key** MCP session (Streamable HTTP
+  authenticated with `STRIPE_SECRET_KEY`). That surface exposes **9 tools** — it includes
+  `get_stripe_account_info` and lacks `list_available_accounts_or_orgs` and
+  `manage_stripe_accounts`. The OAuth surface probed on 2026-09-22 exposes **10 tools** with the
+  reverse membership. So `get_stripe_account_info` is not superseded — it is present on the key
+  surface and absent on the OAuth surface, while the two account-management tools follow the
+  opposite pattern.
 
 **Ruling: keep `get_stripe_account_info`, and register both.** This is a deliberate exception to
 §2's live-beats-documentation rule, taken because the two sources are describing the same server at
@@ -548,6 +550,14 @@ and the server it was read from. Every operation in `spec3.json` lands in exactl
 states: **routed** (we implement it), **catalogued** (real MCP has it, we do not — bucket B), or
 **absent** (real MCP does not have it — bucket A).
 
+**Enumeration completed 2026-09-23**: 594 operations total — 123 catalogued, 471 absent. The
+`{"kind":"tools"}` record in `mcp_catalogue.jsonl` reflects the **key-authenticated** MCP surface
+(9 tools, authenticated with `STRIPE_SECRET_KEY` via Streamable HTTP). That surface includes
+`get_stripe_account_info` and lacks `list_available_accounts_or_orgs` and `manage_stripe_accounts`.
+15 Balance, Issuing and Payouts reads are marked `key_restricted` — they responded "not available
+with secret key type" on the key surface but are catalogued over the OAuth surface. Operation-level
+verdicts reflect whichever surface made the operation available.
+
 **The catalogue is a curated subset, not the whole API.** Probing on 2026-09-22 found
 `GetTerminalReaders`, `GetTreasuryFinancialAccounts`, `GetRadarEarlyFraudWarnings`,
 `GetCustomersCustomerSources`, `GetEvents`, `GetEventsId` and `PostInvoicesInvoicePay` all absent,
@@ -888,8 +898,19 @@ the way `stripe_world`'s conformance allow-list is.
 | **`llm_context` on search results** | Stripe-authored prose in no public artifact. Reproduced where the probe captured it, absent elsewhere | This project — declared |
 | **`stripe_analytics` answers a permission refusal** | Sigma is not reproducible, and a key without the analytics permission is a realistic account state. Closed by the §5 refusal mechanism rather than left as a gap (§6). The cost: an agent that would have got analytics on a real permissioned account gets a refusal here | This project — declared |
 | **`get_stripe_account_info` exists here and not on the live server** | Documented by Stripe and carries no preview label (§4.1.1). Kept deliberately; a harness that does not want it does not include it | This project — declared |
-| **`SH206` lint violation** | Real tool descriptions name other tools. Fidelity wins; the world becomes unsafe under a prefixing host | This project — declared, and a `SEAHAVEN_FINDINGS.md` entry |
+| **`SH206` lint warning** | Real tool descriptions name other tools. Fidelity wins; a prefixing host earns a warning it is documented to accept (architecture §1.1: SH206 is a warning, fires only against the host, and the documented fix is to accept it or drop the prefix). No `SEAHAVEN_FINDINGS.md` entry needed | This project — declared |
 | **`product.attributes`, `product.type`, `product.tax_details`** | Returned by the live API, documented in neither the full nor the pinned spec. Ruled on in §11.2: the published schema wins and we expect the wire to catch up. Three probable-severity tells stay open on every product read | This project — declared, revisit if the wire has not caught up |
+| **Product table keyed on path prefixes** | Architecture §4.4 says tags, but `spec3.json` tags are empty for every operation. Path prefixes are a reliable proxy; the table is in `spec/products.py` | This project — declared |
+| **83 of 155 routed operations absent on real MCP** | These answer bucket A ("not available") via the catalogue gate, even though handlers exist. The catalogue is the authority, not the routing table (functional spec §9) | This project — closed by design |
+| **`charge.radar_options` emits `null`** | The probe saw `{}` for `radar_options`, but `spec3.json` types the field as `{"type":"null"}`. Schema conformance enforces the spec's type. The tell is subtle and the schema wins (§11.2's precedent) | This project — declared (EC-09 analogy) |
+| **`GetBalanceTransactionsId` keyword order** | The last two keywords in the discovery index differ from the probe's captured order. The search function is keyword-scored, not order-sensitive, so this does not affect ranking | This project — declared |
+| **Catalogue reflects the key-authenticated MCP surface** | The `{"kind":"tools"}` record in `mcp_catalogue.jsonl` lists 9 tools from a secret-key session. That surface includes `get_stripe_account_info` and lacks `list_available_accounts_or_orgs` and `manage_stripe_accounts`. 15 Balance, Issuing and Payouts reads are marked `key_restricted` — catalogued over OAuth but "not available with secret key type". The operation verdicts (`catalogued`/`absent`) reflect the OAuth surface where available | This project — declared |
+| **`EC-09`: deleted customer stub missing `cache_context_key`** | The spec types `deleted_customer` as a three-key stub; adding a fourth field would break schema conformance | This project — declared |
+| **`AR-03`: integer-for-string parameter coercion** | Real Stripe silently coerces `name: 12345` to `"12345"`; ours rejects with 400. Fixing touches the validation core (`ParamSpec`); the tell fires only if an agent sends an integer for a string parameter, uncommon in JSON tool calls | This project — declared |
+| **`AS-09`: round account `created` timestamp** | `1704067200` (midnight 2024-01-01 UTC) is conspicuously round. Subsumes under the frozen-clock residue — `ctx.clock` is static and all timestamps share it | This project — declared (frozen-clock residue) |
+| **`AR-04`: 404 message trailing help text** | The real API appends "If you are trying to list objects..." to 404 messages. After Phase 7's catalogue gating, agents reach the 404 handler only for truly unknown paths (bucket A intercepts everything else), so the tell is subtle and narrow | This project — declared |
+| **`EC-10`: JSON field ordering** | Real Stripe returns fields in a stable documented order; our serialization order may differ. JSON ordering is not semantically meaningful and no agent logic depends on it | This project — declared |
+| **`AS-17`: fixed `charge.outcome.risk_score`** | Real Stripe varies risk_score (0-99) per charge; ours omits it. Reproducing it needs a Radar model outside scope | This project — declared |
 | **Search freshness** | Real Stripe search lags writes; this world is exact. Inherited from `stripe_world` | `stripe_world` |
 
 ## 14. Open questions
@@ -912,8 +933,9 @@ Each blocks something specific, and each has a defined way to close.
    It also uncovered the third error channel of §4.5.1.
 3. ~~`stripe_analytics` without Sigma~~ — **closed** 2026-09-22, and the assumption behind the
    question was wrong: the tool works on the sandbox. See §6 and the §13 residue entry.
-4. **The real catalogue's true extent.** Blocks §5.3's artifact. Closes by the enumeration described
-   there; the cost is the reason it is called out rather than assumed.
+4. ~~The real catalogue's true extent~~ — **closed** 2026-09-23. Enumerated: 594 operations (123
+   catalogued, 471 absent) plus 15 key-restricted entries catalogued over OAuth. The `{"kind":"tools"}`
+   record reflects the key-authenticated surface (9 tools).
 5. **`human_confirmation` / `approval_token`.** The schema is captured but the flow that triggers it
    is not. Blocks nothing yet; if it fires on operations this world routes, it becomes a surface of
    its own.

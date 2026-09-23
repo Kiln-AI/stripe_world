@@ -11,24 +11,42 @@ functional API vocabulary under the source material's MIT licence (see `THIRD_PA
 
 ## The agent surface
 
-The world exposes the five-tool shape Stripe's own MCP server uses, so an agent trained against
-this world works against the real thing without relearning.
+The world exposes eight of Stripe's own MCP server's ten tools, addressed by `operationId` with
+`stripe_context` and `livemode` context parameters on every call. An agent trained against this
+world works against the real thing without relearning.
 
 | Tool | Purpose |
 |---|---|
-| `stripe_api_search(query)` | Find Stripe API **methods** by keyword (the method catalogue, not object search) |
-| `stripe_api_details(method, path)` | Parameter documentation for one API method |
-| `stripe_api_read(path, params)` | Read data with any Stripe API `GET` method |
-| `stripe_api_write(method, path, params, idempotency_key)` | Write data with any `POST` or `DELETE` method |
+| `list_available_accounts_or_orgs()` | Bootstrap: returns the accounts this session can reach, with `stripe_context` and `livemode` for every subsequent call |
+| `stripe_api_search(intent, resource)` | Find Stripe API operations by intent and resource (the operation catalogue, not object search) |
+| `stripe_api_details(stripe_api_operation_id)` | Full parameter documentation for one API operation |
+| `stripe_api_read(stripe_api_operation_id, parameters)` | Read data with any Stripe API `GET` operation |
+| `stripe_api_write(stripe_api_operation_id, parameters)` | Write data with any `POST` or `DELETE` operation |
 | `get_stripe_account_info()` | The account object |
+| `manage_stripe_accounts()` | Returns a URL for account management |
+| `stripe_analytics(intent)` | Sigma/analytics -- answers a permission refusal (the world does not reproduce Sigma) |
 
-Every tool returns `{"status": int, "body": {...}}`. HTTP status codes are return values, not
-exceptions -- a 402 card decline is an ordinary outcome, not an error.
+On success a tool returns the bare Stripe object or list envelope. On failure it raises an MCP
+tool error carrying a plain-text message -- an agent never sees a status code, response headers,
+or a structured error envelope.
+
+### Composition requirement
+
+Three of Stripe's ten MCP tools are deliberately not built here:
+`search_stripe_documentation`, `stripe_implementation_planner`, and `send_stripe_mcp_feedback`.
+A harness that wants the complete ten-tool set composes these from the real Stripe MCP server
+alongside this world's eight (see `specs/projects/no_tells/functional_spec.md` §4.1.2--4.1.3).
+**This world is not a standalone drop-in for the Stripe MCP server** and should not be deployed
+as one.
 
 ## What it covers
 
 **155 routed operations** across 24 SQLite tables, pinned to Stripe API version
 `2026-08-26.dahlia`. The operation count is asserted by a test and cannot drift silently.
+Discovery covers the 123 operations the real Stripe MCP catalogues (72 routed, 51 catalogued but
+unrouted, which answer a product-activation or permission refusal when called); the remaining 471
+operations in spec3.json are absent on the real MCP and answer "not available" when addressed
+directly.
 
 ### Resources
 
@@ -114,17 +132,29 @@ the package (`seahaven_stripe_world`), which is what the CLI and pytest plugin f
 import seahaven_stripe_world
 
 with seahaven_stripe_world.world.instance("empty") as inst:
+    # Bootstrap: get the account context
+    accounts = inst.call("list_available_accounts_or_orgs")
+    ctx_id = accounts["accounts"][0]["stripe_context"]
+    mode = accounts["accounts"][0]["livemode"]
+
     # Create a customer
     result = inst.call(
         "stripe_api_write",
-        method="POST",
-        path="/v1/customers",
-        params={"name": "Jane Doe", "email": "jane@example.com"},
+        stripe_api_operation_id="PostCustomers",
+        parameters={"name": "Jane Doe", "email": "jane@example.com"},
+        stripe_context=ctx_id,
+        livemode=mode,
     )
 
     # Read it back
-    cust_id = result["body"]["id"]
-    result = inst.call("stripe_api_read", path=f"/v1/customers/{cust_id}")
+    cust_id = result["id"]
+    result = inst.call(
+        "stripe_api_read",
+        stripe_api_operation_id="GetCustomersCustomer",
+        parameters={"customer": cust_id},
+        stripe_context=ctx_id,
+        livemode=mode,
+    )
 ```
 
 ## Conventions
@@ -169,11 +199,11 @@ src/seahaven_stripe_world/
   search/                               # FTS5 executor, parser, field allowlists
   serialize/                            # row-to-API-object, expansion
   discovery/                            # stripe_api_search and stripe_api_details
-  tools/                                # the five tool registrations
+  tools/                                # the eight registered tools
   middleware/                           # error handler, stripe envelope, idempotency
-  spec/                                 # spec3.min.json, enums, expandable, event_types
+  spec/                                 # spec3.json, spec3.min.json, mcp_catalogue.jsonl, products table
 fixtures/empty/                         # the one shipped fixture
-tests/                                  # 927 tests
+tests/                                  # 1000+ tests
   conformance/                          # cassette replay, allowed differences
   schema_conformance/                   # spec validation of every returned object
   billing/                              # proration, invoicing, dunning, subscription machine
@@ -182,10 +212,17 @@ specs/projects/stripe_world/            # functional spec, architecture, compone
 
 ## Design documentation
 
-The full design lives in `specs/projects/stripe_world/`:
+The world itself is designed in `specs/projects/stripe_world/`:
 
 - `functional_spec.md` -- what the world does and why
 - `architecture.md` -- how it is built
 - `components/*.md` -- detailed designs for dispatcher, discovery, data model, cross-cutting
   behavior, billing engine, fixtures, conformance, and evals
 - `implementation_plan.md` -- the 23-phase build
+
+The MCP conformance project lives in `specs/projects/no_tells/`:
+
+- `functional_spec.md` -- the 70-row tell register, the governing rule, the refusal model,
+  discovery, identity, serialization, and declared residue
+- `architecture.md` -- technical design for the conformance work
+- `research/mcp-fidelity-probe/` -- probe artifacts and the living tell register

@@ -50,7 +50,7 @@ discover later.
 | TS-16, DT-15 | Details parameters grouped as `{path:{}, query:{}, body:{}}` dicts; ours is a flat list | tool-surface, discovery | moderate | closed |
 | TS-18, DT-04 | Path placeholders normalized to `{id}` everywhere; ours uses `{customer}`, `{invoice}`, etc. | tool-surface, discovery | moderate | closed |
 | TS-06, DT-01 | Search tool takes `intent` + `resource` + `limit`; ours takes free-text `query` | tool-surface, discovery | moderate | closed |
-| TS-02 | `get_stripe_account_info` does not exist on real MCP; real uses `list_available_accounts_or_orgs` | tool-surface | moderate | declared |
+| TS-02 | `get_stripe_account_info` absent from the OAuth MCP surface (which has `list_available_accounts_or_orgs` instead); present on the key-authenticated MCP surface. Kept deliberately (§4.1.1) | tool-surface | moderate | declared |
 | TS-03 | `list_available_accounts_or_orgs` missing; it gates every other tool (provides `stripe_context`/`livemode`) | tool-surface | moderate | closed |
 | AR-01 | Out-of-scope paths with product-activation errors (Issuing, etc.) get 404 "Unrecognized"; should be permission-style error | absence-refusal | moderate | closed |
 | AR-02 | Out-of-scope paths that succeed on real Stripe (Checkout, Payment Links, etc.) get 404; should be permission error | absence-refusal | moderate | closed |
@@ -65,13 +65,13 @@ discover later.
 | ID | Tell | Lane(s) | Cost | Disposition |
 |---|---|---|---|---|
 | TS-17, DT-16 | Details returns full multi-paragraph description; ours truncates to first sentence | tool-surface, discovery | trivial | closed |
-| EC-06, EC-07 | Out-of-range `limit` (0, -1, 101, 200) silently clamped to 1..100; ours returns 400 | envelope | trivial | open |
+| EC-06, EC-07 | Out-of-range `limit` (0, -1, 101, 200) silently clamped to 1..100; ours returns 400 | envelope | trivial | closed |
 | EC-08, DT-21 | `openapi_spec_version` is `"2026-08-26.preview"`; ours says `"2026-08-26.dahlia"` | envelope, discovery | trivial | declared |
-| AR-03 | Integer-for-string params (e.g. `name: 12345`) silently coerced; ours rejects with 400 | absence-refusal | trivial | open |
+| AR-03 | Integer-for-string params (e.g. `name: 12345`) silently coerced; ours rejects with 400 | absence-refusal | trivial | declared |
 | DT-05 | Default search result count is 5 (configurable 1-20); ours is fixed at 10 | discovery | trivial | closed |
 | AS-07 | Account object has `metadata: {}`; real account response has no `metadata` key | account-stats | trivial | closed |
-| AS-09 | Account `created` is `1704067200` (midnight 2024-01-01); conspicuously round | account-stats | trivial | open |
-| AS-11 | `customer.invoice_prefix` should be 8 chars from `[A-Z0-9]`; format unverified in our code | account-stats | trivial | open |
+| AS-09 | Account `created` is `1704067200` (midnight 2024-01-01); conspicuously round | account-stats | trivial | declared |
+| AS-11 | `customer.invoice_prefix` should be 8 chars from `[A-Z0-9]`; format unverified in our code | account-stats | trivial | closed |
 | AS-12 | `customer.customer_account` field missing (always `null` on standard accounts) | account-stats | trivial | closed |
 | AS-13 | `customer.test_clock` and `subscription.test_clock` fields missing (always `null`) | account-stats | trivial | closed |
 | AS-14 | `product.attributes` (`[]`) and `product.type` (`"service"`) fields missing | account-stats | trivial | declared |
@@ -80,7 +80,7 @@ discover later.
 | AS-24 | `subscription.cancellation_details` field missing (null sub-fields) | account-stats | trivial | closed |
 | AS-25 | `subscription.managed_payments` and `payment_intent.managed_payments` missing (`{"enabled":false}`) | account-stats | trivial | closed |
 | AS-27 | Structured IDs encode creation time; ours have no time correlation | account-stats | trivial | closed |
-| EC-05, DT-18 | Error messages carry MCP guidance suffix ("Use stripe_api_details..."); ours don't | envelope, discovery | moderate | open |
+| EC-05, DT-18 | Error messages carry MCP guidance suffix ("Use stripe_api_details..."); ours don't | envelope, discovery | moderate | closed |
 | TS-19 | `manage_stripe_accounts` tool missing (returns reconsent URL) | tool-surface | moderate | closed |
 | TS-20 | `search_stripe_documentation` tool missing (returns docs results) | tool-surface | moderate | declared |
 | TS-21 | `stripe_analytics` tool missing (Sigma query interface) | tool-surface | moderate | closed |
@@ -96,14 +96,14 @@ discover later.
 
 | ID | Tell | Lane(s) | Cost | Disposition |
 |---|---|---|---|---|
-| AR-04 | 404 message missing trailing help text ("If you are trying to list objects...") | absence-refusal | trivial | open |
+| AR-04 | 404 message missing trailing help text ("If you are trying to list objects...") | absence-refusal | trivial | declared |
 | EC-09 | Deleted customer stub missing `cache_context_key` field | envelope | trivial | declared |
-| EC-10 | JSON field ordering may differ between our serialization and real API | envelope | trivial | open |
+| EC-10 | JSON field ordering may differ between our serialization and real API | envelope | trivial | declared |
 | AS-15 | `product.tax_details` field missing (always `null`) | account-stats | trivial | declared |
-| AS-16 | `balance_transaction.fee_details` structure: must include all 5 sub-fields exactly | account-stats | trivial | open |
-| AS-17 | `charge.outcome.risk_score` varies per charge on real Stripe (0-99); ours may be fixed | account-stats | trivial | open |
-| AS-18 | `charge.payment_method_details.card` has 20+ sub-fields; ours has fewer | account-stats | trivial | open |
-| AS-19 | `charge.receipt_url` absent or differs from real `pay.stripe.com/receipts/...` URL | account-stats | trivial | open |
+| AS-16 | `balance_transaction.fee_details` structure: must include all 5 sub-fields exactly | account-stats | trivial | closed |
+| AS-17 | `charge.outcome.risk_score` varies per charge on real Stripe (0-99); ours may be fixed | account-stats | trivial | declared |
+| AS-18 | `charge.payment_method_details.card` has 20+ sub-fields; ours has fewer | account-stats | trivial | closed |
+| AS-19 | `charge.receipt_url` absent or differs from real `pay.stripe.com/receipts/...` URL | account-stats | trivial | closed |
 | AS-20 | `account.settings.payouts.schedule.delay_days` is 7 (CA sandbox); ours is 2 | account-stats | trivial | closed |
 | AS-21 | `invoice.account_country`/`account_name` must be derived from account object, not hardcoded | account-stats | trivial | closed |
 | AS-26 | `payment_intent.payment_details` field missing on subscription-created PIs | account-stats | trivial | closed |

@@ -4,8 +4,7 @@ each description compared against the captured real ones (architecture section 8
 The cheapest test in the project and the one covering the largest cluster of
 blatant tells. Failure prints a diff so the gap is visible at a glance.
 
-Tests for the eight tools this world will register are xfailed until their
-phases land and rebuild the signatures and descriptions.
+Each tool's schema and description are compared against the captured real server's.
 """
 
 import json
@@ -83,7 +82,8 @@ def _compare_schema(tool_name: str, real: dict[str, Any], actual_schema: dict[st
                 f"{tool_name}.{prop_name}: type differs. "
                 f"Expected {real_prop['type']!r}, got {actual_type!r}"
             )
-        # Default
+        # Default — must match in both directions: present if real has it,
+        # absent if real does not (a spurious default is itself a tell).
         if "default" in real_prop:
             assert "default" in actual_prop, (
                 f"{tool_name}.{prop_name}: missing default {real_prop['default']!r}"
@@ -91,6 +91,11 @@ def _compare_schema(tool_name: str, real: dict[str, Any], actual_schema: dict[st
             assert actual_prop["default"] == real_prop["default"], (
                 f"{tool_name}.{prop_name}: default differs. "
                 f"Expected {real_prop['default']!r}, got {actual_prop['default']!r}"
+            )
+        else:
+            assert "default" not in actual_prop, (
+                f"{tool_name}.{prop_name}: spurious default "
+                f"{actual_prop['default']!r} — real schema has none"
             )
         # Minimum / maximum
         if "minimum" in real_prop:
@@ -167,8 +172,7 @@ def test_full_spec_committed() -> None:
 
 # --- Registered tool set guard ------------------------------------------------
 
-# The tools registered today; Phase 7 adds stripe_analytics.  Extend this
-# set as each phase lands.
+# The full set of tools this world registers (functional spec section 4.1).
 _EXPECTED_NOW = {
     "stripe_api_read",
     "stripe_api_write",

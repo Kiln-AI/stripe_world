@@ -80,7 +80,7 @@ A phase is not done until its register rows have dispositions and the full check
 
 ### Completion
 
-- [ ] **Phase 10: Documentation and closeout.** README and world `AGENTS.md` — including the
+- [x] **Phase 10: Documentation and closeout.** README and world `AGENTS.md` — including the
       composition requirement of functional spec §4.1.2, so nobody stands this up standalone and
       assumes the surface is complete. Audit every register row for a disposition, finalise §13, and
       apply the SH206 correction of architecture §1.1 to the functional spec.
