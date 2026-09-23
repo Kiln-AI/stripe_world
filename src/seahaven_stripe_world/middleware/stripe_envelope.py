@@ -33,7 +33,7 @@ from seahaven.world import Handler
 
 from seahaven_stripe_world._ids import stripe_id
 from seahaven_stripe_world.dispatch.response import ApiResponse
-from seahaven_stripe_world.errors import StripeToolError
+from seahaven_stripe_world.errors import CatalogueRefusal, StripeToolError
 from seahaven_stripe_world.stripe_errors import StripeApiError
 from seahaven_stripe_world.world import world
 
@@ -96,6 +96,43 @@ def _render_tool_error(body: dict, *, status: int, op_id: str | None = None) -> 
     return StripeToolError(rendered, status=status, stripe_body=body)
 
 
+def _render_catalogue_refusal(error: CatalogueRefusal) -> StripeToolError:
+    """Render a bucket-B refusal as the agent-visible error string.
+
+    B1 (product activation) -- the measured form (refusal-matrix.md section A):
+        ``Your account is not set up to use {product}. Please visit {url}
+        to get started.``
+
+    B2 (permission) -- the inferred form (functional spec section 5.1.1):
+        ``You don't have the required permissions to perform this action.
+        Required permissions: {permissions}.``
+
+    Both carry the guidance suffix naming ``stripe_api_details``.
+    """
+    if error.product is not None:
+        product_name, dashboard_url = error.product
+        message = (
+            f"Your account is not set up to use {product_name}. "
+            f"Please visit {dashboard_url} to get started."
+        )
+    else:
+        if error.op_permissions:
+            perm_list = ", ".join(error.op_permissions)
+            message = (
+                "You don't have the required permissions to perform this action. "
+                f"Required permissions: {perm_list}."
+            )
+        else:
+            message = "You don't have the required permissions to perform this action."
+    rendered = f"Stripe API error: {message}"
+    rendered += (
+        f"\n\nUse stripe_api_details with stripe_api_operation_id: "
+        f'"{error.op_id}" to see all required and optional parameters.'
+    )
+    body = {"error": {"type": "invalid_request_error", "message": message}}
+    return StripeToolError(rendered, status=403, stripe_body=body)
+
+
 def _mint_request(ctx: seahaven.Ctx, call: seahaven.Call) -> None:
     """Mint a request id and park it -- shared by both rendering paths."""
     key = call.arguments.get("idempotency_key")
@@ -112,7 +149,13 @@ def stripe_envelope(ctx: seahaven.Ctx, call: seahaven.Call, next_: Handler) -> A
         return _mcp_envelope(ctx, call, next_)
     if call.name in _RAW_TOOLS:
         return _raw_envelope(ctx, call, next_)
-    return next_(ctx, call)
+    # Non-dispatch tools (accounts, analytics): CatalogueRefusal is
+    # still rendered as a StripeToolError so the agent sees the B1/B2
+    # message rather than the generic CatalogueRefusal text.
+    try:
+        return next_(ctx, call)
+    except CatalogueRefusal as error:
+        raise _render_catalogue_refusal(error) from None
 
 
 def _mcp_envelope(ctx: seahaven.Ctx, call: seahaven.Call, next_: Handler) -> Any:
@@ -121,6 +164,8 @@ def _mcp_envelope(ctx: seahaven.Ctx, call: seahaven.Call, next_: Handler) -> Any
     op_id = call.arguments.get("stripe_api_operation_id")
     try:
         result = next_(ctx, call)
+    except CatalogueRefusal as error:
+        raise _render_catalogue_refusal(error) from None
     except StripeApiError as error:
         raise _render_tool_error(error.envelope(), status=error.status, op_id=op_id) from None
     if isinstance(result, ApiResponse):

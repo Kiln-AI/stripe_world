@@ -22,6 +22,7 @@ from typing import Any
 import seahaven
 
 __all__ = [
+    "CatalogueRefusal",
     "Internal",
     "InvalidInput",
     "SessionValidation",
@@ -116,5 +117,34 @@ class UnknownOperation(seahaven.ToolError):
             "UNKNOWN_OPERATION",
             f"Operation '{op_id}' is not available. "
             "Use stripe_api_search to find available operations.",
+            {"operation_id": op_id},
+        )
+
+
+class CatalogueRefusal(seahaven.ToolError):
+    """An operation the real MCP catalogues but this world does not route.
+
+    Bucket B (architecture section 4.4): the operation exists at Stripe
+    but the key/account cannot use it.  The envelope middleware renders
+    this as a ``StripeToolError`` carrying the B1 (product-activation) or
+    B2 (permission) message.
+
+    This is a distinct error so the middleware can tell B-refusals apart
+    from A-refusals (``UnknownOperation``) and from genuine Stripe errors.
+    """
+
+    def __init__(
+        self,
+        op_id: str,
+        *,
+        product: tuple[str, str] | None,
+        permissions: Sequence[str],
+    ) -> None:
+        self.op_id = op_id
+        self.product = product
+        self.op_permissions = list(permissions)
+        super().__init__(
+            "CATALOGUE_REFUSAL",
+            f"Operation '{op_id}' is not available for this account.",
             {"operation_id": op_id},
         )

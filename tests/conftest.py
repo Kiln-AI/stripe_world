@@ -216,6 +216,28 @@ def api_details(
 
 
 @pytest.fixture(autouse=True)
+def _allow_routed_ops_through_catalogue(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Patch the catalogue so that all routed operations are treated as
+    catalogued, even if the real MCP catalogue marks them as absent.
+
+    This lets the existing test suite continue to use ``api_read``/
+    ``api_write`` for operations like ``PostPaymentMethods``,
+    ``GetEvents``, etc. that are routed by this world but absent from
+    the real MCP's catalogue.  The MCP surface's catalogue gating
+    behaviour is tested explicitly in ``test_refusal_conformance.py``
+    with the real catalogue data.
+    """
+    from seahaven_stripe_world.dispatch.routes import ALL
+    from seahaven_stripe_world.spec import catalogue
+
+    routed_ops = {r.op_id for r in ALL}
+    # Any routed op that is in ABSENT must move out of ABSENT
+    # so the _gate function doesn't block it.
+    patched_absent = catalogue.ABSENT - routed_ops
+    monkeypatch.setattr(catalogue, "ABSENT", patched_absent)
+
+
+@pytest.fixture(autouse=True)
 def _schema_conformance(
     monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[list[capture.CapturedCall]]:

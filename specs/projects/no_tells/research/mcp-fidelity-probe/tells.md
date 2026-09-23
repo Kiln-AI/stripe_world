@@ -52,8 +52,8 @@ discover later.
 | TS-06, DT-01 | Search tool takes `intent` + `resource` + `limit`; ours takes free-text `query` | tool-surface, discovery | moderate | closed |
 | TS-02 | `get_stripe_account_info` does not exist on real MCP; real uses `list_available_accounts_or_orgs` | tool-surface | moderate | declared |
 | TS-03 | `list_available_accounts_or_orgs` missing; it gates every other tool (provides `stripe_context`/`livemode`) | tool-surface | moderate | closed |
-| AR-01 | Out-of-scope paths with product-activation errors (Issuing, etc.) get 404 "Unrecognized"; should be permission-style error | absence-refusal | moderate | open |
-| AR-02 | Out-of-scope paths that succeed on real Stripe (Checkout, Payment Links, etc.) get 404; should be permission error | absence-refusal | moderate | open |
+| AR-01 | Out-of-scope paths with product-activation errors (Issuing, etc.) get 404 "Unrecognized"; should be permission-style error | absence-refusal | moderate | closed |
+| AR-02 | Out-of-scope paths that succeed on real Stripe (Checkout, Payment Links, etc.) get 404; should be permission error | absence-refusal | moderate | closed |
 | AS-02 | Structured IDs (Format B) embed a 10-char account fragment at a fixed position; ours are fully random | account-stats | moderate | closed |
 | TS-04, TS-05, TS-07, TS-26, DT-13 | Read/write/details tools use `stripe_api_operation_id` + `stripe_context` + `livemode`; ours use `method` + `path` | tool-surface, discovery | hard | closed |
 | TS-01 | Tool count: real MCP has 10 tools; ours has 5 (6 missing, 1 extra) | tool-surface | hard | not-a-tell |
@@ -82,13 +82,13 @@ discover later.
 | AS-27 | Structured IDs encode creation time; ours have no time correlation | account-stats | trivial | closed |
 | EC-05, DT-18 | Error messages carry MCP guidance suffix ("Use stripe_api_details..."); ours don't | envelope, discovery | moderate | open |
 | TS-19 | `manage_stripe_accounts` tool missing (returns reconsent URL) | tool-surface | moderate | closed |
-| TS-20 | `search_stripe_documentation` tool missing (returns docs results) | tool-surface | moderate | open |
-| TS-21 | `stripe_analytics` tool missing (Sigma query interface) | tool-surface | moderate | open |
-| TS-22 | `stripe_implementation_planner` tool missing (decision tree + guide_id) | tool-surface | moderate | open |
-| TS-23 | `send_stripe_mcp_feedback` tool missing (accepts feedback) | tool-surface | moderate | open |
+| TS-20 | `search_stripe_documentation` tool missing (returns docs results) | tool-surface | moderate | declared |
+| TS-21 | `stripe_analytics` tool missing (Sigma query interface) | tool-surface | moderate | closed |
+| TS-22 | `stripe_implementation_planner` tool missing (decision tree + guide_id) | tool-surface | moderate | declared |
+| TS-23 | `send_stripe_mcp_feedback` tool missing (accepts feedback) | tool-surface | moderate | declared |
 | DT-17 | Real details nests parameters to arbitrary depth (156K chars for CheckoutSessions); ours stops at depth 1 | discovery | moderate | open |
 | DT-20 | `required_permissions` array missing from details response | discovery | moderate | open |
-| DT-23 | Some routed ops hidden on real server (`PostInvoicesInvoicePay`); real MCP curates its whitelist | discovery | moderate | open |
+| DT-23 | Some routed ops hidden on real server (`PostInvoicesInvoicePay`); real MCP curates its whitelist | discovery | moderate | closed |
 | AR-09, DT-22 | v1 events endpoints hidden in real MCP (only v2 event destinations); ours routes them | absence-refusal, discovery | decision | closed |
 | AR-10, AS-10 | Successive creates share identical `created` timestamp (frozen clock); real timestamps advance | absence-refusal, account-stats | decision | declared |
 

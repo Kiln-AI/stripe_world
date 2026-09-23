@@ -15,6 +15,7 @@ __all__ = [
     "GET_STRIPE_ACCOUNT_INFO",
     "LIST_AVAILABLE_ACCOUNTS_OR_ORGS",
     "MANAGE_STRIPE_ACCOUNTS",
+    "STRIPE_ANALYTICS",
     "STRIPE_API_DETAILS",
     "STRIPE_API_READ",
     "STRIPE_API_SEARCH",
@@ -93,6 +94,33 @@ MANAGE_STRIPE_ACCOUNTS: Final = (
     "completed their changes.\n"
     "- After confirmation, call list_available_accounts_or_orgs to sync "
     "the updated account list."
+)
+
+STRIPE_ANALYTICS: Final = (
+    "This tool is for analyzing Stripe Sigma and Metrics data "
+    "(e.g. about revenue, charges, products, invoices, subscriptions, "
+    "disputes, transactions, tax tables, payments etc) and running "
+    "SQL-based reporting queries. Use it for historical analytics, "
+    "aggregations, and business intelligence questions.\n"
+    "\n"
+    "Available intents:\n"
+    "- execute_query_run: Execute a new SQL query against Stripe Sigma "
+    "tables (Trino 414 compatible). Results are returned as a data_table.\n"
+    "- retrieve_query_run: Get the status and results of a previously-"
+    "executed query.\n"
+    "- search_query_tables: Search for available Sigma tables and their "
+    "schemas.\n"
+    "- retrieve_query_table: Get the detailed schema information (columns "
+    "and types) for a specific Sigma table.\n"
+    "- execute_query_template: Execute a pre-built Metrics query template. "
+    "Use this for common Stripe metrics like gross volume, successful "
+    "payments, new subscribers, churn, or MRR.\n"
+    "- retrieve_query_template: Look up available metric templates and "
+    "their parameters.\n"
+    "\n"
+    "IMPORTANT: When users ask analytics or data questions, ALWAYS try "
+    "this tool before attempting API calls. The Sigma tables contain "
+    "historical data that may be better suited for aggregate queries."
 )
 
 # get_stripe_account_info is not on the live Stripe MCP server (functional spec

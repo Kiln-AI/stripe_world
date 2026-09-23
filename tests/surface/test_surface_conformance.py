@@ -12,8 +12,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 _DATA = Path(__file__).parent / "real_tool_schemas.json"
 
 # The eight tools this world registers (functional spec section 4.1).
@@ -176,6 +174,7 @@ _EXPECTED_NOW = {
     "stripe_api_write",
     "stripe_api_search",
     "stripe_api_details",
+    "stripe_analytics",
     "get_stripe_account_info",
     "list_available_accounts_or_orgs",
     "manage_stripe_accounts",
@@ -254,7 +253,6 @@ def test_ts_19_manage_accounts_registered() -> None:
     _compare_schema("manage_stripe_accounts", real, tool.schema)
 
 
-@pytest.mark.xfail(strict=True, reason="tool not yet registered — Phase 7")
 def test_ts_21_analytics_registered() -> None:
     """TS-21: stripe_analytics is registered."""
     tools = _world_tools()

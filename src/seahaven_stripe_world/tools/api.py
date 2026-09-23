@@ -27,7 +27,10 @@ from pydantic import Field
 
 from seahaven_stripe_world.discovery import index as discovery
 from seahaven_stripe_world.dispatch import dispatch
-from seahaven_stripe_world.errors import UnknownOperation
+from seahaven_stripe_world.errors import CatalogueRefusal, UnknownOperation
+from seahaven_stripe_world.spec.catalogue import is_absent, is_catalogued
+from seahaven_stripe_world.spec.catalogue import permissions as catalogue_permissions
+from seahaven_stripe_world.spec.products import product_for_path
 from seahaven_stripe_world.tools import _context, _descriptions
 from seahaven_stripe_world.world import world
 
@@ -122,11 +125,55 @@ _HUMAN_CONFIRMATION_PROPERTIES: dict[str, Any] = {
 }
 
 
+# --- Catalogue gating (architecture section 4.3) ---
+
+
+def _gate(op_id: str) -> None:
+    """Check the catalogue before route matching.
+
+    The ordering is: absent -> bucket A, catalogued-but-unrouted -> bucket B.
+    The catalogue is consulted before the route table so that an operation
+    this world routes but the real MCP does not expose (e.g. GetEvents)
+    answers bucket A even though a handler exists (functional spec section 9).
+    """
+    if is_absent(op_id):
+        raise UnknownOperation(op_id)
+    if is_catalogued(op_id):
+        from seahaven_stripe_world.dispatch.router import ROUTER
+
+        route = ROUTER.resolve_op_id(op_id)
+        if route is None:
+            # Catalogued but no route: determine the path from the full spec
+            # for product lookup, then raise B refusal
+            _raise_bucket_b(op_id)
+
+
+def _raise_bucket_b(op_id: str) -> None:
+    """Raise the appropriate bucket-B refusal for a catalogued-but-unrouted op."""
+    from seahaven_stripe_world.spec import full_spec_document
+
+    spec = full_spec_document()
+    path = _find_path_for_op(op_id, spec)
+    product = product_for_path(path) if path else None
+    perms = catalogue_permissions(op_id)
+    raise CatalogueRefusal(op_id, product=product, permissions=perms)
+
+
+def _find_path_for_op(op_id: str, spec: dict[str, Any]) -> str | None:
+    """Find the path for an operation ID in the full OpenAPI spec."""
+    for path, methods in spec.get("paths", {}).items():
+        for _method, op_data in methods.items():
+            if isinstance(op_data, dict) and op_data.get("operationId") == op_id:
+                return path
+    return None
+
+
 # --- Operation ID resolution ---
 
 
 def _resolve_read(op_id: str, parameters: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     """Resolve a GET operation ID to (concrete_path, remaining_params)."""
+    _gate(op_id)
     from seahaven_stripe_world.dispatch.router import ROUTER
 
     route = ROUTER.resolve_op_id(op_id)
@@ -137,6 +184,7 @@ def _resolve_read(op_id: str, parameters: dict[str, Any]) -> tuple[str, dict[str
 
 def _resolve_write(op_id: str, parameters: dict[str, Any]) -> tuple[str, str, dict[str, Any]]:
     """Resolve a POST/DELETE operation ID to (method, concrete_path, remaining_params)."""
+    _gate(op_id)
     from seahaven_stripe_world.dispatch.router import ROUTER
 
     route = ROUTER.resolve_op_id(op_id)
@@ -236,6 +284,12 @@ def stripe_api_details(
 ) -> Any:
     """Get parameter details for a specific Stripe API operation."""
     _context.check(ctx, stripe_context, livemode)
+    # Absent operations are bucket A regardless of context.
+    # Catalogued ops fall through to discovery; Phase 8 will add full
+    # catalogue coverage to the discovery index so all catalogued ops
+    # return a details document.
+    if is_absent(stripe_api_operation_id):
+        raise UnknownOperation(stripe_api_operation_id)
     documented = discovery.details(stripe_api_operation_id)
     if documented is None:
         raise UnknownOperation(stripe_api_operation_id)
