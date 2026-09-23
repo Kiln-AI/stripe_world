@@ -1,7 +1,7 @@
 """Enumerate the real Stripe MCP's operation catalogue.
 
-    python -m tools_dev.enumerate_catalogue              # full run, resume by default
-    python -m tools_dev.enumerate_catalogue --sample 50  # probe 50 random uncovered ops
+    STRIPE_SECRET_KEY=sk_test_... python -m tools_dev.enumerate_catalogue
+    python -m tools_dev.enumerate_catalogue --sample 50
 
 For every ``operationId`` in the committed ``spec3.json``, calls the real Stripe
 MCP's ``stripe_api_details`` and records the verdict:
@@ -13,7 +13,7 @@ MCP's ``stripe_api_details`` and records the verdict:
 Results are written to ``src/seahaven_stripe_world/spec/mcp_catalogue.jsonl``,
 one JSON record per line, appended and flushed as they arrive. A partial file is
 a valid partial result, and a re-run reads the ``op`` set already present and
-probes only the gaps.
+probes only the gaps (error-verdict records are re-probed).
 
 The script also records the live server's tool list as a ``{"kind": "tools", ...}``
 record (functional spec section 4.1.1, architecture section 4.2).
@@ -21,9 +21,19 @@ record (functional spec section 4.1.1, architecture section 4.2).
 **This is the only step in the project that requires a live Stripe MCP connection.**
 CI never runs it; every later phase tests against committed artifacts.
 
-Environment:
-    Requires ``STRIPE_MCP_ENDPOINT`` and ``STRIPE_MCP_TOKEN`` (or reads from
-    ``.env``). Connects to the real Stripe MCP via its Streamable HTTP transport.
+Authentication:
+    Set ``STRIPE_SECRET_KEY`` in the environment or in ``.env``. A test-mode key
+    (``sk_test_`` or ``rk_test_`` prefix) is required; live-mode keys are refused.
+    Stripe's hosted MCP at ``https://mcp.stripe.com`` accepts the secret key as a
+    Bearer token directly.
+
+    The ``stripe_context`` and ``livemode`` values needed by every tool call are
+    obtained automatically: ``livemode`` is derived from the key prefix (always
+    ``false`` for test keys), and ``stripe_context`` is read from the server by
+    calling ``list_available_accounts_or_orgs`` at startup.
+
+    Override the endpoint with ``STRIPE_MCP_ENDPOINT`` if needed (default:
+    ``https://mcp.stripe.com``).
 """
 
 from __future__ import annotations
@@ -40,6 +50,10 @@ from typing import Any
 REPO = Path(__file__).resolve().parents[1]
 SPEC_PATH = REPO / "src" / "seahaven_stripe_world" / "spec" / "spec3.json"
 CATALOGUE_PATH = REPO / "src" / "seahaven_stripe_world" / "spec" / "mcp_catalogue.jsonl"
+
+DEFAULT_ENDPOINT = "https://mcp.stripe.com"
+TEST_KEY_PREFIXES = ("sk_test_", "rk_test_")
+PROTOCOL_VERSION = "2025-06-18"
 
 NOT_AVAILABLE_PREFIX = "Operation '"
 NOT_AVAILABLE_SUFFIX = "' is not available."
@@ -67,7 +81,7 @@ def _load_existing(path: Path) -> dict[str, dict[str, Any]]:
         if not line:
             continue
         record = json.loads(line)
-        if record.get("kind") == "tools":
+        if record.get("kind") in ("tools", "sample_marker"):
             continue
         op = record.get("op")
         if op:
@@ -75,74 +89,189 @@ def _load_existing(path: Path) -> dict[str, dict[str, Any]]:
     return existing
 
 
-def _call_stripe_mcp_details(
-    endpoint: str, token: str, op_id: str, stripe_context: str, livemode: bool
-) -> dict[str, Any]:
-    """Call stripe_api_details on the real MCP via Streamable HTTP.
+def _parse_sse_response(raw: bytes, request_id: str | None = None) -> Any:
+    """Parse a ``text/event-stream`` body and return the JSON-RPC message.
 
-    Returns the parsed JSON result from the MCP tool call.  Raises on
-    transport-level failures.
+    SSE frames are delimited by blank lines.  Each frame may contain
+    ``event:`` and ``data:`` fields.  We extract the ``data:`` payload from
+    the first ``message`` event whose JSON-RPC ``id`` matches *request_id*
+    (or the first message event if *request_id* is ``None``).
     """
-    import urllib.request
+    text = raw.decode("utf-8", errors="replace")
+    current_event = ""
+    current_data_lines: list[str] = []
 
-    # Build the MCP tool call request
-    call_id = f"enum-{op_id}"
-    body = json.dumps(
-        {
-            "jsonrpc": "2.0",
-            "id": call_id,
-            "method": "tools/call",
-            "params": {
-                "name": "stripe_api_details",
-                "arguments": {
-                    "stripe_api_operation_id": op_id,
-                    "stripe_context": stripe_context,
-                    "livemode": livemode,
+    for line in text.split("\n"):
+        if line == "":
+            # End of frame — process if it is a message event with data
+            if current_data_lines and current_event in ("message", ""):
+                payload = "\n".join(current_data_lines)
+                try:
+                    parsed = json.loads(payload)
+                except json.JSONDecodeError:
+                    pass
+                else:
+                    if request_id is None or parsed.get("id") == request_id:
+                        return parsed
+            current_event = ""
+            current_data_lines = []
+            continue
+
+        if line.startswith("event:"):
+            current_event = line[len("event:") :].strip()
+        elif line.startswith("data:"):
+            current_data_lines.append(line[len("data:") :].strip())
+
+    # Handle final frame without trailing blank line
+    if current_data_lines and current_event in ("message", ""):
+        payload = "\n".join(current_data_lines)
+        try:
+            parsed = json.loads(payload)
+        except json.JSONDecodeError:
+            pass
+        else:
+            if request_id is None or parsed.get("id") == request_id:
+                return parsed
+
+    msg = "no matching JSON-RPC message found in SSE stream"
+    raise RuntimeError(msg)
+
+
+class _McpSession:
+    """Minimal MCP Streamable HTTP client with protocol handshake."""
+
+    def __init__(self, endpoint: str, token: str) -> None:
+        self.endpoint = endpoint
+        self.token = token
+        self.session_id: str | None = None
+        self.negotiated_version: str = PROTOCOL_VERSION
+        self._next_id = 0
+
+    def _alloc_id(self) -> str:
+        self._next_id += 1
+        return str(self._next_id)
+
+    def _headers(self) -> dict[str, str]:
+        headers: dict[str, str] = {
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream",
+            "Authorization": f"Bearer {self.token}",
+        }
+        if self.session_id is not None:
+            headers["Mcp-Session-Id"] = self.session_id
+        if self.negotiated_version:
+            headers["MCP-Protocol-Version"] = self.negotiated_version
+        return headers
+
+    def _send(
+        self,
+        body: dict[str, Any],
+        *,
+        expect_response: bool = True,
+    ) -> Any:
+        """Send a JSON-RPC message and optionally read the response."""
+        import urllib.request
+
+        encoded = json.dumps(body, ensure_ascii=False).encode()
+        req = urllib.request.Request(
+            self.endpoint,
+            data=encoded,
+            headers=self._headers(),
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            # Capture session id from any response
+            sid = resp.headers.get("Mcp-Session-Id")
+            if sid:
+                self.session_id = sid
+
+            if not expect_response:
+                return None
+
+            content_type = resp.headers.get("Content-Type", "")
+            raw = resp.read()
+
+            if content_type.startswith("text/event-stream"):
+                return _parse_sse_response(raw, body.get("id"))
+            return json.loads(raw)
+
+    def request(self, method: str, params: Any) -> Any:
+        """Send a JSON-RPC request and return the parsed response."""
+        rpc_id = self._alloc_id()
+        return self._send(
+            {"jsonrpc": "2.0", "id": rpc_id, "method": method, "params": params},
+        )
+
+    def notify(self, method: str, params: dict[str, Any] | None = None) -> None:
+        """Send a JSON-RPC notification (no ``id``, no response expected)."""
+        body: dict[str, Any] = {"jsonrpc": "2.0", "method": method}
+        if params is not None:
+            body["params"] = params
+        self._send(body, expect_response=False)
+
+    def initialize(self) -> dict[str, Any]:
+        """Perform the MCP initialize / initialized handshake."""
+        result = self._send(
+            {
+                "jsonrpc": "2.0",
+                "id": self._alloc_id(),
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": PROTOCOL_VERSION,
+                    "capabilities": {},
+                    "clientInfo": {
+                        "name": "enumerate_catalogue",
+                        "version": "0.1.0",
+                    },
                 },
             },
-        }
-    ).encode()
+        )
+        # Record the negotiated version from the server
+        server_version = result.get("result", {}).get("protocolVersion", PROTOCOL_VERSION)
+        self.negotiated_version = server_version
+        # Send the initialized notification
+        self.notify("notifications/initialized", {})
+        return result
 
-    req = urllib.request.Request(
-        endpoint,
-        data=body,
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {token}",
-        },
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        return json.loads(resp.read())
+    def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Call a tool on the MCP server."""
+        result = self.request("tools/call", {"name": name, "arguments": arguments})
+        return result  # type: ignore[no-any-return]
 
+    def list_tools(self) -> list[str]:
+        """List the tools available on the MCP server."""
+        result = self.request("tools/list", {})
+        tools = result.get("result", {}).get("tools", [])
+        return [t["name"] for t in tools]
 
-def _list_tools(endpoint: str, token: str) -> list[str]:
-    """List the tools available on the MCP server."""
-    import urllib.request
+    def discover_account(self) -> tuple[str, bool]:
+        """Call list_available_accounts_or_orgs to get stripe_context and livemode.
 
-    body = json.dumps(
-        {
-            "jsonrpc": "2.0",
-            "id": "list-tools",
-            "method": "tools/list",
-            "params": {},
-        }
-    ).encode()
+        Returns (stripe_context, livemode).
+        """
+        result = self.call_tool("list_available_accounts_or_orgs", {})
+        tool_result = result.get("result", {})
+        content = tool_result.get("content", [])
 
-    req = urllib.request.Request(
-        endpoint,
-        data=body,
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {token}",
-        },
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        result = json.loads(resp.read())
+        text = ""
+        for item in content:
+            if item.get("type") == "text":
+                text = item.get("text", "")
+                break
 
-    tools = result.get("result", {}).get("tools", [])
-    return [t["name"] for t in tools]
+        if not text:
+            msg = "list_available_accounts_or_orgs returned no content"
+            raise RuntimeError(msg)
+
+        doc = json.loads(text)
+        accounts = doc.get("accounts", [])
+        if not accounts:
+            msg = "list_available_accounts_or_orgs returned no accounts"
+            raise RuntimeError(msg)
+
+        # Use the first account
+        account = accounts[0]
+        return account["stripe_context"], account["livemode"]
 
 
 def _classify_response(result: dict[str, Any], op_id: str) -> dict[str, Any]:
@@ -209,9 +338,21 @@ def _load_env() -> None:
         os.environ.setdefault(key.strip(), value.strip())
 
 
+def _validate_key(key: str) -> None:
+    """Refuse live-mode keys. Only test keys are accepted."""
+    if not any(key.startswith(prefix) for prefix in TEST_KEY_PREFIXES):
+        print(
+            "error: STRIPE_SECRET_KEY must be a test-mode key (sk_test_... or rk_test_...).\n"
+            "Live-mode keys are refused for safety.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Enumerate the real Stripe MCP's operation catalogue."
+        description="Enumerate the real Stripe MCP's operation catalogue.",
+        epilog="Set STRIPE_SECRET_KEY in the environment or .env (test-mode key required).",
     )
     parser.add_argument(
         "--sample",
@@ -223,23 +364,54 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     _load_env()
-    endpoint = os.environ.get("STRIPE_MCP_ENDPOINT")
-    token = os.environ.get("STRIPE_MCP_TOKEN")
-    stripe_context = os.environ.get("STRIPE_MCP_CONTEXT", "")
-    livemode = os.environ.get("STRIPE_MCP_LIVEMODE", "false").lower() == "true"
+    key = os.environ.get("STRIPE_SECRET_KEY", "")
+    endpoint = os.environ.get("STRIPE_MCP_ENDPOINT", DEFAULT_ENDPOINT)
 
-    if not endpoint or not token:
+    if not key:
         print(
-            "Set STRIPE_MCP_ENDPOINT and STRIPE_MCP_TOKEN in the environment or .env",
+            "error: STRIPE_SECRET_KEY is not set.\n"
+            "\n"
+            "Set it in the environment or in .env with a test-mode Stripe key:\n"
+            "  STRIPE_SECRET_KEY=sk_test_...\n"
+            "\n"
+            "Then run:\n"
+            "  python -m tools_dev.enumerate_catalogue",
             file=sys.stderr,
         )
         return 1
-    if not stripe_context:
+
+    _validate_key(key)
+
+    # Derive livemode from key prefix (test keys are always livemode=false)
+    livemode = False
+    print(f"endpoint: {endpoint}")
+    print(f"livemode: {livemode} (derived from key prefix)")
+
+    # Open an MCP session with the server
+    session = _McpSession(endpoint, key)
+    print("initializing MCP session...")
+    try:
+        session.initialize()
+    except Exception as exc:
+        print(f"error: MCP initialize handshake failed: {exc}", file=sys.stderr)
+        return 1
+    print(f"protocol version: {session.negotiated_version}")
+
+    # Discover the account's stripe_context from the server
+    print("discovering stripe_context via list_available_accounts_or_orgs...")
+    try:
+        stripe_context, server_livemode = session.discover_account()
+    except Exception as exc:
+        print(f"error: could not discover account: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"stripe_context: {stripe_context}")
+    if server_livemode != livemode:
         print(
-            "Set STRIPE_MCP_CONTEXT to the account's stripe_context value",
+            f"warning: server reports livemode={server_livemode}, "
+            f"key implies livemode={livemode}; using key-derived value",
             file=sys.stderr,
         )
-        return 1
 
     all_ops = _load_operation_ids()
     print(f"spec3.json has {len(all_ops)} operation ids")
@@ -256,7 +428,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # Record the tool list first
     try:
-        tools = _list_tools(endpoint, token)
+        tools = session.list_tools()
         print(f"live tool list: {tools}")
         with open(CATALOGUE_PATH, "a") as f:
             record = {
@@ -294,7 +466,14 @@ def main(argv: list[str] | None = None) -> int:
     failed = 0
     for i, op_id in enumerate(to_probe):
         try:
-            result = _call_stripe_mcp_details(endpoint, token, op_id, stripe_context, livemode)
+            result = session.call_tool(
+                "stripe_api_details",
+                {
+                    "stripe_api_operation_id": op_id,
+                    "stripe_context": stripe_context,
+                    "livemode": livemode,
+                },
+            )
             record = _classify_response(result, op_id)
         except Exception as exc:
             record = {
