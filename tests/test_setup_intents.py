@@ -48,7 +48,7 @@ def test_the_created_body(instance: seahaven.Instance) -> None:
         "card": {"mandate_options": None, "network": None, "request_three_d_secure": "automatic"}
     }
     assert body["metadata"] == {"p": "1"}
-    assert body["livemode"] is False
+    assert body["livemode"] is True
     # the always-present nullables
     for none in (
         "allowed_payment_method_types",

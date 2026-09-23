@@ -250,16 +250,16 @@ def test_account_info_returns_account_object(instance: seahaven.Instance) -> Non
     result = instance.call("get_stripe_account_info")
     assert result["object"] == "account"
     assert result["id"].startswith("acct_")
-    assert result["charges_enabled"] is True
-    assert result["payouts_enabled"] is True
+    assert result["charges_enabled"] is False
+    assert result["payouts_enabled"] is False
     assert result["default_currency"] == "usd"
     assert result["country"] == "US"
     assert result["type"] == "standard"
-    assert result["details_submitted"] is True
+    assert result["details_submitted"] is False
     assert isinstance(result["business_profile"], dict)
     assert isinstance(result["capabilities"], dict)
     assert isinstance(result["settings"], dict)
-    assert isinstance(result["metadata"], dict)
+    assert "metadata" not in result
     assert isinstance(result["created"], int)
 
 

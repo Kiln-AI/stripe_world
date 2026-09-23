@@ -54,7 +54,7 @@ def test_create_mints_the_one_off_price_behind_pricing(instance, customer) -> No
     assert body["quantity"] == 1
     assert body["quantity_decimal"] == "1"
     assert body["tax_rates"] == []
-    assert body["livemode"] is False
+    assert body["livemode"] is True
     assert "invoicing_rules" not in body  # spec-undeclared live echo
     assert "net_amount" not in body  # null-and-omittable
     # the recorded mechanism: amount+currency mints a one-off price/product
@@ -157,9 +157,7 @@ def test_the_list_is_newest_first_and_the_pending_filter_is_a_null_test(instance
 def test_the_recorded_404_family(instance, customer) -> None:
     missing = call(instance, "GET", "/v1/invoiceitems/ii_nope")
     assert missing["status"] == 404
-    assert missing["body"]["error"]["message"] == (
-        "No such Invoice Item: 'ii_nope'(livemode=false)"
-    )
+    assert missing["body"]["error"]["message"] == ("No such Invoice Item: 'ii_nope'(livemode=true)")
     assert missing["body"]["error"]["code"] == "resource_missing"
     assert missing["body"]["error"]["param"] == "id"
 

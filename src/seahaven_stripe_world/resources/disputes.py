@@ -200,7 +200,7 @@ FIELDS = FieldMap(
         }
     ),
     booleans=frozenset({"is_charge_refundable"}),
-    constants={"livemode": False},
+    constants={},
     derived={
         # The ledger's rows for this dispute, full objects always (the field
         # is `array<ref:balance_transaction>`, never ids): the withdrawal at

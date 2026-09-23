@@ -40,7 +40,7 @@ def test_create_defaults_and_read_only_fields(instance: seahaven.Instance) -> No
     assert body["state"] == "CA"
     assert body["tax_type"] is None
     assert body["description"] is None
-    assert body["livemode"] is False
+    assert body["livemode"] is True
     # The rate is stored as exact TEXT decimal digits, never a float.
     row = instance.inspect().one("SELECT percentage FROM tax_rates WHERE id = ?", body["id"])
     assert row is not None

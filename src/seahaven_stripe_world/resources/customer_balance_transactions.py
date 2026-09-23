@@ -106,7 +106,6 @@ FIELDS = FieldMap(
     timestamps=frozenset({"created"}),
     json_columns=frozenset({"metadata"}),
     constants={
-        "livemode": False,
         "checkout_session": None,
         "customer_account": None,
     },

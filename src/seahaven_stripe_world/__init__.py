@@ -10,7 +10,7 @@ The tooling finds a world by importing its package and reading `world` off it,
 so that attribute is this package's whole public surface.
 """
 
-from seahaven_stripe_world import middleware, tools
+from seahaven_stripe_world import middleware, startup, tools
 from seahaven_stripe_world.world import world
 
-__all__ = ["middleware", "tools", "world"]
+__all__ = ["middleware", "startup", "tools", "world"]

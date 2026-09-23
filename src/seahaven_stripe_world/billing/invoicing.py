@@ -27,6 +27,7 @@ import seahaven
 from seahaven_stripe_world import _ids, _json, _seq, _time
 from seahaven_stripe_world.billing._money import apportion, round_half_up
 from seahaven_stripe_world.resources import _lookup, charges, events, payment_intents
+from seahaven_stripe_world.serialize.fields import instance_livemode
 from seahaven_stripe_world.stripe_errors import declined as declined_body
 
 __all__ = [
@@ -295,6 +296,7 @@ def compute_totals(
     invoice_discounts: Sequence[DiscountSpec] = (),
     tax_rates: Sequence[TaxRateSpec] = (),
     invoice_id: str = "",
+    livemode: bool = True,
 ) -> Totals:
     """The recorded arithmetic, pure: per-line amounts, invoice-scope
     discounts apportioned floor-then-remainder (`_money`'s rule, documented
@@ -459,7 +461,7 @@ def compute_totals(
             {
                 "id": _line_placeholder_id(index),
                 "object": "line_item",
-                "livemode": False,
+                "livemode": livemode,
                 "amount": amounts[index],
                 "currency": currency,
                 "description": line.description,
@@ -874,6 +876,7 @@ def rebuild_invoice_lines(ctx: seahaven.Ctx, invoice_id: str) -> dict[str, Any]:
         invoice_discounts=_invoice_discount_specs(ctx, row),
         tax_rates=_invoice_tax_specs(ctx, row),
         invoice_id=invoice_id,
+        livemode=instance_livemode(ctx),
     )
     previous_ids: dict[tuple[str, ...], str] = {}
     for line in _load_list(row["lines"]):

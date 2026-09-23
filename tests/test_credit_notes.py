@@ -127,7 +127,7 @@ def test_create_credit_note_on_paid_invoice(instance, paid_invoice) -> None:
     assert body["pre_payment_amount"] == 0
     assert body["currency"] == "usd"
     assert body["invoice"] == paid_invoice
-    assert body["livemode"] is False
+    assert body["livemode"] is True
     assert body["id"].startswith("cn_")
     # Number follows the pattern
     assert "-CN-1" in body["number"]
@@ -610,7 +610,7 @@ def test_create_customer_balance_transaction(instance, customer) -> None:
     assert body["currency"] == "usd"
     assert body["description"] == "Courtesy credit"
     assert body["id"].startswith("cbtxn_")
-    assert body["livemode"] is False
+    assert body["livemode"] is True
     # Customer balance updated
     cus = call(instance, "GET", f"/v1/customers/{customer}")["body"]
     assert cus["balance"] == -500

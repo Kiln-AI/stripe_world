@@ -455,7 +455,6 @@ FIELDS = FieldMap(
         "items": _items_envelope,
     },
     constants={
-        "livemode": False,
         "application": None,
         "application_fee_percent": None,
         "automatic_tax": {"disabled_reason": None, "enabled": False, "liability": None},

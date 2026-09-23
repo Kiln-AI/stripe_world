@@ -112,7 +112,7 @@ FIELDS = FieldMap(
     json_columns=frozenset({"metadata"}),
     booleans=frozenset({"valid"}),
     decimals=frozenset({"percent_off"}),
-    constants={"livemode": False},
+    constants={},
     always_present=always_present,
     omit_when_none=omit_when_none,
 )

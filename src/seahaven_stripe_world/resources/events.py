@@ -32,6 +32,7 @@ from seahaven_stripe_world.dispatch.params import Param, ParamSpec
 from seahaven_stripe_world.dispatch.resource import page
 from seahaven_stripe_world.dispatch.response import Request
 from seahaven_stripe_world.resources import _lookup
+from seahaven_stripe_world.serialize.fields import instance_livemode
 from seahaven_stripe_world.spec import EVENT_TYPES
 
 __all__ = ["EVENT_LIST", "EVENT_RETRIEVE", "emit_event", "list_", "retrieve", "serialize"]
@@ -86,7 +87,7 @@ def serialize(ctx: seahaven.Ctx, row: Mapping[str, Any]) -> dict[str, Any]:
         "api_version": row["api_version"],
         "created": _time.to_unix(row["created"]),
         "data": data,
-        "livemode": False,
+        "livemode": instance_livemode(ctx),
         "pending_webhooks": 0,
         "request": {
             "id": row["request_id"],

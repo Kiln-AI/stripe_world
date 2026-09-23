@@ -56,7 +56,7 @@ def test_the_created_body_constants(instance: seahaven.Instance) -> None:
         instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": price}]}
     )["body"]
     assert body["object"] == "subscription"
-    assert body["livemode"] is False
+    assert body["livemode"] is True
     assert body["invoice_settings"] == {
         "account_tax_ids": None,
         "custom_fields": None,

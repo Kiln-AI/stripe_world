@@ -362,7 +362,6 @@ FIELDS = FieldMap(
         "phases": _phases_body,
     },
     constants={
-        "livemode": False,
         "application": None,
         "customer_account": None,
         "test_clock": None,

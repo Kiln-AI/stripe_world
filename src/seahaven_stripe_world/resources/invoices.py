@@ -427,7 +427,6 @@ FIELDS = FieldMap(
         "account_name": lambda ctx, row: _account_field(ctx, "name", None),
     },
     constants={
-        "livemode": False,
         "application": None,
         "account_tax_ids": None,
         "automatic_tax": {

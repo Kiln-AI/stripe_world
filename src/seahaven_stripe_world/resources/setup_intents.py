@@ -256,7 +256,6 @@ FIELDS = FieldMap(
         }
     ),
     constants={
-        "livemode": False,
         "allowed_payment_method_types": None,
         "application": None,
         "customer_account": None,

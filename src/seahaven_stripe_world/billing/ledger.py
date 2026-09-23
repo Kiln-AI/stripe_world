@@ -40,6 +40,7 @@ import seahaven
 from seahaven_stripe_world import _ids, _json, _seq, _time
 from seahaven_stripe_world.billing._money import FeeSchedule
 from seahaven_stripe_world.resources import _lookup, events
+from seahaven_stripe_world.serialize.fields import instance_livemode
 from seahaven_stripe_world.spec import spec_document
 from seahaven_stripe_world.stripe_errors import invalid_request
 
@@ -208,7 +209,7 @@ def read_balance(ctx: seahaven.Ctx) -> dict[str, Any]:
     prefunding block) are omitted while empty, which the spec's required set
     allows and the recorded body's zeros never exercise on this side."""
     now_iso = ctx.clock.iso()
-    out: dict[str, Any] = {"object": "balance", "livemode": False}
+    out: dict[str, Any] = {"object": "balance", "livemode": instance_livemode(ctx)}
     for field, comparator in (("available", "<="), ("pending", ">")):
         rows = ctx.db.rows(
             "SELECT currency, SUM(net) AS total FROM balance_transactions"

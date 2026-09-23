@@ -271,7 +271,7 @@ def test_a_lost_dispute_keeps_its_withdrawal_only(instance: seahaven.Instance) -
 
 def test_the_balance_on_an_empty_ledger(instance: seahaven.Instance) -> None:
     body = balance_of(instance)
-    assert body == {"object": "balance", "livemode": False, "available": [], "pending": []}
+    assert body == {"object": "balance", "livemode": True, "available": [], "pending": []}
 
 
 def test_the_balance_split_and_the_draw_down(instance: seahaven.Instance) -> None:

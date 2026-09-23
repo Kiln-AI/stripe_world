@@ -29,6 +29,7 @@ from seahaven_stripe_world.billing import invoicing, proration
 from seahaven_stripe_world.billing._money import round_half_up
 from seahaven_stripe_world.billing.invoicing import DiscountSpec, TaxRateSpec
 from seahaven_stripe_world.resources import _lookup, events, payment_intents
+from seahaven_stripe_world.serialize.fields import instance_livemode
 from seahaven_stripe_world.stripe_errors import StripeApiError, invalid_request, resource_missing
 
 __all__ = [
@@ -854,6 +855,7 @@ def _cycle_invoice(
         currency=sub_row["currency"],
         invoice_discounts=applied_discounts,
         tax_rates=applied_tax,
+        livemode=instance_livemode(ctx),
     )
     if zero_total_discounts is not None:
         totals.total_discount_amounts.extend(zero_total_discounts)
@@ -987,7 +989,10 @@ def _conversion_invoice(
             )
         )
     totals = invoicing.compute_totals(
-        lines, currency=row["currency"], tax_rates=_persisted_tax_specs(ctx, row)
+        lines,
+        currency=row["currency"],
+        tax_rates=_persisted_tax_specs(ctx, row),
+        livemode=instance_livemode(ctx),
     )
     # The netted coupon shows as amount-0 entries (probed, round 5): the
     # credit's amount already carries it, so the per-line and invoice-level
@@ -1999,6 +2004,7 @@ def resume_subscription(
         currency=row["currency"],
         invoice_discounts=_persisted_discount_specs(ctx, row),
         tax_rates=_persisted_tax_specs(ctx, row),
+        livemode=instance_livemode(ctx),
     )
     if not rolled:
         # An itemless subscription (spec-blessed) resumes with nothing to

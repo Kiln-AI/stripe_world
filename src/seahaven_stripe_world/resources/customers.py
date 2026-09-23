@@ -199,7 +199,6 @@ FIELDS = FieldMap(
     ),
     booleans=frozenset({"delinquent"}),
     constants={
-        "livemode": False,
         "default_source": None,
         "test_clock": None,
         # Always emitted `null` on a fresh customer at the pinned version

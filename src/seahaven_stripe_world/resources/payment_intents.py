@@ -271,7 +271,6 @@ FIELDS = FieldMap(
         }
     ),
     constants={
-        "livemode": False,
         # Recorded on every PI at the pinned version; tips are the only
         # sub-object and this world models none, so the recorded constant is
         # the whole field.

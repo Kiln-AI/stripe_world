@@ -94,7 +94,7 @@ def test_nulled_and_omitted_fields_follow_the_spec(instance: seahaven.Instance) 
     everything else — `business_name`, `sources`, `cash_balance`, … — is
     absent, never null."""
     created = create(instance)
-    assert created["livemode"] is False
+    assert created["livemode"] is True
     assert created["default_source"] is None
     assert created["test_clock"] is None
     assert created["description"] is None

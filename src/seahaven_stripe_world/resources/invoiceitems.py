@@ -30,7 +30,12 @@ from seahaven_stripe_world import _ids, _json, _seq, _time
 from seahaven_stripe_world.dispatch.params import Param, ParamSpec
 from seahaven_stripe_world.dispatch.resource import ResourceSpec, register
 from seahaven_stripe_world.resources import _lookup, events
-from seahaven_stripe_world.serialize.fields import FieldMap, presence_sets, serializer_for
+from seahaven_stripe_world.serialize.fields import (
+    FieldMap,
+    instance_livemode,
+    presence_sets,
+    serializer_for,
+)
 from seahaven_stripe_world.stripe_errors import StripeApiError, invalid_request
 
 if TYPE_CHECKING:
@@ -196,11 +201,13 @@ def _pricing_body(ctx: seahaven.Ctx, *, amount: int, currency: str, name: str) -
     )
 
 
-def _no_such_invoice_item(id_: str, *, status: int = 404) -> StripeApiError:
+def _no_such_invoice_item(ctx: seahaven.Ctx, id_: str, *, status: int = 404) -> StripeApiError:
     # Wire-verbatim (cassette 13 steps 10/64): the capitalized name and the
     # `(livemode=false)` suffix are Stripe's own odd spellings here.
+    # The mode string is derived from the instance (architecture §6.2).
+    mode = "true" if instance_livemode(ctx) else "false"
     return invalid_request(
-        f"No such Invoice Item: '{id_}'(livemode=false)",
+        f"No such Invoice Item: '{id_}'(livemode={mode})",
         code="resource_missing",
         param="id",
         status=status,
@@ -210,7 +217,7 @@ def _no_such_invoice_item(id_: str, *, status: int = 404) -> StripeApiError:
 def _require_item(ctx: seahaven.Ctx, id_: str) -> dict[str, Any]:
     row = ctx.db.one("SELECT * FROM invoiceitems WHERE id = ?", id_)
     if row is None:
-        raise _no_such_invoice_item(id_)
+        raise _no_such_invoice_item(ctx, id_)
     return row
 
 
@@ -283,7 +290,6 @@ FIELDS = FieldMap(
         "tax_rates": _tax_rate_bodies,
     },
     constants={
-        "livemode": False,
         "customer_account": None,
         "test_clock": None,
     },
@@ -572,7 +578,7 @@ def create(ctx: seahaven.Ctx, req: Request) -> dict[str, Any]:
 def retrieve(ctx: seahaven.Ctx, req: Request) -> dict[str, Any]:
     row = ctx.db.one("SELECT * FROM invoiceitems WHERE id = ?", req.path_params["invoiceitem"])
     if row is None:
-        raise _no_such_invoice_item(req.path_params["invoiceitem"])
+        raise _no_such_invoice_item(ctx, req.path_params["invoiceitem"])
     return serialize(ctx, row)
 
 

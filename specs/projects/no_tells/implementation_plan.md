@@ -42,7 +42,7 @@ A phase is not done until its register rows have dispositions and the full check
 
 ### Foundations
 
-- [ ] **Phase 2: Account, startup and the `livemode` sweep.** `startup.py` builds
+- [x] **Phase 2: Account, startup and the `livemode` sweep.** `startup.py` builds
       `ctx.state["account"]`; the fresh-sandbox account object (§6.3); remove `livemode` from ~15
       `ResourceSpec` constants and inline literals and add it centrally in `serialize/fields.py`
       behind the four-object carve-out; derive the embedded `livemode=` error string. **Write the

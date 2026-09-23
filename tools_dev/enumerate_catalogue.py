@@ -246,8 +246,7 @@ def main(argv: list[str] | None = None) -> int:
 
     existing = _load_existing(CATALOGUE_PATH)
     uncovered = [
-        op for op in all_ops
-        if op not in existing or existing[op].get("verdict") == "error"
+        op for op in all_ops if op not in existing or existing[op].get("verdict") == "error"
     ]
     print(f"catalogue has {len(existing)} records, {len(uncovered)} uncovered")
 

@@ -35,7 +35,12 @@ from seahaven_stripe_world.dispatch.resource import (
 )
 from seahaven_stripe_world.dispatch.response import Page
 from seahaven_stripe_world.resources import _lookup, events
-from seahaven_stripe_world.serialize.fields import FieldMap, presence_sets, serializer_for
+from seahaven_stripe_world.serialize.fields import (
+    FieldMap,
+    instance_livemode,
+    presence_sets,
+    serializer_for,
+)
 from seahaven_stripe_world.stripe_errors import invalid_request
 
 if TYPE_CHECKING:
@@ -247,7 +252,6 @@ FIELDS = FieldMap(
         "pdf": _pdf,
     },
     constants={
-        "livemode": False,
         "customer_account": None,
         "shipping_cost": None,
     },
@@ -346,7 +350,7 @@ def _build_line_items(
                         "discount_amount": 0,
                         "discount_amounts": [],
                         "invoice_line_item": line_spec["invoice_line_item"],
-                        "livemode": False,
+                        "livemode": instance_livemode(ctx),
                         "pretax_credit_amounts": [],
                         "quantity": quantity,
                         "taxes": None,
@@ -370,7 +374,7 @@ def _build_line_items(
                         "description": description,
                         "discount_amount": 0,
                         "discount_amounts": [],
-                        "livemode": False,
+                        "livemode": instance_livemode(ctx),
                         "pretax_credit_amounts": [],
                         "quantity": quantity,
                         "taxes": None,
@@ -392,7 +396,7 @@ def _build_line_items(
             "description": None,
             "discount_amount": 0,
             "discount_amounts": [],
-            "livemode": False,
+            "livemode": instance_livemode(ctx),
             "pretax_credit_amounts": [],
             "quantity": 1,
             "taxes": None,

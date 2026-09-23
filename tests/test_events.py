@@ -59,7 +59,7 @@ def test_customer_created_event_shape(instance: seahaven.Instance) -> None:
     assert evt["object"] == "event"
     assert evt["api_version"] == "2026-08-26.dahlia"
     assert isinstance(evt["created"], int)
-    assert evt["livemode"] is False
+    assert evt["livemode"] is True
     assert evt["pending_webhooks"] == 0
     assert evt["type"] == "customer.created"
 

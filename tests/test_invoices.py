@@ -118,7 +118,7 @@ def test_include_sweeps_everything_newest_first(instance, customer) -> None:
     }
     assert line["pricing"]["type"] == "price_details"
     assert line["discounts"] == []
-    assert line["livemode"] is False
+    assert line["livemode"] is True
     # the lines sub-list pages the same rows
     sub = call(instance, "GET", f"/v1/invoices/{body['id']}/lines")
     assert [row["id"] for row in sub["body"]["data"]] == [

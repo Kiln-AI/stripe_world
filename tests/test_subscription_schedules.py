@@ -65,7 +65,7 @@ def test_the_created_body_constants(instance: seahaven.Instance) -> None:
     )["body"]
     assert body["object"] == "subscription_schedule"
     assert body["id"].startswith("sub_sched_")
-    assert body["livemode"] is False
+    assert body["livemode"] is True
     assert body["customer"] == cus
     assert body["end_behavior"] == "release"  # the default
     assert body["application"] is None

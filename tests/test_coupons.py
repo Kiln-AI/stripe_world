@@ -35,7 +35,7 @@ def test_percent_coupon_defaults(instance: seahaven.Instance) -> None:
     assert body["times_redeemed"] == 0
     assert body["valid"] is True
     assert body["redeem_by"] is None
-    assert body["livemode"] is False
+    assert body["livemode"] is True
     # The minted id: eight mixed-case alphanumerics, unprefixed (recorded:
     # `hbzb1NEf`).
     assert len(body["id"]) == 8

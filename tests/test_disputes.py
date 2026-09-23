@@ -70,7 +70,7 @@ def test_the_chargeback_card_creates_the_dispute_inside_the_charge(
     assert dp["charge"] == pi["latest_charge"]
     assert dp["payment_intent"] == pi["id"]
     assert dp["is_charge_refundable"] is False
-    assert dp["livemode"] is False
+    assert dp["livemode"] is True
     assert dp["metadata"] == {}
     assert dp["enhanced_eligibility_types"] == []
     # the chargeback's ledger withdrawal, derived from the ledger (Phase 11)

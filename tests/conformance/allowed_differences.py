@@ -69,6 +69,10 @@ def _both_false(recorded: Any, replayed: Any) -> bool:
     return recorded is False and replayed is False
 
 
+def _both_boolean(recorded: Any, replayed: Any) -> bool:
+    return isinstance(recorded, bool) and isinstance(replayed, bool)
+
+
 def _both_cus_ids(recorded: Any, replayed: Any) -> bool:
     """A `customer`-shaped reference field: both sides are freshly minted ids
     of the same shape, never equal — the `**.id` rule on the field it lands
@@ -537,9 +541,12 @@ def _invoice_number_pair(recorded: Any, replayed: Any) -> bool:
     )
 
 
-#: The Invoice Item 404: `No such Invoice Item: 'ii_…'(livemode=false)` —
+#: The Invoice Item 404: `No such Invoice Item: 'ii_…'(livemode=false|true)` —
 #: the id-only rule in Stripe's own odd spelling (recorded, cassette 13).
-_NO_SUCH_INVOICE_ITEM = re.compile(r"^No such Invoice Item: 'ii_[A-Za-z0-9]+'\(livemode=false\)$")
+#: The mode string is derived from the instance (architecture §6.2).
+_NO_SUCH_INVOICE_ITEM = re.compile(
+    r"^No such Invoice Item: 'ii_[A-Za-z0-9]+'\(livemode=(?:false|true)\)$"
+)
 
 
 def _no_such_invoice_item_modulo_id(recorded: Any, replayed: Any) -> bool:
@@ -593,10 +600,10 @@ ALLOWED_DIFFERENCES: list[AllowedDifference] = [
     ),
     AllowedDifference(
         "**.livemode",
-        "Both sides are always false — recorded from test mode, emitted as a "
-        "constant here. Predicate mode: if either side is ever anything but "
-        "false, that is a real divergence, not a permitted difference.",
-        predicate=_both_false,
+        "Recorded from test mode (false); this world defaults to live mode "
+        "(true) per functional spec §4.7. Both are booleans — the difference "
+        "is expected and correct.",
+        predicate=_both_boolean,
     ),
     AllowedDifference(
         "**.request_log_url",

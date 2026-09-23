@@ -134,7 +134,7 @@ FIELDS = FieldMap(
     timestamps=frozenset({"created", "updated"}),
     json_columns=frozenset({"images", "marketing_features", "metadata", "package_dimensions"}),
     booleans=frozenset({"active", "shippable"}),
-    constants={"livemode": False},
+    constants={},
     always_present=always_present,
     omit_when_none=omit_when_none,
 )

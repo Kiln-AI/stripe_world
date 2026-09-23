@@ -196,7 +196,6 @@ FIELDS = FieldMap(
     ),
     booleans=frozenset({"captured", "disputed", "paid", "refunded"}),
     constants={
-        "livemode": False,
         "application": None,
         "application_fee": None,
         "application_fee_amount": None,

@@ -83,7 +83,7 @@ def test_create_draws_down_and_sweeps(instance: seahaven.Instance) -> None:
     assert payout["currency"] == "usd"
     assert payout["description"] == "rent"
     assert payout["statement_descriptor"] == "RENT"
-    assert payout["livemode"] is False
+    assert payout["livemode"] is True
     assert payout["metadata"] == {}
     assert payout["failure_code"] is None
     assert payout["original_payout"] is None

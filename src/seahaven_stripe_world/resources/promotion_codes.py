@@ -140,7 +140,7 @@ FIELDS = FieldMap(
     timestamps=frozenset({"created", "expires_at"}),
     json_columns=frozenset({"metadata", "restrictions"}),
     booleans=frozenset({"active"}),
-    constants={"livemode": False, "customer_account": None},
+    constants={"customer_account": None},
     # The `coupon` column is not a wire field at the pinned version: it is
     # dressed into the `promotion` wrapper, and `expand[]=promotion.coupon`
     # inflates the id inside it (the generic resolver walks the embedded

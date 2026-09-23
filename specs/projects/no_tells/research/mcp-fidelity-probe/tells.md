@@ -39,11 +39,11 @@ discover later.
 | TS-24 | `stripe_api_write` description text doesn't match | tool-surface | trivial | open |
 | TS-25 | `stripe_api_details` description text doesn't match | tool-surface | trivial | open |
 | AS-01 | Customer ID suffix is 24 chars; real is 14. `prod_` and `si_` also 14 (Format A) | account-stats | trivial | open |
-| AS-03 | Account object missing `controller`, `external_accounts`, `requirements`, `future_requirements`, `tos_acceptance` | account-stats | trivial | open |
-| AS-04 | Account `capabilities` should be `{}` on a fresh sandbox, not `{"card_payments":"active",...}` | account-stats | trivial | open |
-| AS-05 | Account `charges_enabled`/`payouts_enabled` should be `false`; ours are `true` | account-stats | trivial | open |
-| AS-06 | `business_profile` missing 5 null sub-fields; `name` is `"Test Business"` but should be `null` | account-stats | trivial | open |
-| AS-08 | Account ID `acct_1SWTestAccount00` is a human-readable constant; real IDs are 16 random alphanumerics | account-stats | trivial | open |
+| AS-03 | Account object missing `controller`, `external_accounts`, `requirements`, `future_requirements`, `tos_acceptance` | account-stats | trivial | closed |
+| AS-04 | Account `capabilities` should be `{}` on a fresh sandbox, not `{"card_payments":"active",...}` | account-stats | trivial | closed |
+| AS-05 | Account `charges_enabled`/`payouts_enabled` should be `false`; ours are `true` | account-stats | trivial | closed |
+| AS-06 | `business_profile` missing 5 null sub-fields; `name` is `"Test Business"` but should be `null` | account-stats | trivial | closed |
+| AS-08 | Account ID `acct_1SWTestAccount00` is a human-readable constant; real IDs are 16 random alphanumerics | account-stats | trivial | closed |
 | TS-10, TS-11, EC-01 | Success response is bare JSON body; ours wraps in `{status, body, headers}` | tool-surface, envelope | moderate | open |
 | TS-12, EC-02 | Errors are MCP tool errors (plain text); ours returns structured `{status, body}` with `error` object | tool-surface, envelope | moderate | open |
 | TS-15, DT-14 | Details response has 12 keys (`id`, `tags`, `keywords`, `required_permissions`, ...); ours has 6 with `operation_id` not `id` | tool-surface, discovery | moderate | open |
@@ -69,7 +69,7 @@ discover later.
 | EC-08, DT-21 | `openapi_spec_version` is `"2026-08-26.preview"`; ours says `"2026-08-26.dahlia"` | envelope, discovery | trivial | declared |
 | AR-03 | Integer-for-string params (e.g. `name: 12345`) silently coerced; ours rejects with 400 | absence-refusal | trivial | open |
 | DT-05 | Default search result count is 5 (configurable 1-20); ours is fixed at 10 | discovery | trivial | open |
-| AS-07 | Account object has `metadata: {}`; real account response has no `metadata` key | account-stats | trivial | open |
+| AS-07 | Account object has `metadata: {}`; real account response has no `metadata` key | account-stats | trivial | closed |
 | AS-09 | Account `created` is `1704067200` (midnight 2024-01-01); conspicuously round | account-stats | trivial | open |
 | AS-11 | `customer.invoice_prefix` should be 8 chars from `[A-Z0-9]`; format unverified in our code | account-stats | trivial | open |
 | AS-12 | `customer.customer_account` field missing (always `null` on standard accounts) | account-stats | trivial | open |
@@ -104,7 +104,7 @@ discover later.
 | AS-17 | `charge.outcome.risk_score` varies per charge on real Stripe (0-99); ours may be fixed | account-stats | trivial | open |
 | AS-18 | `charge.payment_method_details.card` has 20+ sub-fields; ours has fewer | account-stats | trivial | open |
 | AS-19 | `charge.receipt_url` absent or differs from real `pay.stripe.com/receipts/...` URL | account-stats | trivial | open |
-| AS-20 | `account.settings.payouts.schedule.delay_days` is 7 (CA sandbox); ours is 2 | account-stats | trivial | open |
+| AS-20 | `account.settings.payouts.schedule.delay_days` is 7 (CA sandbox); ours is 2 | account-stats | trivial | closed |
 | AS-21 | `invoice.account_country`/`account_name` must be derived from account object, not hardcoded | account-stats | trivial | open |
 | AS-26 | `payment_intent.payment_details` field missing on subscription-created PIs | account-stats | trivial | open |
 | AS-28 | `charge.radar_options` field missing (empty `{}`) | account-stats | trivial | open |
