@@ -67,7 +67,8 @@ def test_the_succeeded_charge_body(instance: seahaven.Instance) -> None:
     assert ch["receipt_url"] == f"https://pay.stripe.com/receipts/payment/{ch['id']}"
     # absent-by-recording: refunds is expand-only at this version
     assert "refunds" not in ch
-    assert "radar_options" not in ch
+    # radar_options: the spec types it as {"type": "null"}, so it emits null
+    assert ch["radar_options"] is None
     # the outcome of an approval
     assert ch["outcome"] == {
         "advice_code": None,

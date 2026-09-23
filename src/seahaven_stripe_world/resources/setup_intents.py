@@ -258,6 +258,7 @@ FIELDS = FieldMap(
     constants={
         "allowed_payment_method_types": None,
         "application": None,
+        "attach_to_self": None,
         "customer_account": None,
         "excluded_payment_method_types": None,
         # The recorded value is `{"enabled": false}` where the pinned spec

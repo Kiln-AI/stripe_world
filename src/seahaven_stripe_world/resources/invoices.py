@@ -41,7 +41,7 @@ from seahaven_stripe_world.dispatch.resource import (
 )
 from seahaven_stripe_world.dispatch.response import ApiResponse, Request
 from seahaven_stripe_world.resources import _lookup
-from seahaven_stripe_world.serialize.fields import FieldMap, presence_sets, serializer_for
+from seahaven_stripe_world.serialize.fields import OMIT, FieldMap, presence_sets, serializer_for
 from seahaven_stripe_world.stripe_errors import invalid_request
 
 __all__ = [
@@ -429,6 +429,7 @@ FIELDS = FieldMap(
     constants={
         "application": None,
         "account_tax_ids": None,
+        "confirmation_secret": None,
         "automatic_tax": {
             "disabled_reason": None,
             "enabled": False,
@@ -449,6 +450,9 @@ FIELDS = FieldMap(
         "shipping_cost": None,
         "shipping_details": None,
         "test_clock": None,
+        "threshold_reason": None,
+        # Expand-only inline list.
+        "payments": OMIT,
     },
     always_present=always_present,
     omit_when_none=omit_when_none,

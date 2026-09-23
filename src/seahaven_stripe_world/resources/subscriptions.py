@@ -462,6 +462,7 @@ FIELDS = FieldMap(
         "default_source": None,
         "managed_payments": None,
         "on_behalf_of": None,
+        "presentment_details": None,
         "test_clock": None,
         "transfer_data": None,
     },

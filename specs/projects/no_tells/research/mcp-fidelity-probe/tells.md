@@ -72,13 +72,13 @@ discover later.
 | AS-07 | Account object has `metadata: {}`; real account response has no `metadata` key | account-stats | trivial | closed |
 | AS-09 | Account `created` is `1704067200` (midnight 2024-01-01); conspicuously round | account-stats | trivial | open |
 | AS-11 | `customer.invoice_prefix` should be 8 chars from `[A-Z0-9]`; format unverified in our code | account-stats | trivial | open |
-| AS-12 | `customer.customer_account` field missing (always `null` on standard accounts) | account-stats | trivial | open |
-| AS-13 | `customer.test_clock` and `subscription.test_clock` fields missing (always `null`) | account-stats | trivial | open |
+| AS-12 | `customer.customer_account` field missing (always `null` on standard accounts) | account-stats | trivial | closed |
+| AS-13 | `customer.test_clock` and `subscription.test_clock` fields missing (always `null`) | account-stats | trivial | closed |
 | AS-14 | `product.attributes` (`[]`) and `product.type` (`"service"`) fields missing | account-stats | trivial | declared |
-| AS-22 | `subscription.billing_mode` field missing (`{"type":"flexible",...}` or `{"type":"classic"}`) | account-stats | trivial | open |
-| AS-23 | `subscription.trial_settings` field missing | account-stats | trivial | open |
-| AS-24 | `subscription.cancellation_details` field missing (null sub-fields) | account-stats | trivial | open |
-| AS-25 | `subscription.managed_payments` and `payment_intent.managed_payments` missing (`{"enabled":false}`) | account-stats | trivial | open |
+| AS-22 | `subscription.billing_mode` field missing (`{"type":"flexible",...}` or `{"type":"classic"}`) | account-stats | trivial | closed |
+| AS-23 | `subscription.trial_settings` field missing | account-stats | trivial | closed |
+| AS-24 | `subscription.cancellation_details` field missing (null sub-fields) | account-stats | trivial | closed |
+| AS-25 | `subscription.managed_payments` and `payment_intent.managed_payments` missing (`{"enabled":false}`) | account-stats | trivial | closed |
 | AS-27 | Structured IDs encode creation time; ours have no time correlation | account-stats | trivial | closed |
 | EC-05, DT-18 | Error messages carry MCP guidance suffix ("Use stripe_api_details..."); ours don't | envelope, discovery | moderate | open |
 | TS-19 | `manage_stripe_accounts` tool missing (returns reconsent URL) | tool-surface | moderate | closed |
@@ -97,7 +97,7 @@ discover later.
 | ID | Tell | Lane(s) | Cost | Disposition |
 |---|---|---|---|---|
 | AR-04 | 404 message missing trailing help text ("If you are trying to list objects...") | absence-refusal | trivial | open |
-| EC-09 | Deleted customer stub missing `cache_context_key` field | envelope | trivial | open |
+| EC-09 | Deleted customer stub missing `cache_context_key` field | envelope | trivial | declared |
 | EC-10 | JSON field ordering may differ between our serialization and real API | envelope | trivial | open |
 | AS-15 | `product.tax_details` field missing (always `null`) | account-stats | trivial | declared |
 | AS-16 | `balance_transaction.fee_details` structure: must include all 5 sub-fields exactly | account-stats | trivial | open |
@@ -105,9 +105,9 @@ discover later.
 | AS-18 | `charge.payment_method_details.card` has 20+ sub-fields; ours has fewer | account-stats | trivial | open |
 | AS-19 | `charge.receipt_url` absent or differs from real `pay.stripe.com/receipts/...` URL | account-stats | trivial | open |
 | AS-20 | `account.settings.payouts.schedule.delay_days` is 7 (CA sandbox); ours is 2 | account-stats | trivial | closed |
-| AS-21 | `invoice.account_country`/`account_name` must be derived from account object, not hardcoded | account-stats | trivial | open |
-| AS-26 | `payment_intent.payment_details` field missing on subscription-created PIs | account-stats | trivial | open |
-| AS-28 | `charge.radar_options` field missing (empty `{}`) | account-stats | trivial | open |
-| AS-29 | `refund.customer_account` field missing (always `null`) | account-stats | trivial | open |
-| AS-30 | `refund.destination_details` card structure missing | account-stats | trivial | open |
-| AS-31 | `setup_intent.allowed_payment_method_types` and `excluded_payment_method_types` missing | account-stats | trivial | open |
+| AS-21 | `invoice.account_country`/`account_name` must be derived from account object, not hardcoded | account-stats | trivial | closed |
+| AS-26 | `payment_intent.payment_details` field missing on subscription-created PIs | account-stats | trivial | closed |
+| AS-28 | `charge.radar_options` field missing (empty `{}`) | account-stats | trivial | closed |
+| AS-29 | `refund.customer_account` field missing (always `null`) | account-stats | trivial | closed |
+| AS-30 | `refund.destination_details` card structure missing | account-stats | trivial | closed |
+| AS-31 | `setup_intent.allowed_payment_method_types` and `excluded_payment_method_types` missing | account-stats | trivial | closed |

@@ -291,6 +291,11 @@ FIELDS = FieldMap(
         "review": None,
         "transfer_data": None,
         "transfer_group": None,
+        # Phase 9 serialization sweep: fields present in the pruned spec
+        # but never serialized until now.
+        "hooks": None,
+        "payment_details": None,
+        "presentment_details": None,
     },
     always_present=always_present,
     omit_when_none=omit_when_none,

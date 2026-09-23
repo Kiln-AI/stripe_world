@@ -78,7 +78,12 @@ def presence_sets(object_name: str) -> tuple[frozenset[str], frozenset[str]]:
     schema = spec_schemas()[object_name]
     properties = schema.get("properties", {})
     required = set(schema.get("required", ()))
-    always = required | {name for name, prop in properties.items() if prop.get("nullable")}
+    always = required | {
+        name
+        for name, prop in properties.items()
+        # Explicitly nullable, or typed as null (its only value *is* null).
+        if prop.get("nullable") or prop.get("type") == "null"
+    }
     return frozenset(always), frozenset(properties) - always
 
 

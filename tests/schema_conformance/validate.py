@@ -171,6 +171,10 @@ def _member_label(member: dict[str, Any]) -> str:
 def _allows_null(rule: dict[str, Any]) -> bool:
     if rule.get("nul"):
         return True
+    # A field whose only type is null (e.g. radar_options: {"type": "null"})
+    # accepts null by definition — its sole legal value.
+    if rule.get("t") == "null":
+        return True
     return any(member.get("t") == "null" or member.get("nul") for member in rule.get("any", ()))
 
 

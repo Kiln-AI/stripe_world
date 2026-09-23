@@ -131,8 +131,7 @@ FIELDS = FieldMap(
         "application_fee": None,
         "application_fee_amount": None,
         "payout_method": None,
-        # `trace_id` is neither required nor nullable — omitted rather than
-        # nulled, and no bank ever supplies one here.
+        "trace_id": None,
     },
     always_present=always_present,
     omit_when_none=omit_when_none,

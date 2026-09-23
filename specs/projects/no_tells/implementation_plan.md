@@ -73,7 +73,7 @@ A phase is not done until its register rows have dispositions and the full check
 - [x] **Phase 8: Discovery.** The pruner's second output and `discovery_index.json`; `intent` +
       `resource` search with the scoring function; the twelve-key details document; `{id}`
       placeholder normalisation in discovery output only.
-- [ ] **Phase 9: Serialization completeness.** The 20 already-in-schema fields; the pruner fix that
+- [x] **Phase 9: Serialization completeness.** The 20 already-in-schema fields; the pruner fix that
       retains schemas reachable from tool outputs so the `account` object is covered; the three
       excluded product fields with a test asserting their absence; the generated check driven by the
       probe's captured objects.

@@ -255,7 +255,10 @@ def test_stoplisted_refs_nested_in_union_members_are_recursed() -> None:
 
 def test_stoplisted_schemas_leave_the_closure() -> None:
     schemas = build(synthetic_spec()).spec3_min["components"]["schemas"]
-    for name in ("account", "transfer", "reserve_transaction", "customer_tax"):
+    # `account` is in TOOL_OUTPUT_SCHEMAS, so it re-enters via the seed pass
+    # even though it is stoplisted for reference resolution (architecture §7).
+    assert "account" in schemas
+    for name in ("transfer", "reserve_transaction", "customer_tax"):
         assert name not in schemas
 
 

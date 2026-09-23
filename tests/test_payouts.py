@@ -89,7 +89,8 @@ def test_create_draws_down_and_sweeps(instance: seahaven.Instance) -> None:
     assert payout["failure_code"] is None
     assert payout["original_payout"] is None
     assert payout["reversed_by"] is None
-    assert "trace_id" not in payout
+    # trace_id: nullable in the spec, so always-present as null
+    assert payout["trace_id"] is None
     assert payout["balance_transaction"].startswith("txn_")
     assert balance_available(instance) == available - 5000
     swept = call(instance, "GET", "/v1/balance_transactions", {"payout": payout["id"]})

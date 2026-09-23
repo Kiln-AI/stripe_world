@@ -893,9 +893,18 @@ ALLOWED_DIFFERENCES: list[AllowedDifference] = [
     AllowedDifference(
         "**.radar_options",
         "Typed literally `null` by the pinned spec but emitted `{}` live; "
-        "omitted here, where the spec-legal value would be null and null is "
-        "indistinguishable from absent for an empty object.",
-        predicate=lambda recorded, replayed: recorded == {} and replayed is None,
+        "we emit null (the spec-legal value). Some recordings omit the "
+        "field entirely — null vs absent for a null-typed field is harmless.",
+        predicate=lambda recorded, replayed: (
+            (recorded == {} and replayed is None) or (recorded is None and replayed is None)
+        ),
+    ),
+    AllowedDifference(
+        "**.confirmation_secret",
+        "Nullable per the spec; absent from recordings made before the "
+        "field existed. We emit null — absent vs null for a nullable "
+        "field is harmless (Phase 9, serialization completeness).",
+        predicate=lambda recorded, replayed: recorded is None and replayed is None,
     ),
     # --- network and Radar state this world does not model (Phase 8) ---
     AllowedDifference(

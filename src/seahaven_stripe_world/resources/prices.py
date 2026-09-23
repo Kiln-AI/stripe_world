@@ -25,7 +25,7 @@ from seahaven_stripe_world.dispatch.resource import (
     register,
 )
 from seahaven_stripe_world.resources import _lookup, events
-from seahaven_stripe_world.serialize.fields import FieldMap, presence_sets, serializer_for
+from seahaven_stripe_world.serialize.fields import OMIT, FieldMap, presence_sets, serializer_for
 from seahaven_stripe_world.stripe_errors import invalid_request
 
 if TYPE_CHECKING:
@@ -215,7 +215,12 @@ FIELDS = FieldMap(
     json_columns=frozenset({"custom_unit_amount", "metadata", "transform_quantity"}),
     derived={"recurring": _recurring_body},
     booleans=frozenset({"active"}),
-    constants={},
+    constants={
+        # Accepted and stored but never serialized at the pinned version:
+        # no recorded response body carries these fields.
+        "currency_options": OMIT,
+        "tiers": OMIT,
+    },
     always_present=always_present,
     omit_when_none=omit_when_none,
 )

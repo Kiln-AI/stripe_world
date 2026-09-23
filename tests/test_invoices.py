@@ -88,7 +88,8 @@ def test_the_default_create_excludes_pending_items(instance, customer) -> None:
     assert body["invoice_pdf"] is None
     assert "payments" not in body
     assert "threshold_reason" not in body
-    assert "confirmation_secret" not in body
+    # confirmation_secret: nullable in the spec, so always-present as null
+    assert body["confirmation_secret"] is None
 
 
 def test_include_sweeps_everything_newest_first(instance, customer) -> None:

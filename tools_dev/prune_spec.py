@@ -106,6 +106,13 @@ CUT_CUSTOMER_SUBRESOURCES = frozenset(
     }
 )
 
+# Schemas reachable from tool outputs but not from routed operations
+# (architecture §7, functional spec §11.1). Seeded into the closure after
+# the main walk so the schema-conformance validator can check them, without
+# removing them from STOPLIST_NAMES (which would let every on_behalf_of
+# union inflate the closure).
+TOOL_OUTPUT_SCHEMAS = frozenset({"account"})
+
 # Schemas the closure walker never enters, per the rulings in
 # specs/.../api-surface-and-object-graph/scope-boundary-edges.md. The list is
 # representative of that document's summary table rather than exhaustive; the
@@ -115,7 +122,10 @@ CUT_CUSTOMER_SUBRESOURCES = frozenset(
 # does not route.
 STOPLIST_NAMES = frozenset(
     {
-        # Connect.
+        # Connect (account stays in the stoplist for *reference* resolution —
+        # other schemas' $ref to it are still nulled — but gets seeded
+        # separately via TOOL_OUTPUT_SCHEMAS so its own schema enters the
+        # closure for schema-conformance validation).
         "account",
         "application",
         "transfer",
@@ -834,10 +844,13 @@ def _build_schema_rules(bodies: dict[str, Any]) -> dict[str, Any]:
                 )
                 raise GenerationError(msg)
             table[obj["enum"][0]] = name
-    if bodies and not by_object:
-        # An empty closure is a degenerate spec (a route set with no response
-        # schemas at all); a non-empty closure with no discriminated object
-        # anywhere means a spec bump nuked every `object` discriminator.
+    # Ignore TOOL_OUTPUT_SCHEMAS when checking for a degenerate closure:
+    # they may enter without an object discriminator (they are not routed
+    # responses — they are tool return values seeded separately).
+    non_seed_bodies = {n for n in bodies if n not in TOOL_OUTPUT_SCHEMAS}
+    if non_seed_bodies and not by_object:
+        # A non-empty closure with no discriminated object anywhere means a
+        # spec bump nuked every `object` discriminator.
         msg = "no discriminated object schemas found in the pruned closure"
         raise GenerationError(msg)
 
@@ -1042,6 +1055,31 @@ def build_artifacts(
         for next_name in sorted(found):
             if next_name not in closure:
                 todo.append(next_name)
+
+    # Second pass: seed tool-output schemas (architecture §7). Each seed
+    # bypasses the stoplist for itself but honours it for its refs, so the
+    # account schema enters without inflating every on_behalf_of union.
+    for seed in sorted(TOOL_OUTPUT_SCHEMAS):
+        if seed in closure or seed not in schemas:
+            continue
+        closure.add(seed)
+        body = _strip_all_markup(_drop_rails(_apply_stoplist(schemas[seed]), rails))
+        bodies[seed] = body
+        found_seed: set[str] = set()
+        _harvest_refs(body, found_seed)
+        extra = sorted(name for name in found_seed if name not in closure)
+        while extra:
+            name = extra.pop()
+            if name in closure or name not in schemas or _stoplisted(name):
+                continue
+            closure.add(name)
+            body = _strip_all_markup(_drop_rails(_apply_stoplist(schemas[name]), rails))
+            bodies[name] = body
+            found2: set[str] = set()
+            _harvest_refs(body, found2)
+            for next_name in sorted(found2):
+                if next_name not in closure:
+                    extra.append(next_name)
 
     if len(closure) >= SCHEMA_BUDGET:
         msg = f"closure reached {len(closure)} schemas, over the {SCHEMA_BUDGET} budget"
