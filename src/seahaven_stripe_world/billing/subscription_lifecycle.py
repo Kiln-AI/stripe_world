@@ -278,7 +278,7 @@ def _resolve_discounts(
             # Code from the billing engine's error table; the exact message
             # spelling is unrecorded (Phase 12 did not probe it).
             raise invalid_request(f"Coupon {coupon['id']} is expired.", code="coupon_expired")
-        discount_id = _ids.stripe_id(ctx, "di_")
+        discount_id = _ids.stripe_id(ctx, "di_", timestamp=now)
         percent = Fraction(coupon["percent_off"]) if coupon["percent_off"] else None
         specs.append(
             DiscountSpec(
@@ -406,7 +406,7 @@ def create_subscription(ctx: seahaven.Ctx, params: dict[str, Any]) -> dict[str, 
     tax_specs = _tax_specs(ctx, params.get("default_tax_rates", []))
 
     # The row, with a provisional status the invoice outcome settles.
-    sub_id = _ids.stripe_id(ctx, "sub_")
+    sub_id = _ids.stripe_id(ctx, "sub_", timestamp=now)
     cols: dict[str, Any] = {
         "id": sub_id,
         "x_seq": _seq.next_seq(ctx, "subscriptions"),
@@ -458,7 +458,7 @@ def create_subscription(ctx: seahaven.Ctx, params: dict[str, Any]) -> dict[str, 
             ctx,
             "subscription_items",
             {
-                "id": _ids.stripe_id(ctx, "si_"),
+                "id": _ids.stripe_id(ctx, "si_", timestamp=now),
                 "x_seq": _seq.next_seq(ctx, "subscription_items"),
                 "created": now,
                 "current_period_start": period_start,
@@ -1529,7 +1529,7 @@ def _apply_items_update(
             ctx,
             "subscription_items",
             {
-                "id": _ids.stripe_id(ctx, "si_"),
+                "id": _ids.stripe_id(ctx, "si_", timestamp=now),
                 "x_seq": _seq.next_seq(ctx, "subscription_items"),
                 "created": now,
                 "current_period_start": now,
@@ -2043,14 +2043,15 @@ def _mint_resume_setup_intent(ctx: seahaven.Ctx, row: Mapping[str, Any]) -> str:
     awaiting a method (its `payment_method_types` are this world's
     `["card"]` — the recording's `["card", "klarna", "link"]` is the
     account's dashboard configuration, allow-listed)."""
-    seti_id = _ids.stripe_id(ctx, "seti_")
+    seti_created = ctx.clock.iso()
+    seti_id = _ids.stripe_id(ctx, "seti_", timestamp=seti_created)
     _insert_row(
         ctx,
         "setup_intents",
         {
             "id": seti_id,
             "x_seq": _seq.next_seq(ctx, "setup_intents"),
-            "created": ctx.clock.iso(),
+            "created": seti_created,
             "client_secret": payment_intents._mint_client_secret(ctx, seti_id),
             "customer": row["customer"],
             "status": "requires_payment_method",

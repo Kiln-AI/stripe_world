@@ -162,8 +162,8 @@ def create(ctx: seahaven.Ctx, req: Request) -> dict[str, Any]:
     if req.metadata is not None:
         metadata_text = _json.dumps(dict(req.metadata.apply({})))
 
-    cbt_id = _ids.stripe_id(ctx, "cbtxn_")
     now = ctx.clock.iso()
+    cbt_id = _ids.stripe_id(ctx, "cbtxn_", timestamp=now)
     ctx.db.execute(
         "INSERT INTO customer_balance_transactions"
         " (id, x_seq, created, amount, currency, customer, description,"

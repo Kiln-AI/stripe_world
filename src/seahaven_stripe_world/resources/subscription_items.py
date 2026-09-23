@@ -312,7 +312,7 @@ def create(ctx: seahaven.Ctx, req: Request) -> dict[str, Any]:
     proration_date = params.pop("proration_date", None)
     params.pop("payment_behavior", None)
     cols: dict[str, Any] = {
-        "id": _ids.stripe_id(ctx, "si_"),
+        "id": _ids.stripe_id(ctx, "si_", timestamp=now),
         "x_seq": _seq.next_seq(ctx, "subscription_items"),
         "created": now,
         "current_period_start": now,

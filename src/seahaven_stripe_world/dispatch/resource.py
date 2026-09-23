@@ -567,14 +567,15 @@ def create(ctx: seahaven.Ctx, req: Request) -> dict[str, Any]:
     exactly what a later retrieve answers, defaults included.
     """
     spec = _spec_of(req)
+    created = ctx.clock.iso()
     cols: dict[str, Any] = {
         "id": (
-            _ids.stripe_id(ctx, spec.id_prefix)
+            _ids.stripe_id(ctx, spec.id_prefix, timestamp=created)
             if spec.mint_id is None
             else spec.mint_id(ctx, req.params.get("id"))
         ),
         "x_seq": _seq.next_seq(ctx, spec.table),
-        "created": ctx.clock.iso(),
+        "created": created,
     }
     cols.update({column: _store(value) for column, value in req.params.items()})
     if req.metadata is not None:

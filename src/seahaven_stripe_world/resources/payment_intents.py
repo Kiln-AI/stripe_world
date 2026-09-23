@@ -708,11 +708,12 @@ def create(ctx: seahaven.Ctx, req: Request) -> dict[str, Any] | ApiResponse:
         )
     should_confirm = params.pop("confirm", None) is True
     params.pop("off_session", None)
-    id_ = _ids.stripe_id(ctx, "pi_")
+    pi_created = ctx.clock.iso()
+    id_ = _ids.stripe_id(ctx, "pi_", timestamp=pi_created)
     cols: dict[str, Any] = {
         "id": id_,
         "x_seq": _seq.next_seq(ctx, "payment_intents"),
-        "created": ctx.clock.iso(),
+        "created": pi_created,
         "client_secret": _mint_client_secret(ctx, id_),
         # Recorded: `automatic_async` is the default at the pinned version.
         "capture_method": "automatic_async",

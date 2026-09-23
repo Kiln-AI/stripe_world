@@ -47,7 +47,7 @@ A phase is not done until its register rows have dispositions and the full check
       `ResourceSpec` constants and inline literals and add it centrally in `serialize/fields.py`
       behind the four-object carve-out; derive the embedded `livemode=` error string. **Write the
       source-grep guard test before the sweep, not after.** The widest edit in the project.
-- [ ] **Phase 3: Ids.** The two measured formats, the per-prefix table, the account fragment from
+- [x] **Phase 3: Ids.** The two measured formats, the per-prefix table, the account fragment from
       Phase 2's state, the timestamp group taken from the stamped time rather than "now", the
       version digit as a defaulted argument. Replaces the blanket 24-char assertion.
 

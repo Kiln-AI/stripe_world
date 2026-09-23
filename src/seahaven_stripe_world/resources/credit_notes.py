@@ -326,7 +326,7 @@ def _build_line_items(
         result: list[dict[str, Any]] = []
         for line_spec in lines_param:
             line_type = line_spec["type"]
-            cnli_id = _ids.stripe_id(ctx, "cnli_")
+            cnli_id = _ids.stripe_id(ctx, "cnli_", timestamp=ctx.clock.iso())
             if line_type == "invoice_line_item" and "invoice_line_item" in line_spec:
                 # Find the referenced invoice line
                 inv_line = None
@@ -387,7 +387,7 @@ def _build_line_items(
         return result
 
     # Default: one custom_line_item for the whole amount
-    cnli_id = _ids.stripe_id(ctx, "cnli_")
+    cnli_id = _ids.stripe_id(ctx, "cnli_", timestamp=ctx.clock.iso())
     return [
         {
             "id": cnli_id,
@@ -533,7 +533,7 @@ def create(ctx: seahaven.Ctx, req: Request) -> dict[str, Any]:
     computed = _compute_credit_note(ctx, params=params, invoice_row=invoice)
 
     now = ctx.clock.iso()
-    cn_id = _ids.stripe_id(ctx, "cn_")
+    cn_id = _ids.stripe_id(ctx, "cn_", timestamp=now)
     number = _credit_note_number(ctx, invoice["id"])
     effective_at = params.get("effective_at", now)
     metadata_text = "{}"
@@ -551,7 +551,7 @@ def create(ctx: seahaven.Ctx, req: Request) -> dict[str, Any]:
             ctx, "customers", "customer", invoice["customer"], param="customer"
         )
         ending_balance = customer["balance"] - credit_amount
-        cbt_id = _ids.stripe_id(ctx, "cbtxn_")
+        cbt_id = _ids.stripe_id(ctx, "cbtxn_", timestamp=now)
         # Insert with credit_note=NULL first; the credit note row does not
         # exist yet (mutual FK pair -- data_model §3.11).  The back-link
         # UPDATE below fills it in after the credit note is inserted.
@@ -739,7 +739,7 @@ def void(ctx: seahaven.Ctx, req: Request) -> dict[str, Any]:
                 ctx, "customers", "customer", original_cbt["customer"], param="customer"
             )
             ending_balance = customer["balance"] + reversal_amount
-            reversal_id = _ids.stripe_id(ctx, "cbtxn_")
+            reversal_id = _ids.stripe_id(ctx, "cbtxn_", timestamp=now)
             ctx.db.execute(
                 "INSERT INTO customer_balance_transactions"
                 " (id, x_seq, created, amount, credit_note, currency, customer,"

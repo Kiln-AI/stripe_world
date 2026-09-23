@@ -38,7 +38,7 @@ discover later.
 | TS-09 | `stripe_api_search` description text doesn't match (keyword search vs intent+resource) | tool-surface | trivial | open |
 | TS-24 | `stripe_api_write` description text doesn't match | tool-surface | trivial | open |
 | TS-25 | `stripe_api_details` description text doesn't match | tool-surface | trivial | open |
-| AS-01 | Customer ID suffix is 24 chars; real is 14. `prod_` and `si_` also 14 (Format A) | account-stats | trivial | open |
+| AS-01 | Customer ID suffix is 24 chars; real is 14. `prod_` and `si_` also 14 (Format A) | account-stats | trivial | closed |
 | AS-03 | Account object missing `controller`, `external_accounts`, `requirements`, `future_requirements`, `tos_acceptance` | account-stats | trivial | closed |
 | AS-04 | Account `capabilities` should be `{}` on a fresh sandbox, not `{"card_payments":"active",...}` | account-stats | trivial | closed |
 | AS-05 | Account `charges_enabled`/`payouts_enabled` should be `false`; ours are `true` | account-stats | trivial | closed |
@@ -54,7 +54,7 @@ discover later.
 | TS-03 | `list_available_accounts_or_orgs` missing; it gates every other tool (provides `stripe_context`/`livemode`) | tool-surface | moderate | open |
 | AR-01 | Out-of-scope paths with product-activation errors (Issuing, etc.) get 404 "Unrecognized"; should be permission-style error | absence-refusal | moderate | open |
 | AR-02 | Out-of-scope paths that succeed on real Stripe (Checkout, Payment Links, etc.) get 404; should be permission error | absence-refusal | moderate | open |
-| AS-02 | Structured IDs (Format B) embed a 10-char account fragment at a fixed position; ours are fully random | account-stats | moderate | open |
+| AS-02 | Structured IDs (Format B) embed a 10-char account fragment at a fixed position; ours are fully random | account-stats | moderate | closed |
 | TS-04, TS-05, TS-07, TS-26, DT-13 | Read/write/details tools use `stripe_api_operation_id` + `stripe_context` + `livemode`; ours use `method` + `path` | tool-surface, discovery | hard | open |
 | TS-01 | Tool count: real MCP has 10 tools; ours has 5 (6 missing, 1 extra) | tool-surface | hard | not-a-tell |
 | AR-05, AR-06, DT-06, DT-07, DT-08, DT-09, DT-10, DT-11, DT-12, DT-19, DT-25 | Discovery covers entire Stripe API (Issuing, Connect, Checkout, Treasury, Tax, v2, ...); ours covers only 148 ops | absence-refusal, discovery | hard | open |
@@ -79,7 +79,7 @@ discover later.
 | AS-23 | `subscription.trial_settings` field missing | account-stats | trivial | open |
 | AS-24 | `subscription.cancellation_details` field missing (null sub-fields) | account-stats | trivial | open |
 | AS-25 | `subscription.managed_payments` and `payment_intent.managed_payments` missing (`{"enabled":false}`) | account-stats | trivial | open |
-| AS-27 | Structured IDs encode creation time; ours have no time correlation | account-stats | trivial | open |
+| AS-27 | Structured IDs encode creation time; ours have no time correlation | account-stats | trivial | closed |
 | EC-05, DT-18 | Error messages carry MCP guidance suffix ("Use stripe_api_details..."); ours don't | envelope, discovery | moderate | open |
 | TS-19 | `manage_stripe_accounts` tool missing (returns reconsent URL) | tool-surface | moderate | open |
 | TS-20 | `search_stripe_documentation` tool missing (returns docs results) | tool-surface | moderate | open |

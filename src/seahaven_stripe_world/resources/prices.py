@@ -298,10 +298,11 @@ def _price_columns(
             )
         if unit_amount is not None:
             unit_amount_decimal = str(unit_amount)
+    price_created = ctx.clock.iso()
     cols: dict[str, Any] = {
-        "id": _ids.stripe_id(ctx, "price_"),
+        "id": _ids.stripe_id(ctx, "price_", timestamp=price_created),
         "x_seq": _seq.next_seq(ctx, "prices"),
-        "created": ctx.clock.iso(),
+        "created": price_created,
         "active": int(params.get("active", True)),
         "billing_scheme": billing_scheme,
         "currency": params["currency"],

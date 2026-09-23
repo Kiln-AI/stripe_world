@@ -588,7 +588,7 @@ def create(ctx: seahaven.Ctx, req: Request) -> dict[str, Any]:
         dict(req.metadata.apply({})) if req.metadata is not None else params.get("metadata", {})
     )
 
-    sched_id = _ids.stripe_id(ctx, "sub_sched_")
+    sched_id = _ids.stripe_id(ctx, "sub_sched_", timestamp=ctx.clock.iso())
     end_behavior = params.get("end_behavior", "release")
 
     default_settings = params.get("default_settings") or {}

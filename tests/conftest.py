@@ -18,6 +18,7 @@ import seahaven
 from schema_conformance import capture
 from seahaven_stripe_world.middleware.error_handler import error_handler
 from seahaven_stripe_world.middleware.stripe_envelope import stripe_envelope
+from seahaven_stripe_world.startup import ACCOUNT_ID
 from seahaven_stripe_world.world import world
 
 # The instant every fixture of this world is frozen at (`fixtures_src/generate.py`).
@@ -66,6 +67,19 @@ def probe(tmp_path: Path) -> Callable[..., seahaven.World]:
         )
         built.middleware(error_handler)
         built.middleware(stripe_envelope)
+
+        @built.instance_startup
+        def _probe_startup(ctx: seahaven.Ctx, **_kwargs: object) -> None:
+            """Set up the account state that _ids needs for Format B ids."""
+            ctx.state["account"] = {
+                "id": ACCOUNT_ID,
+                "livemode": True,
+                "name": None,
+                "country": "US",
+                "default_currency": "usd",
+                "object": {},
+            }
+
         for tool in tools:
             built.tool(tool)
         return built

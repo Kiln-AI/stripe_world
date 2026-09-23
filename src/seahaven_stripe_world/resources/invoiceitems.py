@@ -153,8 +153,8 @@ def _mint_one_off_price(
     from seahaven_stripe_world.resources import prices, products
 
     if product_id is None:
-        product_id = _ids.stripe_id(ctx, "prod_")
         now = ctx.clock.iso()
+        product_id = _ids.stripe_id(ctx, "prod_", timestamp=now)
         ctx.db.execute(
             "INSERT INTO products (id, x_seq, created, updated, active, images,"
             " marketing_features, metadata, name)"
@@ -168,14 +168,15 @@ def _mint_one_off_price(
         products._emit_created(
             ctx, _lookup.require_row(ctx, "products", "product", product_id, param="product")
         )
-    price_id = _ids.stripe_id(ctx, "price_")
+    price_created = ctx.clock.iso()
+    price_id = _ids.stripe_id(ctx, "price_", timestamp=price_created)
     ctx.db.execute(
         "INSERT INTO prices (id, x_seq, created, active, billing_scheme, currency,"
         " product, tax_behavior, type, unit_amount, unit_amount_decimal)"
         " VALUES (?, ?, ?, 1, 'per_unit', ?, ?, 'unspecified', 'one_time', ?, ?)",
         price_id,
         _seq.next_seq(ctx, "prices"),
-        ctx.clock.iso(),
+        price_created,
         currency,
         product_id,
         amount,
@@ -325,7 +326,7 @@ def insert_invoice_item(
     """Write one invoiceitem row (minting its one-off price) and emit
     `invoiceitem.created`."""
     now = ctx.clock.iso()
-    item_id = _ids.stripe_id(ctx, "ii_")
+    item_id = _ids.stripe_id(ctx, "ii_", timestamp=now)
     pricing = _pricing_body(
         ctx, amount=amount, currency=currency, name=description or "One-time item"
     )
@@ -389,7 +390,7 @@ def insert_proration_item(
     prorate-only DELETE): `parent: null` and no `proration_details` at all
     — pass `subscription_item_id=None` and no credited ids to write it."""
     now = ctx.clock.iso()
-    item_id = _ids.stripe_id(ctx, "ii_")
+    item_id = _ids.stripe_id(ctx, "ii_", timestamp=now)
     linked = subscription_item_id is not None
     credited = (
         {

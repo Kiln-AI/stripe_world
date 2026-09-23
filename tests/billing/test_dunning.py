@@ -276,7 +276,7 @@ def test_end_behavior_cancel_leaves_the_invoice_open(instance: seahaven.Instance
 def test_end_behavior_mark_unpaid(instance: seahaven.Instance) -> None:
     sub, invoice_id = _past_due_invoice(instance)
     with instance.bulk() as ctx:
-        ctx.state["account"] = {"dunning": {"end_behavior": "mark_unpaid"}}
+        ctx.state["account"]["dunning"] = {"end_behavior": "mark_unpaid"}
         for _ in range(7):
             dunning.record_failed_attempt(ctx, invoice_id, decline_code="insufficient_funds")
     assert one_row(instance, "SELECT status FROM subscriptions WHERE id = ?", sub)["status"] == (
@@ -287,7 +287,7 @@ def test_end_behavior_mark_unpaid(instance: seahaven.Instance) -> None:
 def test_end_behavior_leave_past_due(instance: seahaven.Instance) -> None:
     sub, invoice_id = _past_due_invoice(instance)
     with instance.bulk() as ctx:
-        ctx.state["account"] = {"dunning": {"end_behavior": "leave_past_due"}}
+        ctx.state["account"]["dunning"] = {"end_behavior": "leave_past_due"}
         for _ in range(7):
             dunning.record_failed_attempt(ctx, invoice_id, decline_code="insufficient_funds")
     assert one_row(instance, "SELECT status FROM subscriptions WHERE id = ?", sub)["status"] == (
@@ -302,7 +302,7 @@ def test_leave_past_due_fires_no_event(instance: seahaven.Instance) -> None:
     would be noise."""
     _sub, invoice_id = _past_due_invoice(instance)
     with instance.bulk() as ctx:
-        ctx.state["account"] = {"dunning": {"end_behavior": "leave_past_due"}}
+        ctx.state["account"]["dunning"] = {"end_behavior": "leave_past_due"}
         for _ in range(7):
             dunning.record_failed_attempt(ctx, invoice_id, decline_code="insufficient_funds")
     events = instance.inspect().rows(

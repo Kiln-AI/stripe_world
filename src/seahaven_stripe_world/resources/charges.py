@@ -386,8 +386,8 @@ def insert_charge(
     inside this call takes its ledger row immediately
     (`record_capture_ledger`); a manual hold's row lands at the capture
     transition."""
-    id_ = _ids.stripe_id(ctx, "ch_")
     created = ctx.clock.iso()
+    id_ = _ids.stripe_id(ctx, "ch_", timestamp=created, version_digit="3")
     failed = failure_code is not None
     cols = {
         "id": id_,

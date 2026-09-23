@@ -69,7 +69,7 @@ def stripe_envelope(ctx: seahaven.Ctx, call: seahaven.Call, next_: Handler) -> A
         return next_(ctx, call)
     key = call.arguments.get("idempotency_key")
     ctx.state["_request"] = {
-        "id": stripe_id(ctx, "req_"),
+        "id": stripe_id(ctx, "req_", timestamp=ctx.clock.iso()),
         "idempotency_key": key if isinstance(key, str) else None,
     }
     try:

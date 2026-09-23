@@ -145,11 +145,12 @@ _serialize = serializer_for(FIELDS)
 def _product_columns(ctx: seahaven.Ctx, params: dict[str, Any]) -> dict[str, Any]:
     """The INSERT column dict shared by the route handler and the inline
     product a price's `product_data` describes."""
+    prod_created = ctx.clock.iso()
     cols: dict[str, Any] = {
-        "id": params.get("id") or _ids.stripe_id(ctx, "prod_"),
+        "id": params.get("id") or _ids.stripe_id(ctx, "prod_", timestamp=prod_created),
         "x_seq": _seq.next_seq(ctx, "products"),
-        "created": ctx.clock.iso(),
-        "updated": ctx.clock.iso(),
+        "created": prod_created,
+        "updated": prod_created,
         "name": params["name"],
         "active": int(params.get("active", True)),
         "metadata": "{}",

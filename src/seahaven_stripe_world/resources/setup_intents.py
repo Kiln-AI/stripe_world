@@ -371,7 +371,7 @@ def _re_read(ctx: seahaven.Ctx, id_: str) -> dict[str, Any]:
 def _mint_attempt(ctx: seahaven.Ctx) -> str:
     """The `setatt_…` stub every confirm attempt mints (recorded); the
     object behind it is out of scope and never resolves."""
-    return _ids.stripe_id(ctx, "setatt_")
+    return _ids.stripe_id(ctx, "setatt_", timestamp=ctx.clock.iso())
 
 
 def _confirm(
@@ -543,11 +543,12 @@ def create(ctx: seahaven.Ctx, req: Request) -> dict[str, Any] | ApiResponse:
         _guard_ownership(ctx, pm_row, params.get("customer"), body=None)
     should_confirm = params.pop("confirm", None) is True
     params.pop("usage", None)  # the dead parameter (probed, Phase 10)
-    id_ = _ids.stripe_id(ctx, "seti_")
+    seti_created = ctx.clock.iso()
+    id_ = _ids.stripe_id(ctx, "seti_", timestamp=seti_created)
     cols: dict[str, Any] = {
         "id": id_,
         "x_seq": _seq.next_seq(ctx, "setup_intents"),
-        "created": ctx.clock.iso(),
+        "created": seti_created,
         "client_secret": _mint_client_secret(ctx, id_),
         "status": (
             "requires_confirmation" if params.get("payment_method") else "requires_payment_method"

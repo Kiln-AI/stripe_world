@@ -600,8 +600,11 @@ def create_invoice(
     manual-create field set into the INSERT for the same reason."""
     now = ctx.clock.iso()
     customer = _lookup.require_row(ctx, "customers", "customer", customer_id, param="customer")
-    id_ = _ids.stripe_id(ctx, "in_")
-    lines = [{**line, "id": _ids.stripe_id(ctx, "il_"), "invoice": id_} for line in totals.lines]
+    id_ = _ids.stripe_id(ctx, "in_", timestamp=now)
+    lines = [
+        {**line, "id": _ids.stripe_id(ctx, "il_", timestamp=now), "invoice": id_}
+        for line in totals.lines
+    ]
     due_date = (
         _time.from_unix(_time.to_unix(now) + days_until_due * 86_400)
         if days_until_due is not None
@@ -905,7 +908,7 @@ def rebuild_invoice_lines(ctx: seahaven.Ctx, invoice_id: str) -> dict[str, Any]:
             )
         line = {
             **line,
-            "id": previous_ids.get(key) or _ids.stripe_id(ctx, "il_"),
+            "id": previous_ids.get(key) or _ids.stripe_id(ctx, "il_", timestamp=ctx.clock.iso()),
         }
         lines.append(line)
     # A draft's amount fields mirror the new total (recorded: the swept
@@ -1101,14 +1104,15 @@ def _write_settlement_cbt(
     of -1 — correcting §3.5's `adjustment` guess for both. A sub-minimum
     roll is `invoice_too_small` (the enum's own name for it, recorded on
     the +1 and +4 rolls)."""
-    cbt_id = _ids.stripe_id(ctx, "cbtxn_")
+    cbt_created = ctx.clock.iso()
+    cbt_id = _ids.stripe_id(ctx, "cbtxn_", timestamp=cbt_created)
     ctx.db.execute(
         "INSERT INTO customer_balance_transactions"
         " (id, x_seq, created, amount, currency, customer, ending_balance,"
         " invoice, type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         cbt_id,
         _seq.next_seq(ctx, "customer_balance_transactions"),
-        ctx.clock.iso(),
+        cbt_created,
         amount,
         invoice["currency"],
         customer_id,

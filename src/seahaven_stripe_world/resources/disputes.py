@@ -325,10 +325,11 @@ def maybe_create_dispute(
     if reason is None:
         return
     track = tags.get("dispute_track", "chargeback")
-    id_ = _ids.stripe_id(ctx, "du_")
+    dispute_created = ctx.clock.iso()
+    id_ = _ids.stripe_id(ctx, "du_", timestamp=dispute_created, version_digit="3")
     evidence = _blank_evidence()
     evidence_details = {
-        "due_by": compute_due_by(ctx.clock.iso()),
+        "due_by": compute_due_by(dispute_created),
         "enhanced_eligibility": {},
         "has_evidence": False,
         "past_due": False,
@@ -341,7 +342,7 @@ def maybe_create_dispute(
         " VALUES (?, ?, ?, ?, ?, ?, '[]', ?, ?, ?, '{}', ?, ?, ?, ?)",
         id_,
         _seq.next_seq(ctx, "disputes"),
-        ctx.clock.iso(),
+        dispute_created,
         # The captured amount — equal to the charge amount on the automatic
         # path, and the partial-capture ceiling on the manual path (probed:
         # the dispute is born at capture with the captured funds; the

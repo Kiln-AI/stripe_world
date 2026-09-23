@@ -66,7 +66,8 @@ def test_created_id_has_the_right_prefix_and_created_is_unix(instance: seahaven.
 
     created = create(instance)
     assert created["id"].startswith("cus_")
-    assert len(created["id"]) == len("cus_") + 24
+    # Format A (cus_): 14-char random suffix (id-shapes.md)
+    assert len(created["id"]) == len("cus_") + 14
     assert created["created"] == _time.to_unix(NOW)
 
 

@@ -6,16 +6,24 @@ and seed mint the same ids. `ctx.ids.uuid()` is fixed-format UUIDv4 text and is
 unusable here; nothing in this package calls it, and a bare UUID where Stripe
 expects a prefix is the hazard `SEAHAVEN_FINDINGS.md` Entry 2 records.
 
-The suffix is 24 characters from `[A-Za-z0-9]`: real Stripe suffixes vary in
-length and encode nothing, so a fixed 24 is faithful in shape and simpler to
-assert (`components/data_model.md` §2).
+Two measured formats (id-shapes.md, probed 2026-09-22):
+
+  Format A   prefix + 14 random chars from [A-Za-z0-9]         cus_, prod_, si_
+  Format B   prefix + V(1) + T(5) + A(10) + R(8) = 24 chars    everything else
+               V  version digit (1 = direct create, 3 = side-effect)
+               T  base62 timestamp group — equal for objects created in the same second
+               A  the account fragment: the last 10 chars of the account id's suffix
+               R  8 random chars from [A-Za-z0-9]
 """
 
 import string
 
 import seahaven
 
+from seahaven_stripe_world._time import to_unix
+
 __all__ = [
+    "FORMAT_A_PREFIXES",
     "ID_ALPHABET",
     "STRIPE_ID_PREFIXES",
     "STUB_ID_PREFIXES",
@@ -25,6 +33,20 @@ __all__ = [
 
 #: 62 characters, Stripe's own id shape.
 ID_ALPHABET = string.ascii_letters + string.digits
+
+# Base62 alphabet for timestamp encoding: digits first, then uppercase, then
+# lowercase — standard base62 ordering so the encoded value sorts correctly.
+_BASE62 = string.digits + string.ascii_uppercase + string.ascii_lowercase
+
+#: Prefixes whose ids use Format A (14 random chars). Measured from real Stripe
+#: sandbox (id-shapes.md): `cus_`, `prod_`, `si_` all have 14-char suffixes.
+FORMAT_A_PREFIXES: frozenset[str] = frozenset({"cus_", "prod_", "si_"})
+
+_FORMAT_A_SUFFIX_LEN = 14
+_FORMAT_B_SUFFIX_LEN = 24
+_TIMESTAMP_CHARS = 5
+_ACCOUNT_FRAGMENT_LEN = 10
+_RANDOM_CHARS_B = 8
 
 #: object name -> id prefix, for every object this world stores. Sourced from
 #: stripe-mock's fixtures (see `components/data_model.md` §2): `spec3.json`
@@ -86,21 +108,85 @@ _KNOWN_PREFIXES = (
 )
 
 
-def stripe_id(ctx: seahaven.Ctx, prefix: str) -> str:
+def _base62_encode(value: int, width: int) -> str:
+    """Encode a non-negative integer into a fixed-width base62 string."""
+    if value < 0:
+        raise ValueError(f"negative value: {value}")
+    chars: list[str] = []
+    for _ in range(width):
+        value, remainder = divmod(value, 62)
+        chars.append(_BASE62[remainder])
+    # Reverse so the most-significant digit is first.
+    return "".join(reversed(chars))
+
+
+def _account_fragment(ctx: seahaven.Ctx) -> str:
+    """The last 10 chars of the account id's suffix after `acct_`."""
+    account = ctx.state.get("account")
+    if account is None:
+        raise seahaven.WorldBug("_ids: ctx.state['account'] is not set — startup has not run")
+    acct_id: str = account["id"]
+    # Account id is `acct_` + 16 chars. The fragment is the last 10 of the suffix.
+    suffix = acct_id.removeprefix("acct_")
+    if len(suffix) < _ACCOUNT_FRAGMENT_LEN:
+        raise seahaven.WorldBug(
+            f"_ids: account id suffix too short ({len(suffix)} chars): {acct_id!r}"
+        )
+    return suffix[-_ACCOUNT_FRAGMENT_LEN:]
+
+
+def _base62_timestamp(iso_timestamp: str) -> str:
+    """Encode a timestamp as a 5-character base62 group.
+
+    Objects created in the same second share the same group — which is also
+    true of real ids created in the same second (id-shapes.md).
+    """
+    unix = to_unix(iso_timestamp)
+    return _base62_encode(unix, _TIMESTAMP_CHARS)
+
+
+def stripe_id(
+    ctx: seahaven.Ctx,
+    prefix: str,
+    *,
+    timestamp: str | None = None,
+    version_digit: str = "1",
+) -> str:
     """A Stripe-shaped id drawn from the instance's seeded stream.
 
-    Returns `f"{prefix}{token}"` where token is 24 characters from
-    `ID_ALPHABET`, each drawn from `ctx.ids.random`. Raises `WorldBug` if
-    `prefix` is not one this world mints — an unknown prefix is an authoring
-    mistake (a typo, or an id shape Stripe does not have), and it must not
-    surface as a malformed id an agent could be blamed for.
+    Two formats (id-shapes.md):
+
+    - **Format A** (cus_, prod_, si_): `prefix` + 14 random alphanumerics.
+    - **Format B** (everything else): `prefix` + version_digit(1) +
+      base62_timestamp(5) + account_fragment(10) + 8 random alphanumerics.
+
+    `timestamp` is the ISO creation time being stamped on the row. Under a
+    frozen clock all ids in a rollout share a timestamp group, which is also
+    true of real ids created in the same second. If None, reads `ctx.clock`.
+
+    `version_digit` defaults to `"1"` (direct create). Callers that mint
+    side-effect ids (charges from PI confirmation, balance transactions,
+    refunds) pass `"3"`.
+
+    Raises `WorldBug` if `prefix` is unknown or if startup has not run
+    (Format B needs the account fragment).
     """
     if prefix not in _KNOWN_PREFIXES:
         raise seahaven.WorldBug(
             f"no Stripe id prefix {prefix!r}: not in _ids.STRIPE_ID_PREFIXES, "
             f"STUB_ID_PREFIXES or the request prefix"
         )
-    token = "".join(ctx.ids.random.choice(ID_ALPHABET) for _ in range(24))
+
+    if prefix in FORMAT_A_PREFIXES:
+        token = "".join(ctx.ids.random.choice(ID_ALPHABET) for _ in range(_FORMAT_A_SUFFIX_LEN))
+        return f"{prefix}{token}"
+
+    # Format B: structured suffix
+    ts = timestamp if timestamp is not None else ctx.clock.iso()
+    fragment = _account_fragment(ctx)
+    t_group = _base62_timestamp(ts)
+    random_part = "".join(ctx.ids.random.choice(ID_ALPHABET) for _ in range(_RANDOM_CHARS_B))
+    token = f"{version_digit}{t_group}{fragment}{random_part}"
     return f"{prefix}{token}"
 
 

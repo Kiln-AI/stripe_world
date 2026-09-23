@@ -59,13 +59,14 @@ def emit_event(
     data: dict[str, Any] = {"object": obj}
     if previous:
         data["previous_attributes"] = dict(previous)
-    event_id = _ids.stripe_id(ctx, "evt_")
+    event_created = ctx.clock.iso()
+    event_id = _ids.stripe_id(ctx, "evt_", timestamp=event_created)
     ctx.db.execute(
         "INSERT INTO events (id, x_seq, created, api_version, data, request_id,"
         " request_idempotency_key, type) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         event_id,
         _seq.next_seq(ctx, "events"),
-        ctx.clock.iso(),
+        event_created,
         "2026-08-26.dahlia",
         _json.dumps(data),
         request.get("id"),
