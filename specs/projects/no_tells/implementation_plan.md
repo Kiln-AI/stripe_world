@@ -61,7 +61,7 @@ A phase is not done until its register rows have dispositions and the full check
 - [x] **Phase 5: The four API tools.** New signatures with operation-id addressing and the context
       parameters, `_descriptions.py` verbatim, `_context.py` validation and its two refusals.
       Surface conformance goes green for these four.
-- [ ] **Phase 6: The account tools.** `list_available_accounts_or_orgs` as a projection of Phase 2's
+- [x] **Phase 6: The account tools.** `list_available_accounts_or_orgs` as a projection of Phase 2's
       state, `get_stripe_account_info` retained, `manage_stripe_accounts`. Surface conformance green
       for all eight registered tools.
 

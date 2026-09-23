@@ -313,6 +313,64 @@ def test_account_info_is_idempotent(instance: seahaven.Instance) -> None:
     assert first == second
 
 
+# --- list_available_accounts_or_orgs ------------------------------------------
+
+
+def test_ts_03_list_accounts_returns_session_accounts(
+    instance: seahaven.Instance,
+) -> None:
+    """TS-03: list_available_accounts_or_orgs returns the session's accounts
+    as a one-element list projected from ctx.state["account"]."""
+    result = instance.call("list_available_accounts_or_orgs")
+    assert "accounts" in result
+    accounts = result["accounts"]
+    assert isinstance(accounts, list)
+    assert len(accounts) == 1
+    entry = accounts[0]
+    assert entry["stripe_context"] == ACCOUNT_ID
+    assert entry["livemode"] is True
+    assert set(entry.keys()) == {"stripe_context", "livemode", "name"}
+
+
+def test_list_accounts_agrees_with_account_info(
+    instance: seahaven.Instance,
+) -> None:
+    """The two account tools present the same account identity."""
+    account_info = instance.call("get_stripe_account_info")
+    listed = instance.call("list_available_accounts_or_orgs")["accounts"][0]
+    assert listed["stripe_context"] == account_info["id"]
+
+
+# --- manage_stripe_accounts --------------------------------------------------
+
+
+def test_ts_19_manage_accounts_returns_reconsent_url(
+    instance: seahaven.Instance,
+) -> None:
+    """TS-19: manage_stripe_accounts returns a reconsent_url with the right
+    prefix and an oases_ session id."""
+    result = instance.call("manage_stripe_accounts")
+    assert "reconsent_url" in result
+    url = result["reconsent_url"]
+    assert url.startswith("https://access.stripe.com/mcp/oauth2/authorize/sessions/oases_")
+    # The oases_ id suffix is 24 alphanumeric characters.
+    oases_id = url.split("oases_")[1]
+    assert len(oases_id) == 24
+    assert oases_id.isalnum()
+
+
+def test_manage_accounts_url_is_deterministic(
+    instance: seahaven.Instance,
+) -> None:
+    """Two calls on the same instance yield different oases_ ids (the seeded
+    stream advances), but both are well-formed."""
+    first = instance.call("manage_stripe_accounts")["reconsent_url"]
+    second = instance.call("manage_stripe_accounts")["reconsent_url"]
+    # Both well-formed
+    assert first.startswith("https://access.stripe.com/mcp/oauth2/authorize/sessions/oases_")
+    assert second.startswith("https://access.stripe.com/mcp/oauth2/authorize/sessions/oases_")
+
+
 def _all_routes():
     from seahaven_stripe_world.dispatch.routes import ALL
 

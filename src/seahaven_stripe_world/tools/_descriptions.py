@@ -12,6 +12,9 @@ the *implementation* for a human reader.
 from typing import Final
 
 __all__ = [
+    "GET_STRIPE_ACCOUNT_INFO",
+    "LIST_AVAILABLE_ACCOUNTS_OR_ORGS",
+    "MANAGE_STRIPE_ACCOUNTS",
     "STRIPE_API_DETAILS",
     "STRIPE_API_READ",
     "STRIPE_API_SEARCH",
@@ -68,4 +71,34 @@ STRIPE_API_DETAILS: Final = (
     "\n"
     'The response may include an "LLM Context" section with usage guidance '
     "specific to the operation — follow any instructions there."
+)
+
+LIST_AVAILABLE_ACCOUNTS_OR_ORGS: Final = (
+    "Lists all Stripe accounts in this session with their stripe_context "
+    "and livemode values.\n"
+    "- Call this first to get stripe_context and livemode before any "
+    "account-specific operation.\n"
+    "- After calling, ask the user which account to use unless already specified.\n"
+    "- Warn the user before switching between testmode and livemode."
+)
+
+MANAGE_STRIPE_ACCOUNTS: Final = (
+    "Returns a URL to the Stripe Dashboard where users can add accounts, "
+    "remove accounts, or change permissions for this session.\n"
+    "- Use when the user wants to add, remove, or modify permissions for "
+    "an account.\n"
+    "- Call this directly — no need to call list_available_accounts_or_orgs "
+    "first.\n"
+    "- Present the URL to the user and wait for them to confirm they "
+    "completed their changes.\n"
+    "- After confirmation, call list_available_accounts_or_orgs to sync "
+    "the updated account list."
+)
+
+# get_stripe_account_info is not on the live Stripe MCP server (functional spec
+# section 4.1.1). Its description is this world's own, not a captured verbatim.
+GET_STRIPE_ACCOUNT_INFO: Final = (
+    "Retrieve the Stripe account object for this session's account. "
+    "Returns billing-relevant fields: business profile, capabilities, "
+    "default currency, and payout settings."
 )

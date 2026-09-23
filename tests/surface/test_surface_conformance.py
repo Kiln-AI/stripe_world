@@ -169,8 +169,7 @@ def test_full_spec_committed() -> None:
 
 # --- Registered tool set guard ------------------------------------------------
 
-# The tools registered today; Phase 6 adds list_available_accounts_or_orgs
-# and manage_stripe_accounts, Phase 7 adds stripe_analytics.  Extend this
+# The tools registered today; Phase 7 adds stripe_analytics.  Extend this
 # set as each phase lands.
 _EXPECTED_NOW = {
     "stripe_api_read",
@@ -178,6 +177,8 @@ _EXPECTED_NOW = {
     "stripe_api_search",
     "stripe_api_details",
     "get_stripe_account_info",
+    "list_available_accounts_or_orgs",
+    "manage_stripe_accounts",
 }
 
 
@@ -233,7 +234,6 @@ def test_ts_07_details_takes_operation_id() -> None:
     _compare_schema("stripe_api_details", real, tool.schema)
 
 
-@pytest.mark.xfail(strict=True, reason="tool not yet registered — Phase 6")
 def test_ts_03_list_accounts_registered() -> None:
     """TS-03: list_available_accounts_or_orgs is registered."""
     tools = _world_tools()
@@ -244,7 +244,6 @@ def test_ts_03_list_accounts_registered() -> None:
     _compare_schema("list_available_accounts_or_orgs", real, tool.schema)
 
 
-@pytest.mark.xfail(strict=True, reason="tool not yet registered — Phase 6")
 def test_ts_19_manage_accounts_registered() -> None:
     """TS-19: manage_stripe_accounts is registered."""
     tools = _world_tools()

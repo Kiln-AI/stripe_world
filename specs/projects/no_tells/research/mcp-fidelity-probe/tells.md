@@ -50,8 +50,8 @@ discover later.
 | TS-16, DT-15 | Details parameters grouped as `{path:{}, query:{}, body:{}}` dicts; ours is a flat list | tool-surface, discovery | moderate | open |
 | TS-18, DT-04 | Path placeholders normalized to `{id}` everywhere; ours uses `{customer}`, `{invoice}`, etc. | tool-surface, discovery | moderate | open |
 | TS-06, DT-01 | Search tool takes `intent` + `resource` + `limit`; ours takes free-text `query` | tool-surface, discovery | moderate | closed |
-| TS-02 | `get_stripe_account_info` does not exist on real MCP; real uses `list_available_accounts_or_orgs` | tool-surface | moderate | open |
-| TS-03 | `list_available_accounts_or_orgs` missing; it gates every other tool (provides `stripe_context`/`livemode`) | tool-surface | moderate | open |
+| TS-02 | `get_stripe_account_info` does not exist on real MCP; real uses `list_available_accounts_or_orgs` | tool-surface | moderate | declared |
+| TS-03 | `list_available_accounts_or_orgs` missing; it gates every other tool (provides `stripe_context`/`livemode`) | tool-surface | moderate | closed |
 | AR-01 | Out-of-scope paths with product-activation errors (Issuing, etc.) get 404 "Unrecognized"; should be permission-style error | absence-refusal | moderate | open |
 | AR-02 | Out-of-scope paths that succeed on real Stripe (Checkout, Payment Links, etc.) get 404; should be permission error | absence-refusal | moderate | open |
 | AS-02 | Structured IDs (Format B) embed a 10-char account fragment at a fixed position; ours are fully random | account-stats | moderate | closed |
@@ -81,7 +81,7 @@ discover later.
 | AS-25 | `subscription.managed_payments` and `payment_intent.managed_payments` missing (`{"enabled":false}`) | account-stats | trivial | open |
 | AS-27 | Structured IDs encode creation time; ours have no time correlation | account-stats | trivial | closed |
 | EC-05, DT-18 | Error messages carry MCP guidance suffix ("Use stripe_api_details..."); ours don't | envelope, discovery | moderate | open |
-| TS-19 | `manage_stripe_accounts` tool missing (returns reconsent URL) | tool-surface | moderate | open |
+| TS-19 | `manage_stripe_accounts` tool missing (returns reconsent URL) | tool-surface | moderate | closed |
 | TS-20 | `search_stripe_documentation` tool missing (returns docs results) | tool-surface | moderate | open |
 | TS-21 | `stripe_analytics` tool missing (Sigma query interface) | tool-surface | moderate | open |
 | TS-22 | `stripe_implementation_planner` tool missing (decision tree + guide_id) | tool-surface | moderate | open |
