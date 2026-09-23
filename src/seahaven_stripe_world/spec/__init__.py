@@ -32,6 +32,7 @@ __all__ = [
     "ENUM_OVERRIDES",
     "EVENT_TYPES",
     "EXPANDABLE_FIELDS",
+    "full_spec_document",
     "pinned_version",
     "schema_rules",
     "spec_document",
@@ -59,6 +60,18 @@ def spec_document() -> dict[str, Any]:
     copy rather than each opening the file.
     """
     text = resources.files("seahaven_stripe_world.spec").joinpath("spec3.min.json").read_text()
+    return json.loads(text)  # type: ignore[no-any-return]
+
+
+@cache
+def full_spec_document() -> dict[str, Any]:
+    """The full Stripe OpenAPI spec, parsed once per process.
+
+    ~8 MB — used by the enumeration script and by the discovery index
+    (architecture section 5.1). Not loaded at world startup; only
+    callers that need the full catalogue import this.
+    """
+    text = resources.files("seahaven_stripe_world.spec").joinpath("spec3.json").read_text()
     return json.loads(text)  # type: ignore[no-any-return]
 
 

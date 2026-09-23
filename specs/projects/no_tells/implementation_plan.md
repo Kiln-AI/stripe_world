@@ -34,7 +34,7 @@ A phase is not done until its register rows have dispositions and the full check
 
 ### Capture
 
-- [ ] **Phase 1: Capture and enumerate.** `tools_dev/enumerate_catalogue.py` with resume and
+- [x] **Phase 1: Capture and enumerate.** `tools_dev/enumerate_catalogue.py` with resume and
       `--sample` (architecture §4.2); commit `spec3.json` in full; capture the ten real tool schemas
       and descriptions to `tests/surface/real_tool_schemas.json`; write the surface-conformance
       harness (§8.1), `xfail` until the tools land. **Start the enumeration run at the end of this
