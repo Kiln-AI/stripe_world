@@ -109,6 +109,11 @@ in one of exactly three dispositions:
 There is no fourth option, and "we'll get to it" is not a disposition. A row with no disposition is
 an unfinished requirement.
 
+**Dispositions are recorded in the register's own `Disposition` column**, which is why that file is
+a living checklist rather than a frozen research artifact. There is deliberately no second copy of
+the list: two hand-maintained lists that are supposed to agree will not. Every row starts `open`;
+each implementation phase updates the rows it touched.
+
 ## 4. The agent surface
 
 The largest theme, and the one everything else depends on. The real server's tool interface differs

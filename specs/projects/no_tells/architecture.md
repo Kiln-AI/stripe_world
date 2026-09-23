@@ -254,6 +254,21 @@ only the gaps. `verdict: "error"` is never treated as `absent` — that would in
 - Append-and-flush per record. Ordered by operation id so runs are comparable.
 - `--resume` is the default; `--sample N` is the declared fallback, and writes a `sampled: true`
   marker plus the uncovered remainder so nothing reads as measured that was not.
+- **It also records the live server's tool list**, not only its operations, as a `{"kind": "tools",
+  "tools": [...], "probed": "…"}` record. Functional spec §4.1.1 requires this: the documented and
+  live tool lists already disagree in both directions, and a drift run must catch further movement —
+  in particular `get_stripe_account_info` reappearing, which would retire that section's exception.
+
+### 4.2.1 Re-running it as a drift job
+
+The enumeration is not a one-off. Stripe curates the catalogue and has already been observed to
+exclude operations no permission or product explains (functional spec §9), so membership can move
+under us. Re-running with `--resume` against a fresh file and diffing against the committed artifact
+is the drift check, and it is the same command — there is no separate drift script to keep in step.
+
+A diff is a finding, not a failure: an operation moving between `catalogued` and `absent` changes
+which bucket it refuses in, and the generated refusal test (§8.2) will fail on it, which is the
+intended alarm.
 
 ### 4.3 Routing a call
 

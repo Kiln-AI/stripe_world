@@ -23,8 +23,10 @@ the new return contract, so Phase 4 precedes Phase 5.
 2. **Name each test for the register id it closes** — `test_ts_04_read_takes_operation_id`.
 3. **Implement until green**, then `uv run ruff format --check && uv run ruff check`, `uv run ty
    check`, `uv run pytest`, `uv run seahaven check`.
-4. **Update the register dispositions** the phase touched: closed, declared, or not-a-tell. A row
-   with no disposition is unfinished work.
+4. **Update the register's `Disposition` column** for the rows the phase touched — `closed`,
+   `declared` or `not-a-tell`. The register is
+   [`research/mcp-fidelity-probe/tells.md`](research/mcp-fidelity-probe/tells.md) and it is the only
+   copy; every row starts `open`. A row left `open` after a phase that touched it is unfinished work.
 
 A phase is not done until its register rows have dispositions and the full check list is clean.
 
