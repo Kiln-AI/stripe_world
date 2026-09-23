@@ -53,7 +53,7 @@ A phase is not done until its register rows have dispositions and the full check
 
 ### The edge
 
-- [ ] **Phase 4: The envelope transform.** Rewrite `middleware/stripe_envelope.py` to unwrap a 2xx
+- [x] **Phase 4: The envelope transform.** Rewrite `middleware/stripe_envelope.py` to unwrap a 2xx
       to its bare body and raise on anything else (architecture §2.5), and adapt the existing suite,
       which asserts `{status, body}` throughout. Tool signatures are untouched here on purpose: this
       isolates the one change with transaction semantics behind it. `call_stripe` keeps
