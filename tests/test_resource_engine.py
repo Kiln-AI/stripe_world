@@ -6,6 +6,7 @@ import seahaven
 
 from conftest import BLANK_NOW, dispatch_tool
 from seahaven_stripe_world.dispatch.response import ApiResponse
+from seahaven_stripe_world.errors import StripeToolError
 
 pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
 
@@ -33,9 +34,7 @@ def _clean_by_object():
 
 
 def create(instance: seahaven.Instance, **params: object) -> dict:
-    result = instance.call("stripe_api_write", method="POST", path="/v1/customers", params=params)
-    assert result["status"] == 200, result
-    return result["body"]
+    return instance.call("stripe_api_write", method="POST", path="/v1/customers", params=params)
 
 
 def test_crud_round_trip(instance: seahaven.Instance) -> None:
@@ -44,20 +43,18 @@ def test_crud_round_trip(instance: seahaven.Instance) -> None:
     cus = created["id"]
 
     retrieved = instance.call("stripe_api_read", path=f"/v1/customers/{cus}")
-    assert retrieved["status"] == 200
-    assert retrieved["body"] == created  # the create answers what a retrieve answers
+    assert retrieved == created  # the create answers what a retrieve answers
 
     updated = instance.call(
         "stripe_api_write", method="POST", path=f"/v1/customers/{cus}", params={"name": "Ada L."}
     )
-    assert updated["body"]["name"] == "Ada L."
+    assert updated["name"] == "Ada L."
 
     listed = instance.call("stripe_api_read", path="/v1/customers")
-    assert [item["id"] for item in listed["body"]["data"]] == [cus]
+    assert [item["id"] for item in listed["data"]] == [cus]
 
     deleted = instance.call("stripe_api_write", method="DELETE", path=f"/v1/customers/{cus}")
-    assert deleted["status"] == 200
-    assert deleted["body"] == {"id": cus, "object": "customer", "deleted": True}
+    assert deleted == {"id": cus, "object": "customer", "deleted": True}
 
 
 def test_created_id_has_the_right_prefix_and_created_is_unix(instance: seahaven.Instance) -> None:
@@ -113,11 +110,10 @@ def test_soft_delete_is_still_retrievable_and_filtered_from_lists(
     instance.call("stripe_api_write", method="DELETE", path=f"/v1/customers/{gone['id']}")
 
     stub = instance.call("stripe_api_read", path=f"/v1/customers/{gone['id']}")
-    assert stub["status"] == 200
-    assert stub["body"]["deleted"] is True
+    assert stub["deleted"] is True
 
     listed = instance.call("stripe_api_read", path="/v1/customers")
-    assert [item["id"] for item in listed["body"]["data"]] == [staying["id"]]
+    assert [item["id"] for item in listed["data"]] == [staying["id"]]
 
 
 def test_update_absent_means_unchanged(instance: seahaven.Instance) -> None:
@@ -128,17 +124,21 @@ def test_update_absent_means_unchanged(instance: seahaven.Instance) -> None:
         path=f"/v1/customers/{created['id']}",
         params={"name": "Changed"},
     )
-    assert updated["body"]["name"] == "Changed"
-    assert updated["body"]["email"] == "keep@example.test"
-    assert updated["body"]["description"] == "kept"
+    assert updated["name"] == "Changed"
+    assert updated["email"] == "keep@example.test"
+    assert updated["description"] == "kept"
 
 
 def test_update_of_a_missing_row_is_resource_missing(instance: seahaven.Instance) -> None:
-    result = instance.call(
-        "stripe_api_write", method="POST", path="/v1/customers/cus_missing", params={"name": "x"}
-    )
-    assert result["status"] == 404
-    assert result["body"]["error"]["code"] == "resource_missing"
+    with pytest.raises(StripeToolError) as exc_info:
+        instance.call(
+            "stripe_api_write",
+            method="POST",
+            path="/v1/customers/cus_missing",
+            params={"name": "x"},
+        )
+    assert exc_info.value.status == 404
+    assert exc_info.value.stripe_body["error"]["code"] == "resource_missing"
 
 
 def test_list_filters(instance: seahaven.Instance) -> None:
@@ -149,20 +149,20 @@ def test_list_filters(instance: seahaven.Instance) -> None:
     listed = instance.call(
         "stripe_api_read", path="/v1/customers", params={"email": "one@example.test"}
     )
-    assert [item["id"] for item in listed["body"]["data"]] == [one["id"]]
-    assert listed["body"]["url"] == "/v1/customers"
+    assert [item["id"] for item in listed["data"]] == [one["id"]]
+    assert listed["url"] == "/v1/customers"
 
     # A `created` range that excludes the frozen instant excludes everything.
     before = _time.to_unix(BLANK_NOW) - 3600
     empty = instance.call(
         "stripe_api_read", path="/v1/customers", params={"created": {"lt": before}}
     )
-    assert empty["body"]["data"] == []
+    assert empty["data"] == []
     # …and one that includes it includes the rows.
     present = instance.call(
         "stripe_api_read", path="/v1/customers", params={"created": {"gte": before}}
     )
-    assert len(present["body"]["data"]) == 2
+    assert len(present["data"]) == 2
 
 
 def test_list_is_reverse_chronological_under_a_frozen_clock(instance: seahaven.Instance) -> None:
@@ -171,7 +171,7 @@ def test_list_is_reverse_chronological_under_a_frozen_clock(instance: seahaven.I
     order (`components/data_model.md` §3.11)."""
     ids = [create(instance, name=f"c{i}")["id"] for i in range(3)]
     listed = instance.call("stripe_api_read", path="/v1/customers")
-    assert [item["id"] for item in listed["body"]["data"]] == list(reversed(ids))
+    assert [item["id"] for item in listed["data"]] == list(reversed(ids))
 
 
 def test_generated_writes_emit_their_events(instance: seahaven.Instance) -> None:

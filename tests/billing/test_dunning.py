@@ -8,6 +8,7 @@ import seahaven
 
 from conftest import BLANK_NOW
 from seahaven_stripe_world.billing import dunning
+from seahaven_stripe_world.errors import StripeToolError
 from seahaven_stripe_world.spec.enums import DECLINE_CODES
 
 pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
@@ -113,7 +114,7 @@ def test_the_policy_is_not_a_subscription_field(instance: seahaven.Instance) -> 
 
 
 def _armed(instance: seahaven.Instance) -> tuple[str, str]:
-    cus = call(instance, "POST", "/v1/customers", {"email": "dun@example.test"})["body"]["id"]
+    cus = call(instance, "POST", "/v1/customers", {"email": "dun@example.test"})["id"]
     pm = call(
         instance,
         "POST",
@@ -122,7 +123,7 @@ def _armed(instance: seahaven.Instance) -> tuple[str, str]:
             "type": "card",
             "card": {"number": "4000000000000341", "exp_month": 1, "exp_year": 2031},
         },
-    )["body"]["id"]
+    )["id"]
     call(instance, "POST", f"/v1/payment_methods/{pm}/attach", {"customer": cus})
     call(
         instance,
@@ -148,7 +149,7 @@ def _open_declining_invoice(instance: seahaven.Instance) -> str:
     """An OPEN invoice whose card declines, through the routed surface: an
     always_invoice proration switch against the decline card."""
     cus, _pm = _armed(instance)
-    prod = call(instance, "POST", "/v1/products", {"name": "dun"})["body"]["id"]
+    prod = call(instance, "POST", "/v1/products", {"name": "dun"})["id"]
     p10 = call(
         instance,
         "POST",
@@ -159,13 +160,13 @@ def _open_declining_invoice(instance: seahaven.Instance) -> str:
             "currency": "usd",
             "recurring": {"interval": "month"},
         },
-    )["body"]["id"]
+    )["id"]
     sub = call(
         instance,
         "POST",
         "/v1/subscriptions",
         {"customer": cus, "items": [{"price": p10}], "payment_behavior": "allow_incomplete"},
-    )["body"]
+    )
     assert sub["status"] == "incomplete"
     return sub["latest_invoice"]
 
@@ -187,7 +188,8 @@ def test_manual_pay_after_the_first_never_increments(instance: seahaven.Instance
         invoice_id,
     )
     for _ in range(3):
-        call(instance, "POST", f"/v1/invoices/{invoice_id}/pay", {})
+        with pytest.raises(StripeToolError):
+            call(instance, "POST", f"/v1/invoices/{invoice_id}/pay", {})
     after = one_row(
         instance,
         "SELECT attempt_count, next_payment_attempt FROM invoices WHERE id = ?",

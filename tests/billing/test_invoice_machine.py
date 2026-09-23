@@ -9,6 +9,7 @@ import pytest
 import seahaven
 
 from conftest import BLANK_NOW
+from seahaven_stripe_world.errors import StripeToolError
 
 pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
 
@@ -22,10 +23,10 @@ def call(instance: seahaven.Instance, method: str, path: str, params: dict | Non
 @pytest.fixture()
 def armed(instance: seahaven.Instance) -> str:
     """A customer whose default method pays synchronously."""
-    cus = call(instance, "POST", "/v1/customers", {"email": "m@example.test"})["body"]["id"]
+    cus = call(instance, "POST", "/v1/customers", {"email": "m@example.test"})["id"]
     pm = call(
         instance, "POST", "/v1/payment_methods", {"type": "card", "card": {"token": "tok_visa"}}
-    )["body"]["id"]
+    )["id"]
     call(instance, "POST", f"/v1/payment_methods/{pm}/attach", {"customer": cus})
     call(
         instance,
@@ -48,12 +49,12 @@ def draft_with_items(instance: seahaven.Instance, customer: str, amount: int) ->
         "POST",
         "/v1/invoices",
         {"customer": customer, "pending_invoice_items_behavior": "include"},
-    )["body"]
+    )
 
 
 def test_finalize_assigns_the_number_and_attempts_nothing(instance, armed) -> None:
     invoice = draft_with_items(instance, armed, 3000)
-    open_ = call(instance, "POST", f"/v1/invoices/{invoice['id']}/finalize", {})["body"]
+    open_ = call(instance, "POST", f"/v1/invoices/{invoice['id']}/finalize", {})
     assert open_["status"] == "open"
     assert open_["number"].endswith("-0001")
     assert open_["effective_at"] is not None  # null on the draft, stamped here
@@ -67,13 +68,13 @@ def test_finalize_assigns_the_number_and_attempts_nothing(instance, armed) -> No
     assert open_["status_transitions"]["paid_at"] is None
     # the sequence is per customer and shared by every finalization path
     second = draft_with_items(instance, armed, 1000)
-    paid = call(instance, "POST", f"/v1/invoices/{second['id']}/pay", {})["body"]
+    paid = call(instance, "POST", f"/v1/invoices/{second['id']}/pay", {})
     assert paid["number"].endswith("-0002")
 
 
 def test_the_zero_amount_finalize_settles_inside_the_call(instance, armed) -> None:
-    invoice = call(instance, "POST", "/v1/invoices", {"customer": armed})["body"]
-    paid = call(instance, "POST", f"/v1/invoices/{invoice['id']}/finalize", {})["body"]
+    invoice = call(instance, "POST", "/v1/invoices", {"customer": armed})
+    paid = call(instance, "POST", f"/v1/invoices/{invoice['id']}/finalize", {})
     assert paid["status"] == "paid"
     assert paid["attempted"] is True
     assert paid["attempt_count"] == 0
@@ -82,7 +83,7 @@ def test_the_zero_amount_finalize_settles_inside_the_call(instance, armed) -> No
 
 def test_paying_a_draft_finalizes_and_collects(instance, armed) -> None:
     invoice = draft_with_items(instance, armed, 3500)
-    paid = call(instance, "POST", f"/v1/invoices/{invoice['id']}/pay", {})["body"]
+    paid = call(instance, "POST", f"/v1/invoices/{invoice['id']}/pay", {})
     assert paid["status"] == "paid"
     assert paid["attempted"] is True
     assert paid["attempt_count"] == 1
@@ -102,9 +103,7 @@ def test_paying_a_draft_finalizes_and_collects(instance, armed) -> None:
 def test_the_out_of_band_pay_attempts_nothing(instance, armed) -> None:
     invoice = draft_with_items(instance, armed, 4400)
     call(instance, "POST", f"/v1/invoices/{invoice['id']}/finalize", {})
-    paid = call(instance, "POST", f"/v1/invoices/{invoice['id']}/pay", {"paid_out_of_band": True})[
-        "body"
-    ]
+    paid = call(instance, "POST", f"/v1/invoices/{invoice['id']}/pay", {"paid_out_of_band": True})
     assert paid["status"] == "paid"
     assert paid["attempted"] is False  # recorded: not even the flag flips
     assert paid["attempt_count"] == 0
@@ -117,7 +116,7 @@ def test_a_declined_pay_returns_the_envelope_and_keeps_every_write(instance) -> 
     keeps): a declined /pay answers the 402 envelope as a VALUE, and the
     finalization, the failed charge, the attempt counters and the
     `invoice.payment_failed` event all survive the call."""
-    cus = call(instance, "POST", "/v1/customers", {"email": "dec@example.test"})["body"]["id"]
+    cus = call(instance, "POST", "/v1/customers", {"email": "dec@example.test"})["id"]
     dec = call(
         instance,
         "POST",
@@ -126,7 +125,7 @@ def test_a_declined_pay_returns_the_envelope_and_keeps_every_write(instance) -> 
             "type": "card",
             "card": {"number": "4000000000000341", "exp_month": 9, "exp_year": 2027, "cvc": "123"},
         },
-    )["body"]["id"]
+    )["id"]
     call(instance, "POST", f"/v1/payment_methods/{dec}/attach", {"customer": cus})
     call(
         instance,
@@ -145,14 +144,15 @@ def test_a_declined_pay_returns_the_envelope_and_keeps_every_write(instance) -> 
         "POST",
         "/v1/invoices",
         {"customer": cus, "pending_invoice_items_behavior": "include"},
-    )["body"]
-    declined = call(instance, "POST", f"/v1/invoices/{invoice['id']}/pay", {})
-    assert declined["status"] == 402
-    assert declined["body"]["error"]["type"] == "card_error"
-    assert declined["body"]["error"]["code"] == "card_declined"
+    )
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "POST", f"/v1/invoices/{invoice['id']}/pay", {})
+    assert exc_info.value.status == 402
+    assert exc_info.value.stripe_body["error"]["type"] == "card_error"
+    assert exc_info.value.stripe_body["error"]["code"] == "card_declined"
     # the writes survived: the invoice finalized OPEN with the attempt
     # counted, the failed charge exists, and the event family is complete
-    fresh = call(instance, "GET", f"/v1/invoices/{invoice['id']}")["body"]
+    fresh = call(instance, "GET", f"/v1/invoices/{invoice['id']}")
     assert fresh["status"] == "open"
     assert fresh["number"] is not None
     assert fresh["attempted"] is True
@@ -186,12 +186,13 @@ def test_pay_refuses_a_void_or_uncollectible_invoice(instance, armed) -> None:
     call(instance, "POST", f"/v1/invoices/{invoice['id']}/finalize", {})
     call(instance, "POST", f"/v1/invoices/{invoice['id']}/void", {})
     for params in ({}, {"paid_out_of_band": True}):
-        refused = call(instance, "POST", f"/v1/invoices/{invoice['id']}/pay", params)
-        assert refused["status"] == 400, params
-        assert refused["body"]["error"]["message"] == (
+        with pytest.raises(StripeToolError) as exc_info:
+            call(instance, "POST", f"/v1/invoices/{invoice['id']}/pay", params)
+        assert exc_info.value.status == 400
+        assert exc_info.value.stripe_body["error"]["message"] == (
             "You can only pass in open invoices. This invoice isn't open."
         )
-    after = call(instance, "GET", f"/v1/invoices/{invoice['id']}")["body"]
+    after = call(instance, "GET", f"/v1/invoices/{invoice['id']}")
     assert after["status"] == "void"  # out-of-band did not resurrect it
     assert after["status_transitions"]["paid_at"] is None
 
@@ -199,16 +200,14 @@ def test_pay_refuses_a_void_or_uncollectible_invoice(instance, armed) -> None:
 def test_void_and_mark_uncollectible_from_open(instance, armed) -> None:
     invoice = draft_with_items(instance, armed, 3000)
     call(instance, "POST", f"/v1/invoices/{invoice['id']}/finalize", {})
-    voided = call(instance, "POST", f"/v1/invoices/{invoice['id']}/void", {})["body"]
+    voided = call(instance, "POST", f"/v1/invoices/{invoice['id']}/void", {})
     assert voided["status"] == "void"
     assert voided["amount_due"] == 3000  # left as it was (recorded)
     assert voided["amount_remaining"] == 3000
     assert voided["status_transitions"]["voided_at"] is not None
     marked = draft_with_items(instance, armed, 1200)
     call(instance, "POST", f"/v1/invoices/{marked['id']}/finalize", {})
-    uncollectible = call(instance, "POST", f"/v1/invoices/{marked['id']}/mark_uncollectible", {})[
-        "body"
-    ]
+    uncollectible = call(instance, "POST", f"/v1/invoices/{marked['id']}/mark_uncollectible", {})
     assert uncollectible["status"] == "uncollectible"
     assert uncollectible["status_transitions"]["marked_uncollectible_at"] is not None
 
@@ -216,9 +215,10 @@ def test_void_and_mark_uncollectible_from_open(instance, armed) -> None:
 def test_the_wrong_state_refusals(instance, armed) -> None:
     invoice = draft_with_items(instance, armed, 3500)
     invoice_id = invoice["id"]
-    void_draft = call(instance, "POST", f"/v1/invoices/{invoice_id}/void", {})
-    assert void_draft["status"] == 400
-    assert void_draft["body"]["error"]["message"] == (
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "POST", f"/v1/invoices/{invoice_id}/void", {})
+    assert exc_info.value.status == 400
+    assert exc_info.value.stripe_body["error"]["message"] == (
         "You can only pass in open invoices. This invoice isn't open."
     )
     call(instance, "POST", f"/v1/invoices/{invoice_id}/pay", {})
@@ -231,27 +231,31 @@ def test_the_wrong_state_refusals(instance, armed) -> None:
             "This invoice is already finalized, you can't re-finalize a non-draft invoice.",
         ),
     ):
-        refused = call(instance, "POST", f"/v1/invoices/{invoice_id}{path}", {})
-        assert refused["status"] == 400, path
-        assert refused["body"]["error"]["message"] == message, path
-        assert "code" not in refused["body"]["error"], path
-    deleted = call(instance, "DELETE", f"/v1/invoices/{invoice_id}")
-    assert deleted["body"]["error"]["message"] == "You can only delete draft invoices."
-    description = call(instance, "POST", f"/v1/invoices/{invoice_id}", {"description": "no"})
+        with pytest.raises(StripeToolError) as exc_info:
+            call(instance, "POST", f"/v1/invoices/{invoice_id}{path}", {})
+        assert exc_info.value.status == 400, path
+        assert exc_info.value.stripe_body["error"]["message"] == message, path
+        assert "code" not in exc_info.value.stripe_body["error"], path
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "DELETE", f"/v1/invoices/{invoice_id}")
+    assert exc_info.value.stripe_body["error"]["message"] == "You can only delete draft invoices."
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "POST", f"/v1/invoices/{invoice_id}", {"description": "no"})
     assert (
-        description["body"]["error"]["message"] == "Finalized invoices can't be updated in this way"
+        exc_info.value.stripe_body["error"]["message"]
+        == "Finalized invoices can't be updated in this way"
     )
-    assert description["body"]["error"]["param"] == "description"
+    assert exc_info.value.stripe_body["error"]["param"] == "description"
     # metadata succeeds where description refused (recorded)
     meta = call(instance, "POST", f"/v1/invoices/{invoice_id}", {"metadata": {"k": "v"}})
-    assert meta["status"] == 200
-    assert meta["body"]["metadata"] == {"k": "v"}
+    assert meta["metadata"] == {"k": "v"}
     # the re-mark has its own spelling
     other = draft_with_items(instance, armed, 100)
     call(instance, "POST", f"/v1/invoices/{other['id']}/finalize", {})
     call(instance, "POST", f"/v1/invoices/{other['id']}/mark_uncollectible", {})
-    re_marked = call(instance, "POST", f"/v1/invoices/{other['id']}/mark_uncollectible", {})
-    assert re_marked["body"]["error"]["message"] == (
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "POST", f"/v1/invoices/{other['id']}/mark_uncollectible", {})
+    assert exc_info.value.stripe_body["error"]["message"] == (
         "This invoice has already been marked uncollectible."
     )
 
@@ -273,7 +277,7 @@ def test_the_send_family(instance, armed) -> None:
             "days_until_due": 7,
             "pending_invoice_items_behavior": "include",
         },
-    )["body"]
+    )
     assert invoice["total"] > 0  # stays open through finalize; $0 settles
     # /send on a draft finalizes (a $0 result settles)
     zero = call(
@@ -281,18 +285,19 @@ def test_the_send_family(instance, armed) -> None:
         "POST",
         "/v1/invoices",
         {"customer": armed, "collection_method": "send_invoice", "days_until_due": 7},
-    )["body"]
-    sent_draft = call(instance, "POST", f"/v1/invoices/{zero['id']}/send", {})["body"]
+    )
+    sent_draft = call(instance, "POST", f"/v1/invoices/{zero['id']}/send", {})
     assert sent_draft["status"] == "paid"
     assert sent_draft["number"] is not None
     # /send on an open send_invoice answers the unchanged body
     call(instance, "POST", f"/v1/invoices/{invoice['id']}/finalize", {})
-    sent_open = call(instance, "POST", f"/v1/invoices/{invoice['id']}/send", {})["body"]
+    sent_open = call(instance, "POST", f"/v1/invoices/{invoice['id']}/send", {})
     assert sent_open["status"] == "open"
     # /send on a paid invoice refuses with the recorded support-pointer form
-    refused = call(instance, "POST", f"/v1/invoices/{zero['id']}/send", {})
-    assert refused["status"] == 400
-    assert refused["body"]["error"]["message"] == (
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "POST", f"/v1/invoices/{zero['id']}/send", {})
+    assert exc_info.value.status == 400
+    assert exc_info.value.stripe_body["error"]["message"] == (
         "This invoice cannot be sent right now. Please contact us via "
         "https://support.stripe.com/contact with details, so we can help."
     )
@@ -301,12 +306,13 @@ def test_the_send_family(instance, armed) -> None:
 def test_delete_draft_keeps_its_items_attached(instance, armed) -> None:
     invoice = draft_with_items(instance, armed, 800)
     deleted = call(instance, "DELETE", f"/v1/invoices/{invoice['id']}")
-    assert deleted["status"] == 200
-    assert deleted["body"] == {"id": invoice["id"], "object": "invoice", "deleted": True}
-    assert call(instance, "GET", f"/v1/invoices/{invoice['id']}")["status"] == 404
+    assert deleted == {"id": invoice["id"], "object": "invoice", "deleted": True}
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "GET", f"/v1/invoices/{invoice['id']}")
+    assert exc_info.value.status == 404
     # recorded: nothing is released, and the pending view is empty
     pending = call(instance, "GET", "/v1/invoiceitems", {"customer": armed, "pending": True})
-    assert pending["body"]["data"] == []
+    assert pending["data"] == []
     attached = instance.inspect().one("SELECT invoice FROM invoiceitems WHERE customer = ?", armed)
     assert attached["invoice"] == invoice["id"]
 
@@ -317,10 +323,10 @@ def test_the_customer_balance_settles_at_finalization(instance) -> None:
         "POST",
         "/v1/customers",
         {"email": "bal@example.test", "balance": -1000},
-    )["body"]
+    )
     pm = call(
         instance, "POST", "/v1/payment_methods", {"type": "card", "card": {"token": "tok_visa"}}
-    )["body"]["id"]
+    )["id"]
     call(instance, "POST", f"/v1/payment_methods/{pm}/attach", {"customer": credited["id"]})
     call(
         instance,
@@ -329,7 +335,7 @@ def test_the_customer_balance_settles_at_finalization(instance) -> None:
         {"invoice_settings": {"default_payment_method": pm}},
     )
     invoice = draft_with_items(instance, credited["id"], 3000)
-    paid = call(instance, "POST", f"/v1/invoices/{invoice['id']}/pay", {})["body"]
+    paid = call(instance, "POST", f"/v1/invoices/{invoice['id']}/pay", {})
     # §3.5 worked case: credit consumed, due reduced, cbt row written
     assert paid["starting_balance"] == -1000
     assert paid["amount_due"] == 2000
@@ -340,7 +346,7 @@ def test_the_customer_balance_settles_at_finalization(instance) -> None:
     )
     assert cbt["type"] == "applied_to_invoice"
     assert cbt["amount"] == 1000
-    fresh = call(instance, "GET", f"/v1/customers/{credited['id']}")["body"]
+    fresh = call(instance, "GET", f"/v1/customers/{credited['id']}")
     assert fresh["balance"] == 0
 
 
@@ -367,12 +373,12 @@ def test_invoice_events_through_the_machine(instance, armed) -> None:
 
 def seeded(instance: seahaven.Instance, armed: str) -> None:
     """A small state spread: paid, open, draft, void, uncollectible."""
-    one = draft_with_items(instance, armed, 3000)
+    one = draft_with_items(instance, armed, 3000)["id"]
     call(instance, "POST", f"/v1/invoices/{one}/pay", {})
-    two = draft_with_items(instance, armed, 1200)
+    two = draft_with_items(instance, armed, 1200)["id"]
     call(instance, "POST", f"/v1/invoices/{two}/finalize", {})
     call(instance, "POST", f"/v1/invoices/{two}/void", {})
-    three = draft_with_items(instance, armed, 500)
+    three = draft_with_items(instance, armed, 500)["id"]
     call(instance, "POST", f"/v1/invoices/{three}/finalize", {})
     call(instance, "POST", f"/v1/invoices/{three}/mark_uncollectible", {})
     draft_with_items(instance, armed, 100)

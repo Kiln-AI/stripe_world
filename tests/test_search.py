@@ -10,6 +10,7 @@ import pytest
 import seahaven
 
 from conftest import BLANK_NOW
+from seahaven_stripe_world.errors import StripeToolError
 from seahaven_stripe_world.search.parser import Combinator, Operator, ParseError, parse
 
 pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
@@ -21,21 +22,12 @@ pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
 
 
 def _write(instance: seahaven.Instance, path: str, **params: object) -> dict:
-    result = instance.call("stripe_api_write", method="POST", path=path, params=params)
-    assert result["status"] == 200, result
-    return result["body"]
+    return instance.call("stripe_api_write", method="POST", path=path, params=params)
 
 
 def _search(instance: seahaven.Instance, path: str, query: str, **extra: object) -> dict:
     params: dict = {"query": query, **extra}
-    result = instance.call("stripe_api_read", path=path, params=params)
-    assert result["status"] == 200, result
-    return result["body"]
-
-
-def _search_raw(instance: seahaven.Instance, path: str, **params: object) -> dict:
-    """Return the full result dict (status + body) without asserting 200."""
-    return instance.call("stripe_api_read", path=path, params=dict(params))
+    return instance.call("stripe_api_read", path=path, params=params)
 
 
 # ---------------------------------------------------------------------------
@@ -141,12 +133,16 @@ class TestSearchEnvelope:
         assert body["url"] == "/v1/products/search"
 
     def test_search_missing_query_is_400(self, instance: seahaven.Instance) -> None:
-        result = _search_raw(instance, "/v1/products/search")
-        assert result["status"] == 400
+        with pytest.raises(StripeToolError) as exc_info:
+            instance.call("stripe_api_read", path="/v1/products/search", params={})
+        assert exc_info.value.status == 400
 
     def test_search_invalid_query_is_400(self, instance: seahaven.Instance) -> None:
-        result = _search_raw(instance, "/v1/products/search", query="status>")
-        assert result["status"] == 400
+        with pytest.raises(StripeToolError) as exc_info:
+            instance.call(
+                "stripe_api_read", path="/v1/products/search", params={"query": "status>"}
+            )
+        assert exc_info.value.status == 400
 
 
 # ---------------------------------------------------------------------------
@@ -181,12 +177,22 @@ class TestProductsSearch:
         assert any("Enterprise" in d["name"] for d in body["data"])
 
     def test_substring_too_short(self, instance: seahaven.Instance) -> None:
-        result = _search_raw(instance, "/v1/products/search", query='name~"ab"')
-        assert result["status"] == 400
+        with pytest.raises(StripeToolError) as exc_info:
+            instance.call(
+                "stripe_api_read",
+                path="/v1/products/search",
+                params={"query": 'name~"ab"'},
+            )
+        assert exc_info.value.status == 400
 
     def test_unknown_field_is_400(self, instance: seahaven.Instance) -> None:
-        result = _search_raw(instance, "/v1/products/search", query='nonexistent:"val"')
-        assert result["status"] == 400
+        with pytest.raises(StripeToolError) as exc_info:
+            instance.call(
+                "stripe_api_read",
+                path="/v1/products/search",
+                params={"query": 'nonexistent:"val"'},
+            )
+        assert exc_info.value.status == 400
 
 
 # ---------------------------------------------------------------------------
@@ -402,13 +408,13 @@ class TestSearchPagination:
         assert len(all_ids) == 3
 
     def test_invalid_page_cursor_is_400(self, instance: seahaven.Instance) -> None:
-        result = _search_raw(
-            instance,
-            "/v1/products/search",
-            query='name:"x"',
-            page="bogus-not-base64",
-        )
-        assert result["status"] == 400
+        with pytest.raises(StripeToolError) as exc_info:
+            instance.call(
+                "stripe_api_read",
+                path="/v1/products/search",
+                params={"query": 'name:"x"', "page": "bogus-not-base64"},
+            )
+        assert exc_info.value.status == 400
 
     def test_total_count_absent_by_default(self, instance: seahaven.Instance) -> None:
         """total_count is not returned unless expand[]=total_count is set."""
@@ -547,12 +553,13 @@ class TestExpandTotalCountGating:
 
     def test_total_count_rejected_on_list_endpoint(self, instance: seahaven.Instance) -> None:
         """Non-search list endpoints must return 400 for expand[]=total_count."""
-        result = instance.call(
-            "stripe_api_read",
-            path="/v1/products",
-            params={"expand": ["total_count"]},
-        )
-        assert result["status"] == 400
+        with pytest.raises(StripeToolError) as exc_info:
+            instance.call(
+                "stripe_api_read",
+                path="/v1/products",
+                params={"expand": ["total_count"]},
+            )
+        assert exc_info.value.status == 400
 
     def test_total_count_accepted_on_search_endpoint(self, instance: seahaven.Instance) -> None:
         """Search endpoints accept expand[]=total_count and return the count."""
@@ -588,13 +595,13 @@ class TestCursorFingerprint:
         cursor = body["next_page"]
 
         # Replay that cursor against a different query — must fail.
-        result = _search_raw(
-            instance,
-            "/v1/products/search",
-            query='name:"FpTest Beta"',
-            page=cursor,
-        )
-        assert result["status"] == 400
+        with pytest.raises(StripeToolError) as exc_info:
+            instance.call(
+                "stripe_api_read",
+                path="/v1/products/search",
+                params={"query": 'name:"FpTest Beta"', "page": cursor},
+            )
+        assert exc_info.value.status == 400
 
     def test_same_fts_different_sql_filter_rejected(self, instance: seahaven.Instance) -> None:
         """Same FTS term but different SQL-side filter must invalidate the
@@ -621,37 +628,37 @@ class TestCursorFingerprint:
         cursor = body["next_page"]
 
         # Replay with same FTS term but different numeric filter — must fail.
-        result = _search_raw(
-            instance,
-            "/v1/customers/search",
-            query='name:"FpSql Widget" AND created>9999999999',
-            page=cursor,
-        )
-        assert result["status"] == 400
+        with pytest.raises(StripeToolError) as exc_info:
+            instance.call(
+                "stripe_api_read",
+                path="/v1/customers/search",
+                params={"query": 'name:"FpSql Widget" AND created>9999999999', "page": cursor},
+            )
+        assert exc_info.value.status == 400
 
 
 class TestSearchRejectsListCursors:
     """Finding: starting_after and ending_before must be rejected on search."""
 
     def test_starting_after_rejected(self, instance: seahaven.Instance) -> None:
-        result = _search_raw(
-            instance,
-            "/v1/products/search",
-            query='name:"anything"',
-            starting_after="prod_fake",
-        )
-        assert result["status"] == 400
-        assert "starting_after" in result["body"]["error"].get("message", "")
+        with pytest.raises(StripeToolError) as exc_info:
+            instance.call(
+                "stripe_api_read",
+                path="/v1/products/search",
+                params={"query": 'name:"anything"', "starting_after": "prod_fake"},
+            )
+        assert exc_info.value.status == 400
+        assert "starting_after" in exc_info.value.stripe_body["error"].get("message", "")
 
     def test_ending_before_rejected(self, instance: seahaven.Instance) -> None:
-        result = _search_raw(
-            instance,
-            "/v1/products/search",
-            query='name:"anything"',
-            ending_before="prod_fake",
-        )
-        assert result["status"] == 400
-        assert "ending_before" in result["body"]["error"].get("message", "")
+        with pytest.raises(StripeToolError) as exc_info:
+            instance.call(
+                "stripe_api_read",
+                path="/v1/products/search",
+                params={"query": 'name:"anything"', "ending_before": "prod_fake"},
+            )
+        assert exc_info.value.status == 400
+        assert "ending_before" in exc_info.value.stripe_body["error"].get("message", "")
 
 
 class TestNegatedFtsBindParam:

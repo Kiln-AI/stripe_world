@@ -45,7 +45,7 @@ def a_cassette(recorded_body: dict, scenario: str = "synthetic") -> Cassette:
 def a_real_body(instance: seahaven.Instance) -> dict:
     return instance.call(
         "stripe_api_write", method="POST", path="/v1/customers", params={"description": "probe"}
-    )["body"]
+    )
 
 
 def test_replayer_reports_every_undeclared_difference_at_once(instance: seahaven.Instance) -> None:

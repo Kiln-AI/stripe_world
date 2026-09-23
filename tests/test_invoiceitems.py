@@ -7,6 +7,7 @@ import pytest
 import seahaven
 
 from conftest import BLANK_NOW
+from seahaven_stripe_world.errors import StripeToolError
 
 pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
 
@@ -28,12 +29,12 @@ def item(instance: seahaven.Instance, customer: str, amount: int, description: s
             "currency": "usd",
             "description": description,
         },
-    )["body"]["id"]
+    )["id"]
 
 
 @pytest.fixture()
 def customer(instance: seahaven.Instance) -> str:
-    return call(instance, "POST", "/v1/customers", {"email": "ii@example.test"})["body"]["id"]
+    return call(instance, "POST", "/v1/customers", {"email": "ii@example.test"})["id"]
 
 
 def test_create_mints_the_one_off_price_behind_pricing(instance, customer) -> None:
@@ -42,7 +43,7 @@ def test_create_mints_the_one_off_price_behind_pricing(instance, customer) -> No
         "POST",
         "/v1/invoiceitems",
         {"customer": customer, "amount": 2000, "currency": "usd", "description": "Setup fee"},
-    )["body"]
+    )
     assert body["object"] == "invoiceitem"
     assert body["amount"] == 2000
     assert body["discountable"] is True
@@ -64,11 +65,10 @@ def test_create_mints_the_one_off_price_behind_pricing(instance, customer) -> No
     price_id = pricing["price_details"]["price"]
     product_id = pricing["price_details"]["product"]
     price = call(instance, "GET", f"/v1/prices/{price_id}")
-    assert price["status"] == 200
-    assert price["body"]["product"] == product_id
-    assert price["body"]["unit_amount"] == 2000
-    assert price["body"]["type"] == "one_time"
-    assert call(instance, "GET", f"/v1/products/{product_id}")["status"] == 200
+    assert price["product"] == product_id
+    assert price["unit_amount"] == 2000
+    assert price["type"] == "one_time"
+    call(instance, "GET", f"/v1/products/{product_id}")
     # the minted rows are catalog rows: the catalog's own events fire for
     # them, product first (the recorded order), then the item's own
     assert [
@@ -86,7 +86,7 @@ def test_quantity_multiplies_on_create_and_the_sweep(instance, customer) -> None
         "POST",
         "/v1/invoiceitems",
         {"customer": customer, "amount": 500, "currency": "usd", "quantity": 3},
-    )["body"]
+    )
     assert one["quantity"] == 3
     assert one["amount"] == 500
     invoice = call(
@@ -94,7 +94,7 @@ def test_quantity_multiplies_on_create_and_the_sweep(instance, customer) -> None
         "POST",
         "/v1/invoices",
         {"customer": customer, "pending_invoice_items_behavior": "include"},
-    )["body"]
+    )
     line = invoice["lines"]["data"][0]
     assert line["amount"] == 1500
     assert line["quantity"] == 3
@@ -103,7 +103,7 @@ def test_quantity_multiplies_on_create_and_the_sweep(instance, customer) -> None
 
 
 def test_create_against_a_draft_invoice_joins_its_lines(instance, customer) -> None:
-    invoice = call(instance, "POST", "/v1/invoices", {"customer": customer})["body"]
+    invoice = call(instance, "POST", "/v1/invoices", {"customer": customer})
     body = call(
         instance,
         "POST",
@@ -115,10 +115,10 @@ def test_create_against_a_draft_invoice_joins_its_lines(instance, customer) -> N
             "description": "attached at birth",
             "invoice": invoice["id"],
         },
-    )["body"]
+    )
     assert body["invoice"] == invoice["id"]
     # the draft's lines include the new item in the same call
-    fresh = call(instance, "GET", f"/v1/invoices/{invoice['id']}")["body"]
+    fresh = call(instance, "GET", f"/v1/invoices/{invoice['id']}")
     assert [(line["amount"], line["description"]) for line in fresh["lines"]["data"]] == [
         (700, "attached at birth")
     ]
@@ -136,42 +136,45 @@ def test_the_list_is_newest_first_and_the_pending_filter_is_a_null_test(instance
     first = item(instance, customer, 2000, "first")
     second = item(instance, customer, 1500, "second")
     listed = call(instance, "GET", "/v1/invoiceitems", {"customer": customer})
-    assert [row["id"] for row in listed["body"]["data"]] == [second, first]
+    assert [row["id"] for row in listed["data"]] == [second, first]
     pending = call(instance, "GET", "/v1/invoiceitems", {"customer": customer, "pending": True})
-    assert [row["id"] for row in pending["body"]["data"]] == [second, first]
+    assert [row["id"] for row in pending["data"]] == [second, first]
     # a sweep takes both out of the pending view, not out of the list
     invoice = call(
         instance,
         "POST",
         "/v1/invoices",
         {"customer": customer, "pending_invoice_items_behavior": "include"},
-    )["body"]
+    )
     pending = call(instance, "GET", "/v1/invoiceitems", {"customer": customer, "pending": True})
-    assert pending["body"]["data"] == []
+    assert pending["data"] == []
     swept = call(instance, "GET", "/v1/invoiceitems", {"customer": customer, "pending": False})
-    assert {row["id"] for row in swept["body"]["data"]} == {first, second}
+    assert {row["id"] for row in swept["data"]} == {first, second}
     by_invoice = call(instance, "GET", "/v1/invoiceitems", {"invoice": invoice["id"]})
-    assert {row["id"] for row in by_invoice["body"]["data"]} == {first, second}
+    assert {row["id"] for row in by_invoice["data"]} == {first, second}
 
 
 def test_the_recorded_404_family(instance, customer) -> None:
-    missing = call(instance, "GET", "/v1/invoiceitems/ii_nope")
-    assert missing["status"] == 404
-    assert missing["body"]["error"]["message"] == ("No such Invoice Item: 'ii_nope'(livemode=true)")
-    assert missing["body"]["error"]["code"] == "resource_missing"
-    assert missing["body"]["error"]["param"] == "id"
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "GET", "/v1/invoiceitems/ii_nope")
+    assert exc_info.value.status == 404
+    assert exc_info.value.stripe_body["error"]["message"] == (
+        "No such Invoice Item: 'ii_nope'(livemode=true)"
+    )
+    assert exc_info.value.stripe_body["error"]["code"] == "resource_missing"
+    assert exc_info.value.stripe_body["error"]["param"] == "id"
 
 
 def test_update_and_delete_of_a_pending_item(instance, customer) -> None:
     one = item(instance, customer, 900, "revisable")
     updated = call(instance, "POST", f"/v1/invoiceitems/{one}", {"description": "revised"})
-    assert updated["status"] == 200
-    assert updated["body"]["description"] == "revised"
-    assert updated["body"]["pricing"]["price_details"]["price"].startswith("price_")
+    assert updated["description"] == "revised"
+    assert updated["pricing"]["price_details"]["price"].startswith("price_")
     deleted = call(instance, "DELETE", f"/v1/invoiceitems/{one}")
-    assert deleted["status"] == 200
-    assert deleted["body"] == {"id": one, "object": "invoiceitem", "deleted": True}
-    assert call(instance, "GET", f"/v1/invoiceitems/{one}")["status"] == 404
+    assert deleted == {"id": one, "object": "invoiceitem", "deleted": True}
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "GET", f"/v1/invoiceitems/{one}")
+    assert exc_info.value.status == 404
 
 
 def test_an_amount_edit_re_mints_the_price_against_the_same_product(instance, customer) -> None:
@@ -184,21 +187,20 @@ def test_an_amount_edit_re_mints_the_price_against_the_same_product(instance, cu
         "POST",
         "/v1/invoiceitems",
         {"customer": customer, "amount": 500, "currency": "usd", "description": "re-priced"},
-    )["body"]
+    )
     old_product = one["pricing"]["price_details"]["product"]
     before = instance.inspect().one("SELECT COUNT(*) AS n FROM products")["n"]
     events_before = instance.inspect().one(
         "SELECT COUNT(*) AS n FROM events WHERE type = 'product.created'"
     )["n"]
-    edited = call(instance, "POST", f"/v1/invoiceitems/{one['id']}", {"amount": 700})["body"]
+    edited = call(instance, "POST", f"/v1/invoiceitems/{one['id']}", {"amount": 700})
     new_price = edited["pricing"]["price_details"]["price"]
     assert new_price != one["pricing"]["price_details"]["price"]
     assert edited["pricing"]["price_details"]["product"] == old_product
     # the catalog row agrees with the echo — no drift, no phantom product
     price_row = call(instance, "GET", f"/v1/prices/{new_price}")
-    assert price_row["status"] == 200
-    assert price_row["body"]["product"] == old_product
-    assert price_row["body"]["unit_amount"] == 700
+    assert price_row["product"] == old_product
+    assert price_row["unit_amount"] == 700
     assert instance.inspect().one("SELECT COUNT(*) AS n FROM products")["n"] == before
     assert (
         instance.inspect().one("SELECT COUNT(*) AS n FROM events WHERE type = 'product.created'")[
@@ -222,16 +224,18 @@ def test_the_dead_invoice_refusal_pair(instance, customer) -> None:
         "POST",
         "/v1/invoices",
         {"customer": customer, "pending_invoice_items_behavior": "include"},
-    )["body"]
-    assert call(instance, "DELETE", f"/v1/invoices/{invoice['id']}")["status"] == 200
-    refused = call(instance, "DELETE", f"/v1/invoiceitems/{one}")
-    assert refused["status"] == 400
-    assert refused["body"]["error"]["message"] == (
+    )
+    call(instance, "DELETE", f"/v1/invoices/{invoice['id']}")
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "DELETE", f"/v1/invoiceitems/{one}")
+    assert exc_info.value.status == 400
+    assert exc_info.value.stripe_body["error"]["message"] == (
         "Can't delete an invoice item that is attached to an invoice that is no longer editable"
     )
-    dead = call(instance, "POST", f"/v1/invoiceitems/{one}", {"description": "nope"})
-    assert dead["status"] == 400
-    assert dead["body"]["error"]["message"] == "This invoice item has been deleted."
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "POST", f"/v1/invoiceitems/{one}", {"description": "nope"})
+    assert exc_info.value.status == 400
+    assert exc_info.value.stripe_body["error"]["message"] == "This invoice item has been deleted."
     # the finalized-invoice flavor of the same gate
     two = item(instance, customer, 300, "finalized")
     invoice2 = call(
@@ -239,12 +243,12 @@ def test_the_dead_invoice_refusal_pair(instance, customer) -> None:
         "POST",
         "/v1/invoices",
         {"customer": customer, "pending_invoice_items_behavior": "include"},
-    )["body"]
+    )
     call(instance, "POST", f"/v1/invoices/{invoice2['id']}/finalize", {})
-    assert (
-        call(instance, "DELETE", f"/v1/invoiceitems/{two}")["body"]["error"]["message"]
-        == "Can't delete an invoice item that is attached to an invoice that"
-        " is no longer editable"
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "DELETE", f"/v1/invoiceitems/{two}")
+    assert exc_info.value.stripe_body["error"]["message"] == (
+        "Can't delete an invoice item that is attached to an invoice that is no longer editable"
     )
 
 

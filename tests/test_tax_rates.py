@@ -6,6 +6,7 @@ import pytest
 import seahaven
 
 from conftest import BLANK_NOW
+from seahaven_stripe_world.errors import StripeToolError
 
 pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
 
@@ -14,9 +15,7 @@ def create(instance: seahaven.Instance, **params: object) -> dict:
     params.setdefault("display_name", "CA sales tax")
     params.setdefault("inclusive", False)
     params.setdefault("percentage", 8.875)
-    result = instance.call("stripe_api_write", method="POST", path="/v1/tax_rates", params=params)
-    assert result["status"] == 200, result
-    return result["body"]
+    return instance.call("stripe_api_write", method="POST", path="/v1/tax_rates", params=params)
 
 
 def call(instance: seahaven.Instance, method: str, path: str, params: dict | None = None):
@@ -55,13 +54,14 @@ def test_an_integer_percentage_round_trips_as_given(instance: seahaven.Instance)
 
 
 def test_required_parameters(instance: seahaven.Instance) -> None:
-    result = call(instance, "POST", "/v1/tax_rates", {"display_name": "T", "inclusive": True})
-    assert result["status"] == 400
-    assert result["body"]["error"]["code"] == "parameter_missing"
-    assert result["body"]["error"]["message"] == "Missing required param: percentage."
-    result = call(instance, "POST", "/v1/tax_rates", {"display_name": "T", "percentage": 10})
-    assert result["status"] == 400
-    assert result["body"]["error"]["param"] == "inclusive"
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "POST", "/v1/tax_rates", {"display_name": "T", "inclusive": True})
+    assert exc_info.value.stripe_body["error"]["code"] == "parameter_missing"
+    assert exc_info.value.stripe_body["error"]["message"] == "Missing required param: percentage."
+
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "POST", "/v1/tax_rates", {"display_name": "T", "percentage": 10})
+    assert exc_info.value.stripe_body["error"]["param"] == "inclusive"
 
 
 def test_update_and_filters(instance: seahaven.Instance) -> None:
@@ -70,9 +70,8 @@ def test_update_and_filters(instance: seahaven.Instance) -> None:
     result = call(
         instance, "POST", f"/v1/tax_rates/{one['id']}", {"active": False, "description": "archived"}
     )
-    assert result["status"] == 200
-    assert result["body"]["active"] is False
-    assert result["body"]["description"] == "archived"
+    assert result["active"] is False
+    assert result["description"] == "archived"
     event = instance.inspect().one(
         "SELECT json_extract(data, '$.previous_attributes') AS prev FROM events"
         " WHERE type = 'tax_rate.updated'"
@@ -81,13 +80,14 @@ def test_update_and_filters(instance: seahaven.Instance) -> None:
     assert event["prev"] == '{"active":true,"description":null}'
 
     active = call(instance, "GET", "/v1/tax_rates", {"active": True})
-    assert [item["id"] for item in active["body"]["data"]] == [two["id"]]
+    assert [item["id"] for item in active["data"]] == [two["id"]]
     inclusive = call(instance, "GET", "/v1/tax_rates", {"inclusive": True})
-    assert [item["id"] for item in inclusive["body"]["data"]] == [two["id"]]
+    assert [item["id"] for item in inclusive["data"]] == [two["id"]]
 
 
 def test_bogus_id_message_names_two_words(instance: seahaven.Instance) -> None:
-    result = call(instance, "GET", "/v1/tax_rates/txr_nope")
-    assert result["status"] == 404
-    assert result["body"]["error"]["message"] == "No such tax rate: 'txr_nope'"
-    assert result["body"]["error"]["param"] == "tax_rate"
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "GET", "/v1/tax_rates/txr_nope")
+    assert exc_info.value.status == 404
+    assert exc_info.value.stripe_body["error"]["message"] == "No such tax rate: 'txr_nope'"
+    assert exc_info.value.stripe_body["error"]["param"] == "tax_rate"

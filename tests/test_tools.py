@@ -4,6 +4,7 @@ import pytest
 import seahaven
 
 from conftest import BLANK_NOW
+from seahaven_stripe_world.errors import StripeToolError
 
 pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
 
@@ -35,9 +36,10 @@ def test_a_non_object_params_is_refused_before_the_dispatcher(
 def test_the_read_tool_cannot_reach_a_post_only_route(instance: seahaven.Instance) -> None:
     """A `POST`-only path through the read tool is the router's unrecognized
     404, not a tool-contract error — the verb was legal, the URL was not."""
-    result = instance.call("stripe_api_read", path="/v1/charges/ch_1/capture")
-    assert result["status"] == 404
-    assert result["body"]["error"]["message"].startswith("Unrecognized request URL")
+    with pytest.raises(StripeToolError) as exc_info:
+        instance.call("stripe_api_read", path="/v1/charges/ch_1/capture")
+    assert exc_info.value.status == 404
+    assert "Unrecognized request URL" in exc_info.value.message
 
 
 def test_call_stripe_reaches_every_verb(instance: seahaven.Instance) -> None:

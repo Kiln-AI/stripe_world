@@ -8,14 +8,13 @@ import pytest
 import seahaven
 
 from conftest import BLANK_NOW
+from seahaven_stripe_world.errors import StripeToolError
 
 pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
 
 
 def create(instance: seahaven.Instance, **params: object) -> dict:
-    result = instance.call("stripe_api_write", method="POST", path="/v1/coupons", params=params)
-    assert result["status"] == 200, result
-    return result["body"]
+    return instance.call("stripe_api_write", method="POST", path="/v1/coupons", params=params)
 
 
 def call(instance: seahaven.Instance, method: str, path: str, params: dict | None = None):
@@ -95,21 +94,24 @@ def test_cross_field_refusals_are_verbatim(instance: seahaven.Instance) -> None:
         ),
     ]
     for params, message, code, param in cases:
-        result = call(instance, "POST", "/v1/coupons", params)
-        assert result["status"] == 400, params
-        error = result["body"]["error"]
+        with pytest.raises(StripeToolError) as exc_info:
+            call(instance, "POST", "/v1/coupons", params)
+        error = exc_info.value.stripe_body["error"]
         assert error["message"] == message, params
         assert error.get("code") == code, params
         assert error.get("param") == param, params
 
 
 def test_redeem_by_in_the_past_refuses(instance: seahaven.Instance) -> None:
-    result = call(
-        instance, "POST", "/v1/coupons", {"percent_off": 10, "duration": "once", "redeem_by": 1000}
-    )
-    assert result["status"] == 400
-    assert result["body"]["error"]["param"] == "redeem_by"
-    assert result["body"]["error"]["message"] == (
+    with pytest.raises(StripeToolError) as exc_info:
+        call(
+            instance,
+            "POST",
+            "/v1/coupons",
+            {"percent_off": 10, "duration": "once", "redeem_by": 1000},
+        )
+    assert exc_info.value.stripe_body["error"]["param"] == "redeem_by"
+    assert exc_info.value.stripe_body["error"]["message"] == (
         "The parameter `redeem_by` expects a unix timestamp representing a date and "
         "time in the future. You specified the value `1000` which is in the past."
     )
@@ -118,12 +120,12 @@ def test_redeem_by_in_the_past_refuses(instance: seahaven.Instance) -> None:
 def test_caller_supplied_id_round_trips_and_dupe_refuses(instance: seahaven.Instance) -> None:
     body = create(instance, id="TENOFF", percent_off=10, duration="forever")
     assert body["id"] == "TENOFF"
-    result = call(
-        instance, "POST", "/v1/coupons", {"id": "TENOFF", "percent_off": 5, "duration": "once"}
-    )
-    assert result["status"] == 400
-    assert result["body"]["error"]["code"] == "resource_already_exists"
-    assert result["body"]["error"]["message"] == "Coupon already exists."
+    with pytest.raises(StripeToolError) as exc_info:
+        call(
+            instance, "POST", "/v1/coupons", {"id": "TENOFF", "percent_off": 5, "duration": "once"}
+        )
+    assert exc_info.value.stripe_body["error"]["code"] == "resource_already_exists"
+    assert exc_info.value.stripe_body["error"]["message"] == "Coupon already exists."
 
 
 def test_applies_to_and_currency_options_are_stored_not_emitted(
@@ -137,7 +139,7 @@ def test_applies_to_and_currency_options_are_stored_not_emitted(
         amount_off=500,
         currency="usd",
         duration="once",
-        applies_to={"products": [prod["body"]["id"]]},
+        applies_to={"products": [prod["id"]]},
         currency_options={"eur": {"amount_off": 400}},
     )
     assert "applies_to" not in body
@@ -146,18 +148,18 @@ def test_applies_to_and_currency_options_are_stored_not_emitted(
         "SELECT applies_to, currency_options FROM coupons WHERE id = ?", body["id"]
     )
     assert row is not None
-    assert row["applies_to"] == '{{"products":["{}"]}}'.format(prod["body"]["id"])
+    assert row["applies_to"] == '{{"products":["{}"]}}'.format(prod["id"])
     assert row["currency_options"] == '{"eur":{"amount_off":400}}'
     # Probed verbatim: a percent coupon carries no per-currency amounts, and
     # this refusal outranks the map's own key validation.
-    refused = call(
-        instance,
-        "POST",
-        "/v1/coupons",
-        {"percent_off": 5, "duration": "once", "currency_options": {"eur": {"amount_off": 4}}},
-    )
-    assert refused["status"] == 400
-    error = refused["body"]["error"]
+    with pytest.raises(StripeToolError) as exc_info:
+        call(
+            instance,
+            "POST",
+            "/v1/coupons",
+            {"percent_off": 5, "duration": "once", "currency_options": {"eur": {"amount_off": 4}}},
+        )
+    error = exc_info.value.stripe_body["error"]
     assert error["message"] == (
         "You may only specify one of these parameters: currency_options, percent_off."
     )
@@ -176,8 +178,7 @@ def test_update_merges_currency_options_and_renames(instance: seahaven.Instance)
             "currency_options": {"gbp": {"amount_off": 300}},
         },
     )
-    assert result["status"] == 200
-    assert result["body"]["name"] == "renamed"
+    assert result["name"] == "renamed"
     row = instance.inspect().one("SELECT currency_options FROM coupons WHERE id = ?", body["id"])
     assert row is not None
     assert row["currency_options"] == '{"gbp":{"amount_off":300}}'
@@ -195,45 +196,45 @@ def test_currency_options_map_refusals(instance: seahaven.Instance) -> None:
     the wrong case, and the currencies-list refusal for anything else. The
     154-code list is transcribed in `dispatch/params.py` (see its comment for
     why it is not a cassette step)."""
-    scalar = call(
-        instance,
-        "POST",
-        "/v1/coupons",
-        {"amount_off": 500, "currency": "usd", "duration": "once", "currency_options": 5},
-    )
-    assert scalar["status"] == 400
-    assert scalar["body"]["error"]["message"] == "Invalid object"
-    assert scalar["body"]["error"]["param"] == "currency_options"
+    with pytest.raises(StripeToolError) as exc_info:
+        call(
+            instance,
+            "POST",
+            "/v1/coupons",
+            {"amount_off": 500, "currency": "usd", "duration": "once", "currency_options": 5},
+        )
+    assert exc_info.value.stripe_body["error"]["message"] == "Invalid object"
+    assert exc_info.value.stripe_body["error"]["param"] == "currency_options"
 
-    upper = call(
-        instance,
-        "POST",
-        "/v1/coupons",
-        {
-            "amount_off": 500,
-            "currency": "usd",
-            "duration": "once",
-            "currency_options": {"EUR": {"amount_off": 4}},
-        },
-    )
-    assert upper["status"] == 400
-    assert upper["body"]["error"]["message"] == (
+    with pytest.raises(StripeToolError) as exc_info:
+        call(
+            instance,
+            "POST",
+            "/v1/coupons",
+            {
+                "amount_off": 500,
+                "currency": "usd",
+                "duration": "once",
+                "currency_options": {"EUR": {"amount_off": 4}},
+            },
+        )
+    assert exc_info.value.stripe_body["error"]["message"] == (
         "Currencies must be lowercase when used as keys in a map. Use `eur` instead of `EUR`."
     )
 
-    bad = call(
-        instance,
-        "POST",
-        "/v1/coupons",
-        {
-            "amount_off": 500,
-            "currency": "usd",
-            "duration": "once",
-            "currency_options": {"xyz": {"amount_off": 4}},
-        },
-    )
-    assert bad["status"] == 400
-    message = bad["body"]["error"]["message"]
+    with pytest.raises(StripeToolError) as exc_info:
+        call(
+            instance,
+            "POST",
+            "/v1/coupons",
+            {
+                "amount_off": 500,
+                "currency": "usd",
+                "duration": "once",
+                "currency_options": {"xyz": {"amount_off": 4}},
+            },
+        )
+    message = exc_info.value.stripe_body["error"]["message"]
     assert message.startswith("Invalid currency: xyz. Stripe currently supports these currencies: ")
     assert "usd, aed, afn" in message
 
@@ -241,12 +242,12 @@ def test_currency_options_map_refusals(instance: seahaven.Instance) -> None:
 def test_delete_zeroes_valid_and_404s_the_retrieve(instance: seahaven.Instance) -> None:
     body = create(instance, percent_off=10, duration="once")
     result = call(instance, "DELETE", f"/v1/coupons/{body['id']}")
-    assert result["status"] == 200
-    assert result["body"] == {"id": body["id"], "object": "coupon", "deleted": True}
-    gone = call(instance, "GET", f"/v1/coupons/{body['id']}")
-    assert gone["status"] == 404
-    assert gone["body"]["error"]["message"] == f"No such coupon: '{body['id']}'"
-    assert gone["body"]["error"]["param"] == "coupon"
+    assert result == {"id": body["id"], "object": "coupon", "deleted": True}
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "GET", f"/v1/coupons/{body['id']}")
+    assert exc_info.value.status == 404
+    assert exc_info.value.stripe_body["error"]["message"] == f"No such coupon: '{body['id']}'"
+    assert exc_info.value.stripe_body["error"]["param"] == "coupon"
     snapshot = instance.inspect().one(
         "SELECT json_extract(data, '$.object.valid') AS v FROM events WHERE type = 'coupon.deleted'"
     )

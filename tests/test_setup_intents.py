@@ -8,6 +8,7 @@ import pytest
 import seahaven
 
 from conftest import BLANK_NOW
+from seahaven_stripe_world.errors import StripeToolError
 
 pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
 
@@ -19,10 +20,10 @@ def call(instance: seahaven.Instance, method: str, path: str, params: dict | Non
 
 
 def customer_with_card(instance: seahaven.Instance, token: str = "tok_visa") -> tuple[str, str]:
-    cus = call(instance, "POST", "/v1/customers", {"email": "si@example.test"})["body"]["id"]
+    cus = call(instance, "POST", "/v1/customers", {"email": "si@example.test"})["id"]
     pm = call(instance, "POST", "/v1/payment_methods", {"type": "card", "card": {"token": token}})[
-        "body"
-    ]["id"]
+        "id"
+    ]
     call(instance, "POST", f"/v1/payment_methods/{pm}/attach", {"customer": cus})
     return cus, pm
 
@@ -37,7 +38,7 @@ def events_of(instance: seahaven.Instance) -> list[str]:
 
 
 def test_the_created_body(instance: seahaven.Instance) -> None:
-    body = call(instance, "POST", "/v1/setup_intents", {"metadata": {"p": "1"}})["body"]
+    body = call(instance, "POST", "/v1/setup_intents", {"metadata": {"p": "1"}})
     assert body["object"] == "setup_intent"
     assert body["id"].startswith("seti_")
     assert body["status"] == "requires_payment_method"
@@ -79,14 +80,14 @@ def test_the_usage_parameter_is_dead(instance: seahaven.Instance) -> None:
     """Recorded: `on_session` — and even an invalid string — are accepted
     and ignored; the body answers `off_session` every time."""
     for usage in ("on_session", "bogus"):
-        body = call(instance, "POST", "/v1/setup_intents", {"usage": usage})["body"]
+        body = call(instance, "POST", "/v1/setup_intents", {"usage": usage})
         assert body["usage"] == "off_session"
     updated = call(
         instance,
         "POST",
         f"/v1/setup_intents/{body['id']}",
         {"usage": "on_session"},
-    )["body"]
+    )
     assert updated["usage"] == "off_session"
 
 
@@ -94,19 +95,18 @@ def test_create_with_a_payment_method_lands_requires_confirmation(
     instance: seahaven.Instance,
 ) -> None:
     cus, pm = customer_with_card(instance)
-    body = call(instance, "POST", "/v1/setup_intents", {"customer": cus, "payment_method": pm})[
-        "body"
-    ]
+    body = call(instance, "POST", "/v1/setup_intents", {"customer": cus, "payment_method": pm})
     assert body["status"] == "requires_confirmation"
     assert body["payment_method"] == pm
 
 
 def test_create_time_ownership_refusals_carry_no_intent(instance: seahaven.Instance) -> None:
     cus, pm = customer_with_card(instance)
-    other = call(instance, "POST", "/v1/customers", {"email": "o@example.test"})["body"]["id"]
-    wrong = call(instance, "POST", "/v1/setup_intents", {"customer": other, "payment_method": pm})
-    assert wrong["status"] == 400
-    err = wrong["body"]["error"]
+    other = call(instance, "POST", "/v1/customers", {"email": "o@example.test"})["id"]
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "POST", "/v1/setup_intents", {"customer": other, "payment_method": pm})
+    assert exc_info.value.status == 400
+    err = exc_info.value.stripe_body["error"]
     assert err["type"] == "invalid_request_error"
     assert "code" not in err
     assert err["param"] == "payment_method"
@@ -115,9 +115,10 @@ def test_create_time_ownership_refusals_carry_no_intent(instance: seahaven.Insta
         "Please use this PaymentMethod with the Customer that it belongs to instead."
     )
     assert "setup_intent" not in err
-    customerless = call(instance, "POST", "/v1/setup_intents", {"payment_method": pm})
-    assert customerless["status"] == 400
-    err = customerless["body"]["error"]
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "POST", "/v1/setup_intents", {"payment_method": pm})
+    assert exc_info.value.status == 400
+    err = exc_info.value.stripe_body["error"]
     assert err["param"] == "payment_method"
     assert err["message"] == (
         f"The payment method supplied ({pm}) belongs to the Customer {cus}. "
@@ -136,7 +137,7 @@ def test_confirm_succeeds_and_mints_the_attempt_stub(instance: seahaven.Instance
         "POST",
         "/v1/setup_intents",
         {"customer": cus, "payment_method": pm, "confirm": True},
-    )["body"]
+    )
     assert body["status"] == "succeeded"
     assert body["payment_method"] == pm
     assert body["latest_attempt"].startswith("setatt_")
@@ -147,7 +148,7 @@ def test_confirm_succeeds_and_mints_the_attempt_stub(instance: seahaven.Instance
     assert events_of(instance)[-2:] == ["setup_intent.created", "setup_intent.succeeded"]
     # the method was already attached: no attach event, still attached
     assert "payment_method.attached" not in events_of(instance)[-2:]
-    fresh = call(instance, "GET", f"/v1/payment_methods/{pm}")["body"]
+    fresh = call(instance, "GET", f"/v1/payment_methods/{pm}")
     assert fresh["customer"] == cus
 
 
@@ -155,16 +156,16 @@ def test_confirm_auto_attaches_an_unattached_method(instance: seahaven.Instance)
     cus, _ = customer_with_card(instance)
     pm = call(
         instance, "POST", "/v1/payment_methods", {"type": "card", "card": {"token": "tok_visa"}}
-    )["body"]["id"]
-    assert call(instance, "GET", f"/v1/payment_methods/{pm}")["body"]["customer"] is None
+    )["id"]
+    assert call(instance, "GET", f"/v1/payment_methods/{pm}")["customer"] is None
     body = call(
         instance,
         "POST",
         "/v1/setup_intents",
         {"customer": cus, "payment_method": pm, "confirm": True},
-    )["body"]
+    )
     assert body["status"] == "succeeded"
-    after = call(instance, "GET", f"/v1/payment_methods/{pm}")["body"]
+    after = call(instance, "GET", f"/v1/payment_methods/{pm}")
     assert after["customer"] == cus
     # the attach verifies the card (cvc flips to pass) and precedes the
     # terminal event
@@ -186,7 +187,7 @@ def test_the_3ds_card_parks_at_requires_action(instance: seahaven.Instance) -> N
         "POST",
         "/v1/setup_intents",
         {"customer": cus, "payment_method": pm, "confirm": True},
-    )["body"]
+    )
     assert body["status"] == "requires_action"
     assert body["next_action"] == {"type": "use_stripe_sdk", "use_stripe_sdk": {}}
     assert body["latest_attempt"].startswith("setatt_")
@@ -201,25 +202,29 @@ def test_the_3ds_card_parks_at_requires_action(instance: seahaven.Instance) -> N
 
 def _declined_flow(instance: seahaven.Instance, token: str, *, inline: bool):
     pm = call(instance, "POST", "/v1/payment_methods", {"type": "card", "card": {"token": token}})[
-        "body"
-    ]["id"]
+        "id"
+    ]
     if inline:
-        return pm, call(
-            instance,
-            "POST",
-            "/v1/setup_intents",
-            {"payment_method": pm, "confirm": True},
-        )
-    created = call(instance, "POST", "/v1/setup_intents", {"payment_method": pm})["body"]
-    return pm, call(instance, "POST", f"/v1/setup_intents/{created['id']}/confirm")
+        with pytest.raises(StripeToolError) as exc_info:
+            call(
+                instance,
+                "POST",
+                "/v1/setup_intents",
+                {"payment_method": pm, "confirm": True},
+            )
+        return pm, exc_info
+    created = call(instance, "POST", "/v1/setup_intents", {"payment_method": pm})
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "POST", f"/v1/setup_intents/{created['id']}/confirm")
+    return pm, exc_info
 
 
 def test_the_generic_decline_is_a_returned_402_whose_rows_survive(
     instance: seahaven.Instance,
 ) -> None:
-    pm, result = _declined_flow(instance, "tok_visa_chargeDeclined", inline=True)
-    assert result["status"] == 402
-    err = result["body"]["error"]
+    pm, exc_info = _declined_flow(instance, "tok_visa_chargeDeclined", inline=True)
+    assert exc_info.value.status == 402
+    err = exc_info.value.stripe_body["error"]
     assert err["type"] == "card_error"
     assert err["code"] == "card_declined"
     assert err["decline_code"] == "generic_decline"
@@ -235,7 +240,7 @@ def test_the_generic_decline_is_a_returned_402_whose_rows_survive(
     assert failed["last_setup_error"]["payment_method"]["id"] == pm
     assert "payment_method_type" not in failed["last_setup_error"]
     # the row survives and reads back the same way
-    again = call(instance, "GET", f"/v1/setup_intents/{failed['id']}")["body"]
+    again = call(instance, "GET", f"/v1/setup_intents/{failed['id']}")
     assert again["status"] == "requires_payment_method"
     assert again["last_setup_error"]["code"] == "card_declined"
     assert events_of(instance)[-2:] == ["setup_intent.created", "setup_intent.setup_failed"]
@@ -244,9 +249,9 @@ def test_the_generic_decline_is_a_returned_402_whose_rows_survive(
 def test_the_expired_card_decline_carries_its_param_and_fallback_code(
     instance: seahaven.Instance,
 ) -> None:
-    _pm, result = _declined_flow(instance, "tok_chargeDeclinedExpiredCard", inline=False)
-    assert result["status"] == 402
-    err = result["body"]["error"]
+    _pm, exc_info = _declined_flow(instance, "tok_chargeDeclinedExpiredCard", inline=False)
+    assert exc_info.value.status == 402
+    err = exc_info.value.stripe_body["error"]
     assert err["code"] == "expired_card"
     # the setup decline's decline_code falls back to the code (recorded)
     assert err["decline_code"] == "expired_card"
@@ -261,9 +266,10 @@ def test_the_expired_card_decline_carries_its_param_and_fallback_code(
 
 
 def _refusal(instance: seahaven.Instance, method: str, path: str, params: dict | None = None):
-    result = call(instance, method, path, params)
-    assert result["status"] == 400
-    return result["body"]["error"]
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, method, path, params)
+    assert exc_info.value.status == 400
+    return exc_info.value.stripe_body["error"]
 
 
 def test_confirm_without_a_method_refuses_and_never_reads_the_customer_default(
@@ -276,7 +282,7 @@ def test_confirm_without_a_method_refuses_and_never_reads_the_customer_default(
         f"/v1/customers/{cus}",
         {"invoice_settings": {"default_payment_method": pm}},
     )
-    body = call(instance, "POST", "/v1/setup_intents", {"customer": cus})["body"]
+    body = call(instance, "POST", "/v1/setup_intents", {"customer": cus})
     err = _refusal(instance, "POST", f"/v1/setup_intents/{body['id']}/confirm")
     assert err["code"] == "setup_intent_unexpected_state"
     assert err["message"] == (
@@ -291,8 +297,8 @@ def test_confirm_without_a_method_refuses_and_never_reads_the_customer_default(
 
 def test_confirm_time_ownership_refusals_carry_the_intent(instance: seahaven.Instance) -> None:
     cus, pm = customer_with_card(instance)
-    other = call(instance, "POST", "/v1/customers", {"email": "oc@example.test"})["body"]["id"]
-    wrong = call(instance, "POST", "/v1/setup_intents", {"customer": other})["body"]
+    other = call(instance, "POST", "/v1/customers", {"email": "oc@example.test"})["id"]
+    wrong = call(instance, "POST", "/v1/setup_intents", {"customer": other})
     err = _refusal(
         instance, "POST", f"/v1/setup_intents/{wrong['id']}/confirm", {"payment_method": pm}
     )
@@ -303,7 +309,7 @@ def test_confirm_time_ownership_refusals_carry_the_intent(instance: seahaven.Ins
         "Please use this PaymentMethod with the Customer that it belongs to instead."
     )
     assert err["setup_intent"]["id"] == wrong["id"]
-    none = call(instance, "POST", "/v1/setup_intents")["body"]
+    none = call(instance, "POST", "/v1/setup_intents")
     err = _refusal(
         instance, "POST", f"/v1/setup_intents/{none['id']}/confirm", {"payment_method": pm}
     )
@@ -321,7 +327,7 @@ def test_the_wrong_state_family_verbatim(instance: seahaven.Instance) -> None:
         "POST",
         "/v1/setup_intents",
         {"customer": cus, "payment_method": pm, "confirm": True},
-    )["body"]
+    )
     err = _refusal(instance, "POST", f"/v1/setup_intents/{ok['id']}/confirm")
     assert err["code"] == "setup_intent_unexpected_state"
     assert err["message"] == "You cannot confirm this SetupIntent because it has already succeeded."
@@ -338,15 +344,13 @@ def test_the_wrong_state_family_verbatim(instance: seahaven.Instance) -> None:
 
 def test_cancel_stamps_the_reason_and_keeps_the_method(instance: seahaven.Instance) -> None:
     cus, pm = customer_with_card(instance)
-    body = call(instance, "POST", "/v1/setup_intents", {"customer": cus, "payment_method": pm})[
-        "body"
-    ]
+    body = call(instance, "POST", "/v1/setup_intents", {"customer": cus, "payment_method": pm})
     canceled = call(
         instance,
         "POST",
         f"/v1/setup_intents/{body['id']}/cancel",
         {"cancellation_reason": "duplicate"},
-    )["body"]
+    )
     assert canceled["status"] == "canceled"
     assert canceled["cancellation_reason"] == "duplicate"
     assert canceled["payment_method"] == pm  # kept (recorded)
@@ -361,8 +365,8 @@ def test_cancel_stamps_the_reason_and_keeps_the_method(instance: seahaven.Instan
 
 
 def test_cancel_without_a_reason_stamps_null(instance: seahaven.Instance) -> None:
-    body = call(instance, "POST", "/v1/setup_intents")["body"]
-    canceled = call(instance, "POST", f"/v1/setup_intents/{body['id']}/cancel")["body"]
+    body = call(instance, "POST", "/v1/setup_intents")
+    canceled = call(instance, "POST", f"/v1/setup_intents/{body['id']}/cancel")
     assert canceled["cancellation_reason"] is None
 
 
@@ -378,18 +382,16 @@ def test_updates_merge_metadata_and_move_an_open_intent_to_confirmable(
         "POST",
         "/v1/setup_intents",
         {"customer": cus, "description": "before", "metadata": {"a": "1"}},
-    )["body"]
+    )
     updated = call(
         instance,
         "POST",
         f"/v1/setup_intents/{body['id']}",
         {"description": "after", "metadata": {"b": "2"}},
-    )["body"]
+    )
     assert updated["description"] == "after"
     assert updated["metadata"] == {"a": "1", "b": "2"}
-    with_pm = call(instance, "POST", f"/v1/setup_intents/{body['id']}", {"payment_method": pm})[
-        "body"
-    ]
+    with_pm = call(instance, "POST", f"/v1/setup_intents/{body['id']}", {"payment_method": pm})
     assert with_pm["status"] == "requires_confirmation"  # the create rule, applied
     # updates emit no event: there is no setup_intent.updated in the closed set
     assert events_of(instance)[-1] == "setup_intent.created"
@@ -404,13 +406,13 @@ def test_a_succeeded_intent_still_takes_description_and_metadata(
         "POST",
         "/v1/setup_intents",
         {"customer": cus, "payment_method": pm, "confirm": True},
-    )["body"]
+    )
     updated = call(
         instance,
         "POST",
         f"/v1/setup_intents/{ok['id']}",
         {"description": "after the fact", "metadata": {"k": "v"}},
-    )["body"]
+    )
     assert updated["description"] == "after the fact"
     assert updated["metadata"] == {"k": "v"}
     err = _refusal(instance, "POST", f"/v1/setup_intents/{ok['id']}", {"payment_method": pm})
@@ -421,8 +423,8 @@ def test_a_succeeded_intent_still_takes_description_and_metadata(
 
 def test_update_time_ownership_refusals_carry_the_intent(instance: seahaven.Instance) -> None:
     cus, pm = customer_with_card(instance)
-    other = call(instance, "POST", "/v1/customers", {"email": "ou@example.test"})["body"]["id"]
-    bare = call(instance, "POST", "/v1/setup_intents")["body"]
+    other = call(instance, "POST", "/v1/customers", {"email": "ou@example.test"})["id"]
+    bare = call(instance, "POST", "/v1/setup_intents")
     err = _refusal(instance, "POST", f"/v1/setup_intents/{bare['id']}", {"payment_method": pm})
     assert "code" not in err
     assert err["param"] == "payment_method"
@@ -431,7 +433,7 @@ def test_update_time_ownership_refusals_carry_the_intent(instance: seahaven.Inst
         "Please include the Customer in the `customer` parameter on the SetupIntent."
     )
     assert err["setup_intent"]["id"] == bare["id"]
-    moved = call(instance, "POST", f"/v1/setup_intents/{bare['id']}", {"customer": other})["body"]
+    moved = call(instance, "POST", f"/v1/setup_intents/{bare['id']}", {"customer": other})
     assert moved["customer"] == other
     err = _refusal(instance, "POST", f"/v1/setup_intents/{bare['id']}", {"payment_method": pm})
     assert err["message"] == (
@@ -444,15 +446,16 @@ def test_update_time_ownership_refusals_carry_the_intent(instance: seahaven.Inst
 
 
 def test_verify_microdeposits_refuses_the_recorded_shape(instance: seahaven.Instance) -> None:
-    body = call(instance, "POST", "/v1/setup_intents")["body"]
-    result = call(
-        instance,
-        "POST",
-        f"/v1/setup_intents/{body['id']}/verify_microdeposits",
-        {"amounts": [32, 45]},
-    )
-    assert result["status"] == 400
-    err = result["body"]["error"]
+    body = call(instance, "POST", "/v1/setup_intents")
+    with pytest.raises(StripeToolError) as exc_info:
+        call(
+            instance,
+            "POST",
+            f"/v1/setup_intents/{body['id']}/verify_microdeposits",
+            {"amounts": [32, 45]},
+        )
+    assert exc_info.value.status == 400
+    err = exc_info.value.stripe_body["error"]
     assert err["code"] == "intent_invalid_state"
     assert err["doc_url"] == "https://stripe.com/docs/error-codes/intent-invalid-state"
     assert err["message"] == (
@@ -467,28 +470,27 @@ def test_lists_filter_and_the_missing_id_keeps_the_placeholder(
     instance: seahaven.Instance,
 ) -> None:
     cus, pm = customer_with_card(instance)
-    mine = call(instance, "POST", "/v1/setup_intents", {"customer": cus, "payment_method": pm})[
-        "body"
-    ]
-    by_customer = call(instance, "GET", "/v1/setup_intents", {"customer": cus})["body"]
+    mine = call(instance, "POST", "/v1/setup_intents", {"customer": cus, "payment_method": pm})
+    by_customer = call(instance, "GET", "/v1/setup_intents", {"customer": cus})
     assert [item["id"] for item in by_customer["data"]] == [mine["id"]]
     assert by_customer["url"] == "/v1/setup_intents"
-    by_pm = call(instance, "GET", "/v1/setup_intents", {"payment_method": pm})["body"]
+    by_pm = call(instance, "GET", "/v1/setup_intents", {"payment_method": pm})
     assert [item["id"] for item in by_pm["data"]] == [mine["id"]]
-    missing = call(instance, "GET", "/v1/setup_intents/seti_missing000000000000000")
-    assert missing["status"] == 404
-    err = missing["body"]["error"]
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "GET", "/v1/setup_intents/seti_missing000000000000000")
+    assert exc_info.value.status == 404
+    err = exc_info.value.stripe_body["error"]
     assert err["code"] == "resource_missing"
     assert err["param"] == "intent"
     assert err["message"] == "No such setupintent: 'seti_missing000000000000000'"
-    # The hand-written paths answer the same one-word spelling (the engine's
-    # retrieve reads it off the SPEC; these read it off _re_read).
-    canceled = call(instance, "POST", "/v1/setup_intents/seti_missing000000000000000/cancel")
-    assert canceled["status"] == 404
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "POST", "/v1/setup_intents/seti_missing000000000000000/cancel")
+    assert exc_info.value.status == 404
     assert (
-        canceled["body"]["error"]["message"] == "No such setupintent: 'seti_missing000000000000000'"
+        exc_info.value.stripe_body["error"]["message"]
+        == "No such setupintent: 'seti_missing000000000000000'"
     )
-    assert canceled["body"]["error"]["param"] == "intent"
+    assert exc_info.value.stripe_body["error"]["param"] == "intent"
 
 
 def test_expansion_off_a_setup_intent(instance: seahaven.Instance) -> None:
@@ -498,13 +500,13 @@ def test_expansion_off_a_setup_intent(instance: seahaven.Instance) -> None:
         "POST",
         "/v1/setup_intents",
         {"customer": cus, "payment_method": pm},
-    )["body"]
+    )
     got = call(
         instance,
         "GET",
         f"/v1/setup_intents/{body['id']}",
         {"expand": ["payment_method", "customer"]},
-    )["body"]
+    )
     assert got["payment_method"]["object"] == "payment_method"
     assert got["payment_method"]["id"] == pm
     assert got["customer"]["object"] == "customer"

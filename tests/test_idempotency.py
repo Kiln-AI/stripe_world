@@ -9,6 +9,7 @@ import pytest
 import seahaven
 
 from conftest import BLANK_NOW
+from seahaven_stripe_world.errors import StripeToolError
 from seahaven_stripe_world.middleware.idempotency import request_hash
 
 pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
@@ -31,7 +32,7 @@ def key_row(instance: seahaven.Instance, key: str) -> dict | None:
 def a_customer(instance: seahaven.Instance, email: str = "idem@example.test") -> str:
     return instance.call(
         "stripe_api_write", method="POST", path="/v1/customers", params={"email": email}
-    )["body"]["id"]
+    )["id"]
 
 
 # --- the short-circuit: outcome (b), §3.1.8's two doors -------------------------------------------
@@ -43,17 +44,13 @@ def test_a_replayed_post_writes_nothing_and_returns_the_stored_body(
     first = write(
         instance, "/v1/payment_intents", {"amount": 4900, "currency": "usd"}, key="idem-1"
     )
-    assert first["status"] == 200
     before_log = instance.change_log()
     replay = write(
         instance, "/v1/payment_intents", {"amount": 4900, "currency": "usd"}, key="idem-1"
     )
     # Door one: the stored body, byte for byte — `next_` never ran, so nothing
     # was validated, written or emitted, and the two responses are one.
-    # Headers carry a per-call `Request-Id`, so status and body are compared
-    # directly; the header shape is checked by `test_cross_cutting.py`.
-    assert replay["status"] == first["status"]
-    assert replay["body"] == first["body"]
+    assert replay == first
     # Door two: exactly the first call's records — the replay added none.
     assert instance.change_log() == before_log
     assert instance.inspect().one("SELECT count(*) AS n FROM payment_intents") == {"n": 1}
@@ -75,7 +72,7 @@ def test_the_hash_ignores_parameter_key_order(instance: seahaven.Instance) -> No
     replay = write(
         instance, "/v1/payment_intents", {"currency": "usd", "amount": 700}, key="idem-2a"
     )
-    assert replay["status"] == 200  # one request, however the caller ordered it
+    assert isinstance(replay, dict) and "id" in replay  # one request, however the caller ordered it
     assert instance.inspect().one("SELECT count(*) AS n FROM payment_intents") == {"n": 1}
 
 
@@ -86,11 +83,10 @@ def test_the_same_key_with_different_parameters_answers_the_mismatch(
     instance: seahaven.Instance,
 ) -> None:
     write(instance, "/v1/payment_intents", {"amount": 4900, "currency": "usd"}, key="idem-3")
-    mismatch = write(
-        instance, "/v1/payment_intents", {"amount": 5000, "currency": "usd"}, key="idem-3"
-    )
-    assert mismatch["status"] == 400
-    error = mismatch["body"]["error"]
+    with pytest.raises(StripeToolError) as exc_info:
+        write(instance, "/v1/payment_intents", {"amount": 5000, "currency": "usd"}, key="idem-3")
+    assert exc_info.value.status == 400
+    error = exc_info.value.stripe_body["error"]
     assert error["type"] == "idempotency_error"
     assert "code" not in error  # the envelope omits null fields
     assert error["message"] == (
@@ -111,11 +107,10 @@ def test_a_key_is_scoped_to_the_endpoint(instance: seahaven.Instance) -> None:
     """The endpoint is in the hash, not the primary key (§3.1.2/§7.2): one key
     across two endpoints is a mismatch, not a replay."""
     write(instance, "/v1/customers", {"email": "one@example.test"}, key="idem-4")
-    mismatch = write(
-        instance, "/v1/payment_intents", {"amount": 100, "currency": "usd"}, key="idem-4"
-    )
-    assert mismatch["status"] == 400
-    assert mismatch["body"]["error"]["type"] == "idempotency_error"
+    with pytest.raises(StripeToolError) as exc_info:
+        write(instance, "/v1/payment_intents", {"amount": 100, "currency": "usd"}, key="idem-4")
+    assert exc_info.value.status == 400
+    assert exc_info.value.stripe_body["error"]["type"] == "idempotency_error"
 
 
 # --- pass-throughs: §3.1.1 ------------------------------------------------------------------------
@@ -130,10 +125,9 @@ def test_delete_does_not_honour_the_key(instance: seahaven.Instance) -> None:
     second = instance.call(
         "stripe_api_write", method="DELETE", path=f"/v1/customers/{two}", idempotency_key="idem-5"
     )
-    assert first["status"] == 200
     # Re-executed, not replayed: the second answer names the second customer.
-    assert second["status"] == 200
-    assert second["body"]["id"] == two
+    assert first["id"] == one
+    assert second["id"] == two
     assert key_row(instance, "idem-5") is None  # v1 DELETE ignores keys silently
 
 
@@ -170,11 +164,12 @@ def test_a_pre_execution_fault_retracts_the_reservation(instance: seahaven.Insta
     """`parameter_invalid_integer` on amount=0 is pre-execution (Phase 8's
     recorded refusal): "you can retry these requests" must be true, so the
     reservation is gone and a corrected retry executes fresh."""
-    refused = write(instance, "/v1/payment_intents", {"amount": 0, "currency": "usd"}, key="idem-6")
-    assert refused["status"] == 400
+    with pytest.raises(StripeToolError) as exc_info:
+        write(instance, "/v1/payment_intents", {"amount": 0, "currency": "usd"}, key="idem-6")
+    assert exc_info.value.status == 400
     assert key_row(instance, "idem-6") is None
     ok = write(instance, "/v1/payment_intents", {"amount": 1200, "currency": "usd"}, key="idem-6")
-    assert ok["status"] == 200  # the key was never poisoned
+    assert isinstance(ok, dict) and "id" in ok  # the key was never poisoned
     row = key_row(instance, "idem-6")
     assert row is not None
     assert row["state"] == "complete"
@@ -184,13 +179,14 @@ def test_a_raised_execution_fault_is_cached_not_retracted(instance: seahaven.Ins
     """§3.5.5's middle branch: a `resource_missing` raised inside a handler
     (pre_execution=False) reached endpoint execution, so the 404 is cached —
     the retry replays it without re-running anything."""
-    missing = write(
-        instance,
-        "/v1/payment_intents/pi_nope/confirm",
-        None,
-        key="idem-7",
-    )
-    assert missing["status"] == 404
+    with pytest.raises(StripeToolError) as exc_info:
+        write(
+            instance,
+            "/v1/payment_intents/pi_nope/confirm",
+            None,
+            key="idem-7",
+        )
+    assert exc_info.value.status == 404
     assert key_row(instance, "idem-7") == {
         "method": "POST",
         "path": "/v1/payment_intents/pi_nope/confirm",
@@ -198,14 +194,15 @@ def test_a_raised_execution_fault_is_cached_not_retracted(instance: seahaven.Ins
         "state": "complete",
         "status": 404,
     }
-    replay = write(
-        instance,
-        "/v1/payment_intents/pi_nope/confirm",
-        None,
-        key="idem-7",
-    )
-    assert replay["status"] == missing["status"]
-    assert replay["body"] == missing["body"]
+    with pytest.raises(StripeToolError) as replay_info:
+        write(
+            instance,
+            "/v1/payment_intents/pi_nope/confirm",
+            None,
+            key="idem-7",
+        )
+    assert replay_info.value.status == exc_info.value.status
+    assert replay_info.value.message == exc_info.value.message
 
 
 # --- outcome (d) ----------------------------------------------------------------------------------
@@ -222,9 +219,10 @@ def test_an_in_flight_key_answers_409(instance: seahaven.Instance) -> None:
             " 'in_flight', NULL, NULL, ?)",
             ctx.clock.iso(),
         )
-    in_flight = write(instance, "/v1/customers", {"email": "x@example.test"}, key="idem-8")
-    assert in_flight["status"] == 409
-    error = in_flight["body"]["error"]
+    with pytest.raises(StripeToolError) as exc_info:
+        write(instance, "/v1/customers", {"email": "x@example.test"}, key="idem-8")
+    assert exc_info.value.status == 409
+    error = exc_info.value.stripe_body["error"]
     assert error["type"] == "idempotency_error"
     assert error["code"] == "idempotency_key_in_use"
     # In flight beats the hash (§3.1.4d): nothing executed, nothing completed.
@@ -247,7 +245,7 @@ def test_a_returned_402_decline_is_cached_under_the_key(instance: seahaven.Insta
             "type": "card",
             "card": {"number": "4000000000000341", "exp_month": 9, "exp_year": 2027},
         },
-    )["body"]["id"]
+    )["id"]
     params = {
         "amount": 1000,
         "currency": "usd",
@@ -255,11 +253,15 @@ def test_a_returned_402_decline_is_cached_under_the_key(instance: seahaven.Insta
         "payment_method": declined,
         "confirm": True,
     }
-    first = write(instance, "/v1/payment_intents", params, key="idem-9")
-    assert first["status"] == 402
-    replay = write(instance, "/v1/payment_intents", params, key="idem-9")
-    assert replay["status"] == first["status"]
-    assert replay["body"] == first["body"]  # the decline replayed, not re-run
+    with pytest.raises(StripeToolError) as first_info:
+        write(instance, "/v1/payment_intents", params, key="idem-9")
+    assert first_info.value.status == 402
+    with pytest.raises(StripeToolError) as replay_info:
+        write(instance, "/v1/payment_intents", params, key="idem-9")
+    assert replay_info.value.status == first_info.value.status
+    assert (
+        replay_info.value.stripe_body == first_info.value.stripe_body
+    )  # the decline replayed, not re-run
     # Exactly one failed charge row exists across both calls: re-running the
     # confirm would have written a second one (§3.5.5's stated stake).
     assert instance.inspect().one("SELECT count(*) AS n FROM charges WHERE status = 'failed'") == {
@@ -285,9 +287,10 @@ def test_in_flight_beats_a_matching_hash(instance: seahaven.Instance) -> None:
             digest,
             ctx.clock.iso(),
         )
-    result = write(instance, "/v1/customers", {"email": "x@example.test"}, key="idem-10")
-    assert result["status"] == 409
-    assert result["body"]["error"]["code"] == "idempotency_key_in_use"
+    with pytest.raises(StripeToolError) as exc_info:
+        write(instance, "/v1/customers", {"email": "x@example.test"}, key="idem-10")
+    assert exc_info.value.status == 409
+    assert exc_info.value.stripe_body["error"]["code"] == "idempotency_key_in_use"
 
 
 def test_argument_error_retracts_the_reservation(instance: seahaven.Instance) -> None:
@@ -329,12 +332,30 @@ def test_hash_is_order_sensitive_for_arrays(instance: seahaven.Instance) -> None
     """Reordered `items[]` is a mismatch: array order is meaningful and
     making one order-insensitive would be a special case (§3.1.2)."""
     cus = a_customer(instance)
+    pm = instance.call(
+        "stripe_api_write",
+        method="POST",
+        path="/v1/payment_methods",
+        params={"type": "card", "card": {"token": "tok_visa"}},
+    )["id"]
+    instance.call(
+        "stripe_api_write",
+        method="POST",
+        path=f"/v1/payment_methods/{pm}/attach",
+        params={"customer": cus},
+    )
+    instance.call(
+        "stripe_api_write",
+        method="POST",
+        path=f"/v1/customers/{cus}",
+        params={"invoice_settings": {"default_payment_method": pm}},
+    )
     prod1 = instance.call(
         "stripe_api_write", method="POST", path="/v1/products", params={"name": "A"}
-    )["body"]["id"]
+    )["id"]
     prod2 = instance.call(
         "stripe_api_write", method="POST", path="/v1/products", params={"name": "B"}
-    )["body"]["id"]
+    )["id"]
     price1 = instance.call(
         "stripe_api_write",
         method="POST",
@@ -345,7 +366,7 @@ def test_hash_is_order_sensitive_for_arrays(instance: seahaven.Instance) -> None
             "currency": "usd",
             "recurring": {"interval": "month"},
         },
-    )["body"]["id"]
+    )["id"]
     price2 = instance.call(
         "stripe_api_write",
         method="POST",
@@ -356,7 +377,7 @@ def test_hash_is_order_sensitive_for_arrays(instance: seahaven.Instance) -> None
             "currency": "usd",
             "recurring": {"interval": "month"},
         },
-    )["body"]["id"]
+    )["id"]
     params_a = {
         "customer": cus,
         "items": [{"price": price1}, {"price": price2}],
@@ -366,23 +387,25 @@ def test_hash_is_order_sensitive_for_arrays(instance: seahaven.Instance) -> None
         "items": [{"price": price2}, {"price": price1}],
     }
     write(instance, "/v1/subscriptions", params_a, key="idem-13")
-    mismatch = write(instance, "/v1/subscriptions", params_b, key="idem-13")
-    assert mismatch["status"] == 400
-    assert mismatch["body"]["error"]["type"] == "idempotency_error"
+    with pytest.raises(StripeToolError) as exc_info:
+        write(instance, "/v1/subscriptions", params_b, key="idem-13")
+    assert exc_info.value.status == 400
+    assert exc_info.value.stripe_body["error"]["type"] == "idempotency_error"
 
 
 def test_hash_includes_expand(instance: seahaven.Instance) -> None:
     """Same params plus `expand[]` is a mismatch: `expand` is a parameter
     and Stripe compares parameters (§3.1.2)."""
     write(instance, "/v1/customers", {"email": "ex@example.test"}, key="idem-14")
-    mismatch = write(
-        instance,
-        "/v1/customers",
-        {"email": "ex@example.test", "expand": ["default_source"]},
-        key="idem-14",
-    )
-    assert mismatch["status"] == 400
-    assert mismatch["body"]["error"]["type"] == "idempotency_error"
+    with pytest.raises(StripeToolError) as exc_info:
+        write(
+            instance,
+            "/v1/customers",
+            {"email": "ex@example.test", "expand": ["default_source"]},
+            key="idem-14",
+        )
+    assert exc_info.value.status == 400
+    assert exc_info.value.stripe_body["error"]["type"] == "idempotency_error"
 
 
 def test_key_table_is_absent_from_state(instance: seahaven.Instance) -> None:
@@ -410,7 +433,8 @@ def test_mismatch_writes_nothing(instance: seahaven.Instance) -> None:
     """A mismatch does not re-execute and adds nothing to the change log."""
     write(instance, "/v1/customers", {"email": "m@example.test"}, key="idem-16")
     before = instance.change_log()
-    write(instance, "/v1/customers", {"name": "Different"}, key="idem-16")
+    with pytest.raises(StripeToolError):
+        write(instance, "/v1/customers", {"name": "Different"}, key="idem-16")
     assert instance.change_log() == before
 
 

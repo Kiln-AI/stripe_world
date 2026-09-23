@@ -70,18 +70,23 @@ class ConformanceFailure(AssertionError):
 
 
 def _dispatch(instance: seahaven.Instance, wire: Wire) -> tuple[int, dict[str, Any]]:
+    from seahaven_stripe_world.errors import StripeToolError
+
     params = wire.params or None
-    if wire.method == "GET":
-        result = instance.call("stripe_api_read", path=wire.path, params=params)
-    else:
-        result = instance.call(
-            "stripe_api_write",
-            method=wire.method,
-            path=wire.path,
-            params=params,
-            idempotency_key=wire.idempotency_key,
-        )
-    return int(result["status"]), result["body"]
+    try:
+        if wire.method == "GET":
+            result = instance.call("stripe_api_read", path=wire.path, params=params)
+        else:
+            result = instance.call(
+                "stripe_api_write",
+                method=wire.method,
+                path=wire.path,
+                params=params,
+                idempotency_key=wire.idempotency_key,
+            )
+        return 200, result
+    except StripeToolError as exc:
+        return exc.status, exc.stripe_body
 
 
 def _concrete(step: Step, bindings: dict[str, Any]) -> tuple[str, dict[str, Any]]:

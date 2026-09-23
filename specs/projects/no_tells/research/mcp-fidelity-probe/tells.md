@@ -31,7 +31,7 @@ discover later.
 
 | ID | Tell | Lane(s) | Cost | Disposition |
 |---|---|---|---|---|
-| EC-04 | Response headers (`Stripe-Version`, `Request-Id`) visible in our world; real MCP surfaces none | envelope | trivial | open |
+| EC-04 | Response headers (`Stripe-Version`, `Request-Id`) visible in our world; real MCP surfaces none | envelope | trivial | closed |
 | TS-13, DT-02 | Search output missing `{openapi_spec_version, data}` wrapper; ours returns bare list | tool-surface, discovery | trivial | open |
 | TS-14, DT-03 | Search results missing `id` (operation ID) and optional `llm_context` fields | tool-surface, discovery | trivial | open |
 | TS-08 | `stripe_api_read` description text doesn't match (references paths, not operation IDs) | tool-surface | trivial | open |
@@ -44,8 +44,8 @@ discover later.
 | AS-05 | Account `charges_enabled`/`payouts_enabled` should be `false`; ours are `true` | account-stats | trivial | closed |
 | AS-06 | `business_profile` missing 5 null sub-fields; `name` is `"Test Business"` but should be `null` | account-stats | trivial | closed |
 | AS-08 | Account ID `acct_1SWTestAccount00` is a human-readable constant; real IDs are 16 random alphanumerics | account-stats | trivial | closed |
-| TS-10, TS-11, EC-01 | Success response is bare JSON body; ours wraps in `{status, body, headers}` | tool-surface, envelope | moderate | open |
-| TS-12, EC-02 | Errors are MCP tool errors (plain text); ours returns structured `{status, body}` with `error` object | tool-surface, envelope | moderate | open |
+| TS-10, TS-11, EC-01 | Success response is bare JSON body; ours wraps in `{status, body, headers}` | tool-surface, envelope | moderate | closed |
+| TS-12, EC-02 | Errors are MCP tool errors (plain text); ours returns structured `{status, body}` with `error` object | tool-surface, envelope | moderate | closed |
 | TS-15, DT-14 | Details response has 12 keys (`id`, `tags`, `keywords`, `required_permissions`, ...); ours has 6 with `operation_id` not `id` | tool-surface, discovery | moderate | open |
 | TS-16, DT-15 | Details parameters grouped as `{path:{}, query:{}, body:{}}` dicts; ours is a flat list | tool-surface, discovery | moderate | open |
 | TS-18, DT-04 | Path placeholders normalized to `{id}` everywhere; ours uses `{customer}`, `{invoice}`, etc. | tool-surface, discovery | moderate | open |

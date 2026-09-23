@@ -21,7 +21,33 @@ from typing import Any
 
 import seahaven
 
-__all__ = ["Internal", "InvalidInput", "InvalidMethod", "InvalidSearchQuery", "UnknownOperation"]
+__all__ = [
+    "Internal",
+    "InvalidInput",
+    "InvalidMethod",
+    "InvalidSearchQuery",
+    "StripeToolError",
+    "UnknownOperation",
+]
+
+
+class StripeToolError(seahaven.ToolError):
+    """A Stripe API error rendered for the MCP-shaped tool surface.
+
+    The envelope middleware raises this when a non-2xx ``ApiResponse`` or a
+    caught ``StripeApiError`` needs to reach the agent as a tool error carrying
+    a plain string.  The message format -- ``Stripe API error: {message}`` --
+    matches the real MCP server's error rendering (functional spec section 4.5).
+
+    ``status`` and ``stripe_body`` are exposed so tests can verify business
+    logic (which error code was produced) without re-parsing the rendered
+    string; neither is visible to the agent.
+    """
+
+    def __init__(self, message: str, *, status: int, stripe_body: dict) -> None:
+        super().__init__("STRIPE_API_ERROR", message, {"status": status})
+        self.status = status
+        self.stripe_body = stripe_body
 
 
 class InvalidInput(seahaven.ToolError):

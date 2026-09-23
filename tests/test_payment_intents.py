@@ -8,6 +8,7 @@ import pytest
 import seahaven
 
 from conftest import BLANK_NOW
+from seahaven_stripe_world.errors import StripeToolError
 
 pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
 
@@ -19,10 +20,10 @@ def call(instance: seahaven.Instance, method: str, path: str, params: dict | Non
 
 
 def customer_with_card(instance: seahaven.Instance, token: str = "tok_visa") -> tuple[str, str]:
-    cus = call(instance, "POST", "/v1/customers", {"email": "pi@example.test"})["body"]["id"]
+    cus = call(instance, "POST", "/v1/customers", {"email": "pi@example.test"})["id"]
     pm = call(instance, "POST", "/v1/payment_methods", {"type": "card", "card": {"token": token}})[
-        "body"
-    ]["id"]
+        "id"
+    ]
     call(instance, "POST", f"/v1/payment_methods/{pm}/attach", {"customer": cus})
     return cus, pm
 
@@ -38,7 +39,7 @@ CARD_ONLY = {"payment_method_types": ["card"]}
 
 
 def test_plain_create_defaults(instance: seahaven.Instance) -> None:
-    pi = create(instance, {"amount": 4900, "currency": "usd", "metadata": {"p": "1"}})["body"]
+    pi = create(instance, {"amount": 4900, "currency": "usd", "metadata": {"p": "1"}})
     assert pi["object"] == "payment_intent"
     assert pi["status"] == "requires_payment_method"
     assert pi["capture_method"] == "automatic_async"  # recorded default at dahlia
@@ -65,14 +66,14 @@ def test_create_with_payment_method_lands_requires_confirmation(
     pi = create(
         instance, {"amount": 1000, "currency": "usd", "customer": cus, "payment_method": pm}
     )
-    assert pi["body"]["status"] == "requires_confirmation"
-    assert pi["body"]["payment_method"] == pm
+    assert pi["status"] == "requires_confirmation"
+    assert pi["payment_method"] == pm
 
 
 def test_zero_amount_is_refused_with_the_recorded_message(instance: seahaven.Instance) -> None:
-    result = create(instance, {"amount": 0, "currency": "usd"})
-    assert result["status"] == 400
-    error = result["body"]["error"]
+    with pytest.raises(StripeToolError) as exc_info:
+        create(instance, {"amount": 0, "currency": "usd"})
+    error = exc_info.value.stripe_body["error"]
     assert error["code"] == "parameter_invalid_integer"
     assert error["param"] == "amount"
     assert error["message"].startswith("The amount must be greater than or equal to the minimum")
@@ -85,12 +86,10 @@ def test_zero_amount_is_refused_with_the_recorded_message(instance: seahaven.Ins
 
 def test_confirm_in_create_succeeds_and_writes_the_pair(instance: seahaven.Instance) -> None:
     cus, pm = customer_with_card(instance)
-    result = create(
+    pi = create(
         instance,
         {"amount": 4900, "currency": "usd", "customer": cus, "payment_method": pm, "confirm": True},
     )
-    pi = result["body"]
-    assert result["status"] == 200
     assert pi["status"] == "succeeded"
     assert pi["amount_received"] == 4900
     assert pi["latest_charge"].startswith("ch_")
@@ -105,7 +104,7 @@ def test_confirm_in_create_succeeds_and_writes_the_pair(instance: seahaven.Insta
         "payment_intent.succeeded",
     ]
     # one charge, fully captured
-    ch = call(instance, "GET", f"/v1/charges/{pi['latest_charge']}")["body"]
+    ch = call(instance, "GET", f"/v1/charges/{pi['latest_charge']}")
     assert ch["status"] == "succeeded"
     assert ch["captured"] is True
     assert ch["paid"] is True
@@ -122,11 +121,10 @@ def test_confirm_endpoint_resolves_the_intent_pm_then_the_customer_default(
         f"/v1/customers/{cus}",
         {"invoice_settings": {"default_payment_method": pm}},
     )
-    pi = create(instance, {"amount": 1200, "currency": "usd", "customer": cus})["body"]
+    pi = create(instance, {"amount": 1200, "currency": "usd", "customer": cus})
     confirmed = call(instance, "POST", f"/v1/payment_intents/{pi['id']}/confirm")
-    assert confirmed["status"] == 200
-    assert confirmed["body"]["status"] == "succeeded"
-    assert confirmed["body"]["payment_method"] == pm
+    assert confirmed["status"] == "succeeded"
+    assert confirmed["payment_method"] == pm
 
 
 # --- confirm: decline ----------------------------------------------------------------
@@ -139,19 +137,20 @@ def test_the_declined_card_returns_402_and_keeps_its_rows(instance: seahaven.Ins
         "POST",
         "/v1/payment_methods",
         {"type": "card", "card": {"number": "4000000000000341", "exp_month": 9, "exp_year": 2027}},
-    )["body"]
-    result = create(
-        instance,
-        {
-            "amount": 1000,
-            "currency": "usd",
-            "customer": cus,
-            "payment_method": declined["id"],
-            "confirm": True,
-        },
     )
-    assert result["status"] == 402  # the outcome whose rows survive
-    error = result["body"]["error"]
+    with pytest.raises(StripeToolError) as exc_info:
+        create(
+            instance,
+            {
+                "amount": 1000,
+                "currency": "usd",
+                "customer": cus,
+                "payment_method": declined["id"],
+                "confirm": True,
+            },
+        )
+    assert exc_info.value.status == 402  # the outcome whose rows survive
+    error = exc_info.value.stripe_body["error"]
     assert error["type"] == "card_error"
     assert error["code"] == "card_declined"
     assert error["decline_code"] == "generic_decline"
@@ -183,10 +182,11 @@ def test_the_declined_card_returns_402_and_keeps_its_rows(instance: seahaven.Ins
 def test_confirm_with_no_payment_method_refuses_both_recorded_forms(
     instance: seahaven.Instance,
 ) -> None:
-    bare = create(instance, {"amount": 800, "currency": "usd", **CARD_ONLY})["body"]
-    refused = call(instance, "POST", f"/v1/payment_intents/{bare['id']}/confirm")
-    assert refused["status"] == 400
-    error = refused["body"]["error"]
+    bare = create(instance, {"amount": 800, "currency": "usd", **CARD_ONLY})
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "POST", f"/v1/payment_intents/{bare['id']}/confirm")
+    assert exc_info.value.status == 400
+    error = exc_info.value.stripe_body["error"]
     assert error["code"] == "payment_intent_unexpected_state"
     assert error["message"] == (
         "You cannot confirm this PaymentIntent because it's missing a payment method. "
@@ -195,13 +195,14 @@ def test_confirm_with_no_payment_method_refuses_both_recorded_forms(
     )
     assert error["payment_intent"]["id"] == bare["id"]
 
-    cus = call(instance, "POST", "/v1/customers", {"email": "bare@example.test"})["body"]["id"]
+    cus = call(instance, "POST", "/v1/customers", {"email": "bare@example.test"})["id"]
     with_customer = create(
         instance, {"amount": 800, "currency": "usd", "customer": cus, **CARD_ONLY}
-    )["body"]
-    refused2 = call(instance, "POST", f"/v1/payment_intents/{with_customer['id']}/confirm")
-    assert refused2["status"] == 400
-    assert refused2["body"]["error"]["message"] == (
+    )
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "POST", f"/v1/payment_intents/{with_customer['id']}/confirm")
+    assert exc_info.value.status == 400
+    assert exc_info.value.stripe_body["error"]["message"] == (
         "You cannot confirm this PaymentIntent because it's missing a payment method. "
         f"To confirm the PaymentIntent with {cus}, specify a payment method attached to "
         "this customer along with the customer ID."
@@ -214,12 +215,11 @@ def test_a_customerless_intent_refuses_another_customers_method(
     """Probed twice (CR round 1): the ownership refusal, `parameter_missing`
     under a quirky `param: "source"`, the full intent carried."""
     cus, pm = customer_with_card(instance)
-    pi = create(instance, {"amount": 500, "currency": "usd", **CARD_ONLY})["body"]
-    refused = call(
-        instance, "POST", f"/v1/payment_intents/{pi['id']}/confirm", {"payment_method": pm}
-    )
-    assert refused["status"] == 400
-    error = refused["body"]["error"]
+    pi = create(instance, {"amount": 500, "currency": "usd", **CARD_ONLY})
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "POST", f"/v1/payment_intents/{pi['id']}/confirm", {"payment_method": pm})
+    assert exc_info.value.status == 400
+    error = exc_info.value.stripe_body["error"]
     assert error["code"] == "parameter_missing"
     assert error["param"] == "source"
     assert error["message"] == (
@@ -238,14 +238,13 @@ def test_a_fresh_unattached_method_charges_a_customerless_intent(
     divergence for the reused case)."""
     fresh = call(
         instance, "POST", "/v1/payment_methods", {"type": "card", "card": {"token": "tok_visa"}}
-    )["body"]
-    pi = create(instance, {"amount": 500, "currency": "usd", **CARD_ONLY})["body"]
+    )
+    pi = create(instance, {"amount": 500, "currency": "usd", **CARD_ONLY})
     confirmed = call(
         instance, "POST", f"/v1/payment_intents/{pi['id']}/confirm", {"payment_method": fresh["id"]}
     )
-    assert confirmed["status"] == 200
-    assert confirmed["body"]["status"] == "succeeded"
-    assert confirmed["body"]["latest_charge"].startswith("ch_")
+    assert confirmed["status"] == "succeeded"
+    assert confirmed["latest_charge"].startswith("ch_")
 
 
 def test_another_customers_method_on_a_customer_intent_is_refused(
@@ -254,20 +253,21 @@ def test_another_customers_method_on_a_customer_intent_is_refused(
     """Recorded (cassette 04): no code, `param: "payment_method"`, the full
     intent carried on the error object."""
     cus, _pm = customer_with_card(instance)
-    other = call(instance, "POST", "/v1/customers", {"email": "o3@example.test"})["body"]["id"]
+    other = call(instance, "POST", "/v1/customers", {"email": "o3@example.test"})["id"]
     stranger = call(
         instance, "POST", "/v1/payment_methods", {"type": "card", "card": {"token": "tok_visa"}}
-    )["body"]
-    call(instance, "POST", f"/v1/payment_methods/{stranger['id']}/attach", {"customer": other})
-    pi = create(instance, {"amount": 600, "currency": "usd", "customer": cus, **CARD_ONLY})["body"]
-    refused = call(
-        instance,
-        "POST",
-        f"/v1/payment_intents/{pi['id']}/confirm",
-        {"payment_method": stranger["id"]},
     )
-    assert refused["status"] == 400
-    error = refused["body"]["error"]
+    call(instance, "POST", f"/v1/payment_methods/{stranger['id']}/attach", {"customer": other})
+    pi = create(instance, {"amount": 600, "currency": "usd", "customer": cus, **CARD_ONLY})
+    with pytest.raises(StripeToolError) as exc_info:
+        call(
+            instance,
+            "POST",
+            f"/v1/payment_intents/{pi['id']}/confirm",
+            {"payment_method": stranger["id"]},
+        )
+    assert exc_info.value.status == 400
+    error = exc_info.value.stripe_body["error"]
     assert "code" not in error
     assert error["param"] == "payment_method"
     assert error["message"] == (
@@ -287,9 +287,9 @@ def test_the_3ds_card_on_session_parks_at_requires_action(instance: seahaven.Ins
         "POST",
         "/v1/payment_methods",
         {"type": "card", "card": {"token": "tok_threeDSecure2Required"}},
-    )["body"]
+    )
     call(instance, "POST", f"/v1/payment_methods/{three_ds['id']}/attach", {"customer": cus})
-    result = create(
+    pi = create(
         instance,
         {
             "amount": 4400,
@@ -299,7 +299,6 @@ def test_the_3ds_card_on_session_parks_at_requires_action(instance: seahaven.Ins
             "confirm": True,
         },
     )
-    pi = result["body"]
     assert pi["status"] == "requires_action"
     assert pi["latest_charge"] is None  # no charge row exists yet (recorded)
     assert pi["next_action"] == {"type": "use_stripe_sdk", "use_stripe_sdk": {}}
@@ -319,20 +318,21 @@ def test_the_3ds_card_off_session_declines_authentication_required(
         "POST",
         "/v1/payment_methods",
         {"type": "card", "card": {"token": "tok_threeDSecure2Required"}},
-    )["body"]
-    result = create(
-        instance,
-        {
-            "amount": 3300,
-            "currency": "usd",
-            "customer": cus,
-            "payment_method": three_ds["id"],
-            "confirm": True,
-            "off_session": True,
-        },
     )
-    assert result["status"] == 402
-    error = result["body"]["error"]
+    with pytest.raises(StripeToolError) as exc_info:
+        create(
+            instance,
+            {
+                "amount": 3300,
+                "currency": "usd",
+                "customer": cus,
+                "payment_method": three_ds["id"],
+                "confirm": True,
+                "off_session": True,
+            },
+        )
+    assert exc_info.value.status == 402
+    error = exc_info.value.stripe_body["error"]
     assert error["code"] == "authentication_required"
     assert error["decline_code"] == "authentication_required"
     assert error["message"] == "Your card was declined. This transaction requires authentication."
@@ -358,11 +358,11 @@ def test_manual_capture_holds_then_partial_capture_succeeds(instance: seahaven.I
             "confirm": True,
             "capture_method": "manual",
         },
-    )["body"]
+    )
     assert pi["status"] == "requires_capture"
     assert pi["amount_capturable"] == 6500
     assert pi["amount_received"] == 0
-    held = call(instance, "GET", f"/v1/charges/{pi['latest_charge']}")["body"]
+    held = call(instance, "GET", f"/v1/charges/{pi['latest_charge']}")
     assert held["status"] == "succeeded"  # authorized, paid…
     assert held["paid"] is True
     assert held["captured"] is False  # …but uncaptured (recorded)
@@ -379,13 +379,13 @@ def test_manual_capture_holds_then_partial_capture_succeeds(instance: seahaven.I
         f"/v1/payment_intents/{pi['id']}/capture",
         {"amount_to_capture": 5000, "metadata": {"a": "b"}},
     )
-    assert captured["body"]["status"] == "succeeded"
-    assert captured["body"]["amount_received"] == 5000
-    assert captured["body"]["amount_capturable"] == 0
-    assert captured["body"]["metadata"] == {"a": "b"}  # capture merges metadata (CR round 1)
-    after = call(instance, "GET", f"/v1/payment_intents/{pi['id']}")["body"]
+    assert captured["status"] == "succeeded"
+    assert captured["amount_received"] == 5000
+    assert captured["amount_capturable"] == 0
+    assert captured["metadata"] == {"a": "b"}  # capture merges metadata (CR round 1)
+    after = call(instance, "GET", f"/v1/payment_intents/{pi['id']}")
     assert after["metadata"] == {"a": "b"}  # and it stuck
-    after = call(instance, "GET", f"/v1/charges/{pi['latest_charge']}")["body"]
+    after = call(instance, "GET", f"/v1/charges/{pi['latest_charge']}")
     assert after["captured"] is True
     assert after["amount_captured"] == 5000
     types = [
@@ -399,10 +399,11 @@ def test_capture_refusals_are_the_recorded_shapes(instance: seahaven.Instance) -
     ok = create(
         instance,
         {"amount": 1500, "currency": "usd", "customer": cus, "payment_method": pm, "confirm": True},
-    )["body"]
-    again = call(instance, "POST", f"/v1/payment_intents/{ok['id']}/capture")
-    assert again["status"] == 400
-    assert again["body"]["error"]["message"] == (
+    )
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "POST", f"/v1/payment_intents/{ok['id']}/capture")
+    assert exc_info.value.status == 400
+    assert exc_info.value.stripe_body["error"]["message"] == (
         "The remaining amount on this PaymentIntent could not be captured because "
         "the remainder of the authorized amount has been released."
     )
@@ -417,12 +418,16 @@ def test_capture_refusals_are_the_recorded_shapes(instance: seahaven.Instance) -
             "confirm": True,
             "capture_method": "manual",
         },
-    )["body"]
-    over = call(
-        instance, "POST", f"/v1/payment_intents/{hold['id']}/capture", {"amount_to_capture": 9999}
     )
-    assert over["status"] == 400
-    error = over["body"]["error"]
+    with pytest.raises(StripeToolError) as exc_info:
+        call(
+            instance,
+            "POST",
+            f"/v1/payment_intents/{hold['id']}/capture",
+            {"amount_to_capture": 9999},
+        )
+    assert exc_info.value.status == 400
+    error = exc_info.value.stripe_body["error"]
     assert error["code"] == "amount_too_large"
     assert error["message"].startswith("The payment could not be captured because the requested")
     assert error["payment_intent"]["id"] == hold["id"]
@@ -440,15 +445,16 @@ def test_capture_refusals_are_the_recorded_shapes(instance: seahaven.Instance) -
             "confirm": True,
             "capture_method": "manual",
         },
-    )["body"]
-    negative = call(
-        instance,
-        "POST",
-        f"/v1/payment_intents/{neg_hold['id']}/capture",
-        {"amount_to_capture": -100},
     )
-    assert negative["status"] == 400
-    neg_error = negative["body"]["error"]
+    with pytest.raises(StripeToolError) as exc_info:
+        call(
+            instance,
+            "POST",
+            f"/v1/payment_intents/{neg_hold['id']}/capture",
+            {"amount_to_capture": -100},
+        )
+    assert exc_info.value.status == 400
+    neg_error = exc_info.value.stripe_body["error"]
     assert "code" not in neg_error
     assert neg_error["param"] == "amount_to_capture"
     assert neg_error["message"] == "Invalid non-negative integer"
@@ -464,26 +470,31 @@ def test_capture_refusals_are_the_recorded_shapes(instance: seahaven.Instance) -
             "confirm": True,
             "capture_method": "manual",
         },
-    )["body"]
-    zero = call(
-        instance, "POST", f"/v1/payment_intents/{zero_hold['id']}/capture", {"amount_to_capture": 0}
     )
-    assert zero["status"] == 400
-    zero_error = zero["body"]["error"]
+    with pytest.raises(StripeToolError) as exc_info:
+        call(
+            instance,
+            "POST",
+            f"/v1/payment_intents/{zero_hold['id']}/capture",
+            {"amount_to_capture": 0},
+        )
+    assert exc_info.value.status == 400
+    zero_error = exc_info.value.stripe_body["error"]
     assert zero_error["code"] == "parameter_invalid_integer"
     assert zero_error["param"] == "amount"
     assert zero_error["message"] == "This value must be greater than or equal to 1."
     assert zero_error["payment_intent"]["id"] == zero_hold["id"]
     # and neither hold moved
     for hold_id in (neg_hold["id"], zero_hold["id"]):
-        assert call(instance, "GET", f"/v1/payment_intents/{hold_id}")["body"]["status"] == (
+        assert call(instance, "GET", f"/v1/payment_intents/{hold_id}")["status"] == (
             "requires_capture"
         )
 
-    plain = create(instance, {"amount": 1000, "currency": "usd"})["body"]
-    wrong_state = call(instance, "POST", f"/v1/payment_intents/{plain['id']}/capture")
-    assert wrong_state["status"] == 400
-    assert wrong_state["body"]["error"]["message"] == (
+    plain = create(instance, {"amount": 1000, "currency": "usd"})
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "POST", f"/v1/payment_intents/{plain['id']}/capture")
+    assert exc_info.value.status == 400
+    assert exc_info.value.stripe_body["error"]["message"] == (
         "This PaymentIntent could not be captured because it has a status of "
         "requires_payment_method. Only a PaymentIntent with one of the following "
         "statuses may be captured: requires_capture."
@@ -496,20 +507,21 @@ def test_capture_refusals_are_the_recorded_shapes(instance: seahaven.Instance) -
 def test_cancel_echoes_the_reason_and_refuses_the_wrong_states(
     instance: seahaven.Instance,
 ) -> None:
-    pi = create(instance, {"amount": 1200, "currency": "usd"})["body"]
+    pi = create(instance, {"amount": 1200, "currency": "usd"})
     canceled = call(
         instance,
         "POST",
         f"/v1/payment_intents/{pi['id']}/cancel",
         {"cancellation_reason": "abandoned"},
     )
-    assert canceled["body"]["status"] == "canceled"
-    assert canceled["body"]["cancellation_reason"] == "abandoned"
-    assert canceled["body"]["canceled_at"] is not None
+    assert canceled["status"] == "canceled"
+    assert canceled["cancellation_reason"] == "abandoned"
+    assert canceled["canceled_at"] is not None
 
-    again = call(instance, "POST", f"/v1/payment_intents/{pi['id']}/cancel")
-    assert again["status"] == 400
-    assert again["body"]["error"]["message"] == (
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "POST", f"/v1/payment_intents/{pi['id']}/cancel")
+    assert exc_info.value.status == 400
+    assert exc_info.value.stripe_body["error"]["message"] == (
         "You cannot cancel this PaymentIntent because it has a status of canceled. "
         "Only a PaymentIntent with one of the following statuses may be canceled: "
         "requires_payment_method, requires_capture, requires_reauthorization, "
@@ -520,10 +532,11 @@ def test_cancel_echoes_the_reason_and_refuses_the_wrong_states(
     ok = create(
         instance,
         {"amount": 500, "currency": "usd", "customer": cus, "payment_method": pm, "confirm": True},
-    )["body"]
-    refused = call(instance, "POST", f"/v1/payment_intents/{ok['id']}/cancel")
-    assert refused["status"] == 400
-    assert refused["body"]["error"]["message"].startswith(
+    )
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "POST", f"/v1/payment_intents/{ok['id']}/cancel")
+    assert exc_info.value.status == 400
+    assert exc_info.value.stripe_body["error"]["message"].startswith(
         "You cannot cancel this PaymentIntent because it has a status of succeeded."
     )
 
@@ -542,10 +555,10 @@ def test_cancel_without_a_reason_leaves_it_null_and_releases_the_hold(
             "confirm": True,
             "capture_method": "manual",
         },
-    )["body"]
+    )
     canceled = call(instance, "POST", f"/v1/payment_intents/{hold['id']}/cancel")
-    assert canceled["body"]["cancellation_reason"] is None  # recorded: null when omitted
-    charge = call(instance, "GET", f"/v1/charges/{hold['latest_charge']}")["body"]
+    assert canceled["cancellation_reason"] is None  # recorded: null when omitted
+    charge = call(instance, "GET", f"/v1/charges/{hold['latest_charge']}")
     assert charge["status"] == "succeeded"  # the uncaptured shape is kept (recorded)
     assert charge["captured"] is False
 
@@ -558,10 +571,11 @@ def test_amount_updates_are_status_guarded_and_metadata_is_not(instance: seahave
     ok = create(
         instance,
         {"amount": 1500, "currency": "usd", "customer": cus, "payment_method": pm, "confirm": True},
-    )["body"]
-    refused = call(instance, "POST", f"/v1/payment_intents/{ok['id']}", {"amount": 9999})
-    assert refused["status"] == 400
-    error = refused["body"]["error"]
+    )
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "POST", f"/v1/payment_intents/{ok['id']}", {"amount": 9999})
+    assert exc_info.value.status == 400
+    error = exc_info.value.stripe_body["error"]
     assert error["code"] == "payment_intent_unexpected_state"
     assert error["param"] == "amount"
     assert error["message"] == (
@@ -577,12 +591,11 @@ def test_amount_updates_are_status_guarded_and_metadata_is_not(instance: seahave
         f"/v1/payment_intents/{ok['id']}",
         {"metadata": {"u": "v"}, "description": "after"},
     )
-    assert moved["status"] == 200  # description and metadata move on a succeeded intent
-    assert moved["body"]["metadata"] == {"u": "v"}
+    assert moved["metadata"] == {"u": "v"}
 
-    plain = create(instance, {"amount": 1000, "currency": "usd"})["body"]
+    plain = create(instance, {"amount": 1000, "currency": "usd"})
     upped = call(instance, "POST", f"/v1/payment_intents/{plain['id']}", {"amount": 5100})
-    assert upped["body"]["amount"] == 5100
+    assert upped["amount"] == 5100
 
 
 # --- retrieve, expand, list --------------------------------------------------------------------
@@ -593,32 +606,32 @@ def test_latest_charge_expands(instance: seahaven.Instance) -> None:
     pi = create(
         instance,
         {"amount": 2200, "currency": "usd", "customer": cus, "payment_method": pm, "confirm": True},
-    )["body"]
-    got = call(instance, "GET", f"/v1/payment_intents/{pi['id']}", {"expand": ["latest_charge"]})[
-        "body"
-    ]
+    )
+    got = call(instance, "GET", f"/v1/payment_intents/{pi['id']}", {"expand": ["latest_charge"]})
     assert got["latest_charge"]["object"] == "charge"
     assert got["latest_charge"]["payment_intent"] == pi["id"]
 
 
 def test_lists_filter_and_order_by_recency(instance: seahaven.Instance) -> None:
     cus, _ = customer_with_card(instance)
-    other = call(instance, "POST", "/v1/customers", {"email": "other@example.test"})["body"]["id"]
+    other = call(instance, "POST", "/v1/customers", {"email": "other@example.test"})["id"]
     for amount in (1100, 2200):
         create(instance, {"amount": amount, "currency": "usd", "customer": cus})
     create(instance, {"amount": 3300, "currency": "usd", "customer": other})
     page = call(instance, "GET", "/v1/payment_intents", {"customer": cus})
-    assert page["body"]["object"] == "list"
-    assert page["body"]["url"] == "/v1/payment_intents"
-    assert len(page["body"]["data"]) == 2
-    amounts = [item["amount"] for item in page["body"]["data"]]
+    assert page["object"] == "list"
+    assert page["url"] == "/v1/payment_intents"
+    assert len(page["data"]) == 2
+    amounts = [item["amount"] for item in page["data"]]
     assert amounts == [2200, 1100]  # x_seq DESC: newest first
 
 
 def test_missing_ids_keep_their_recorded_spellings(instance: seahaven.Instance) -> None:
-    got = call(instance, "GET", "/v1/payment_intents/pi_nope")
-    error = got["body"]["error"]
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "GET", "/v1/payment_intents/pi_nope")
+    error = exc_info.value.stripe_body["error"]
     assert error["message"] == "No such payment_intent: 'pi_nope'"
     assert error["param"] == "intent"  # the placeholder, not `id` (probed)
-    confirmed = call(instance, "POST", "/v1/payment_intents/pi_nope/confirm")
-    assert confirmed["body"]["error"]["param"] == "intent"
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "POST", "/v1/payment_intents/pi_nope/confirm")
+    assert exc_info.value.stripe_body["error"]["param"] == "intent"

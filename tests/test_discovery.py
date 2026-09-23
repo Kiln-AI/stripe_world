@@ -11,6 +11,7 @@ from conftest import BLANK_NOW
 from seahaven_stripe_world.discovery import index
 from seahaven_stripe_world.dispatch import routes
 from seahaven_stripe_world.dispatch.params import body_of
+from seahaven_stripe_world.errors import StripeToolError
 
 pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
 
@@ -131,9 +132,10 @@ def test_wired_details_document_exactly_the_enforced_allowlist(
         "limit",
         "starting_after",
     }
-    result = instance.call("stripe_api_read", path="/v1/customers", params={"test_clock": "ts_1"})
-    assert result["status"] == 400
-    assert result["body"]["error"]["param"] == "test_clock"
+    with pytest.raises(StripeToolError) as exc_info:
+        instance.call("stripe_api_read", path="/v1/customers", params={"test_clock": "ts_1"})
+    assert exc_info.value.status == 400
+    assert exc_info.value.stripe_body["error"]["param"] == "test_clock"
 
 
 def test_nesting_depth_is_one_level(instance: seahaven.Instance) -> None:

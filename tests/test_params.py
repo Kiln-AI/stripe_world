@@ -15,6 +15,7 @@ from conftest import BLANK_NOW
 from seahaven_stripe_world.dispatch.params import Param, ParamSpec, bind
 from seahaven_stripe_world.dispatch.response import Request
 from seahaven_stripe_world.dispatch.routes import Route
+from seahaven_stripe_world.errors import StripeToolError
 from seahaven_stripe_world.stripe_errors import StripeApiError
 
 pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
@@ -28,13 +29,10 @@ def write(instance: seahaven.Instance, path: str, params: dict | None = None) ->
     return instance.call("stripe_api_write", method="POST", path=path, params=params)
 
 
-def error_of(result: dict) -> dict:
-    assert result["status"] == 400, result
-    return result["body"]["error"]
-
-
 def test_unknown_parameter_is_rejected(instance: seahaven.Instance) -> None:
-    error = error_of(write(instance, "/v1/customers", {"nope": 1}))
+    with pytest.raises(StripeToolError) as exc_info:
+        write(instance, "/v1/customers", {"nope": 1})
+    error = exc_info.value.stripe_body["error"]
     assert error["code"] == "parameter_unknown"
     assert error["param"] == "nope"
     assert error["message"] == "Received unknown parameter: nope"
@@ -42,7 +40,9 @@ def test_unknown_parameter_is_rejected(instance: seahaven.Instance) -> None:
 
 def test_nested_unknown_parameter_uses_bracket_notation(instance: seahaven.Instance) -> None:
     """Probed verbatim this phase: `invoice_settings[nope]`."""
-    error = error_of(write(instance, "/v1/customers", {"invoice_settings": {"nope": 1}}))
+    with pytest.raises(StripeToolError) as exc_info:
+        write(instance, "/v1/customers", {"invoice_settings": {"nope": 1}})
+    error = exc_info.value.stripe_body["error"]
     assert error["code"] == "parameter_unknown"
     assert error["param"] == "invoice_settings[nope]"
 
@@ -50,13 +50,17 @@ def test_nested_unknown_parameter_uses_bracket_notation(instance: seahaven.Insta
 def test_a_lifted_parameter_the_operation_refuses_is_unknown(instance: seahaven.Instance) -> None:
     """`limit` on a retrieve, `expand` on a stub DELETE: `parameter_unknown`,
     the same as any other."""
-    error = error_of(read(instance, "/v1/customers/cus_1", {"limit": 5}))
+    with pytest.raises(StripeToolError) as exc_info:
+        read(instance, "/v1/customers/cus_1", {"limit": 5})
+    error = exc_info.value.stripe_body["error"]
     assert error["code"] == "parameter_unknown"
     assert error["param"] == "limit"
 
 
 def test_literal_choice_rejected(instance: seahaven.Instance) -> None:
-    error = error_of(write(instance, "/v1/customers", {"tax_exempt": "sometimes"}))
+    with pytest.raises(StripeToolError) as exc_info:
+        write(instance, "/v1/customers", {"tax_exempt": "sometimes"})
+    error = exc_info.value.stripe_body["error"]
     # Recorded (Phase 12, the subscriptions cassette): a bad literal answers
     # type/message/param with no `code` — the one refusal family that does.
     assert "code" not in error
@@ -65,31 +69,37 @@ def test_literal_choice_rejected(instance: seahaven.Instance) -> None:
 
 
 def test_strict_types(instance: seahaven.Instance) -> None:
-    error = error_of(write(instance, "/v1/customers", {"next_invoice_sequence": "5"}))
-    assert error["code"] == "parameter_invalid_integer"
-    error = error_of(write(instance, "/v1/customers", {"next_invoice_sequence": 5.0}))
-    assert error["code"] == "parameter_invalid_integer"
-    error = error_of(write(instance, "/v1/customers", {"next_invoice_sequence": True}))
-    assert error["code"] == "parameter_invalid_integer"
+    with pytest.raises(StripeToolError) as exc_info:
+        write(instance, "/v1/customers", {"next_invoice_sequence": "5"})
+    assert exc_info.value.stripe_body["error"]["code"] == "parameter_invalid_integer"
+    with pytest.raises(StripeToolError) as exc_info:
+        write(instance, "/v1/customers", {"next_invoice_sequence": 5.0})
+    assert exc_info.value.stripe_body["error"]["code"] == "parameter_invalid_integer"
+    with pytest.raises(StripeToolError) as exc_info:
+        write(instance, "/v1/customers", {"next_invoice_sequence": True})
+    assert exc_info.value.stripe_body["error"]["code"] == "parameter_invalid_integer"
 
 
 def test_empty_string_where_none_is_allowed(instance: seahaven.Instance) -> None:
-    error = error_of(write(instance, "/v1/customers", {"email": ""}))
+    with pytest.raises(StripeToolError) as exc_info:
+        write(instance, "/v1/customers", {"email": ""})
+    error = exc_info.value.stripe_body["error"]
     assert error["code"] == "parameter_invalid_empty"
     assert error["param"] == "email"
     # The one parameter where "" is meaningful — clearing — accepts it.
     created = write(instance, "/v1/customers", {"description": "x"})
-    cleared = write(instance, f"/v1/customers/{created['body']['id']}", {"description": ""})
-    assert cleared["body"]["description"] is None
+    cleared = write(instance, f"/v1/customers/{created['id']}", {"description": ""})
+    assert cleared["description"] is None
 
 
 def test_id_prefix_checked_before_any_query(instance: seahaven.Instance) -> None:
     """`No such customer: 'ch_123'`, naming `id` — the recorded spelling for
     every top-level customers route (Phase 5 cassettes, scenario 02), not the
     `{customer}` placeholder a nested path would name."""
-    result = read(instance, "/v1/customers/ch_123")
-    assert result["status"] == 404
-    error = result["body"]["error"]
+    with pytest.raises(StripeToolError) as exc_info:
+        read(instance, "/v1/customers/ch_123")
+    assert exc_info.value.status == 404
+    error = exc_info.value.stripe_body["error"]
     assert error["code"] == "resource_missing"
     assert error["param"] == "id"
     assert error["message"] == "No such customer: 'ch_123'"
@@ -103,23 +113,27 @@ def test_limit_clamps_into_the_documented_range(instance: seahaven.Instance) -> 
     for _ in range(3):
         write(instance, "/v1/customers", {})
     for low in (0, -1, -50):
-        body = read(instance, "/v1/customers", {"limit": low})["body"]
-        assert len(body["data"]) == 1
-        assert body["has_more"] is True
-    body = read(instance, "/v1/customers", {"limit": 101})["body"]
-    assert len(body["data"]) == 3  # clamped to 100, then to what exists
-    assert body["has_more"] is False
-    assert read(instance, "/v1/customers")["body"]["data"]  # the default 10
+        result = read(instance, "/v1/customers", {"limit": low})
+        assert len(result["data"]) == 1
+        assert result["has_more"] is True
+    result = read(instance, "/v1/customers", {"limit": 101})
+    assert len(result["data"]) == 3  # clamped to 100, then to what exists
+    assert result["has_more"] is False
+    assert read(instance, "/v1/customers")["data"]  # the default 10
 
 
 def test_cursor_length_bound_is_enforced(instance: seahaven.Instance) -> None:
     """The cursors carry the spec's own `maxLength: 5000`, and the central
     `STARTING_AFTER`/`ENDING_BEFORE` Params — not a bare type check — enforce
     it."""
-    error = error_of(read(instance, "/v1/customers", {"starting_after": "cus_" + "x" * 5000}))
+    with pytest.raises(StripeToolError) as exc_info:
+        read(instance, "/v1/customers", {"starting_after": "cus_" + "x" * 5000})
+    error = exc_info.value.stripe_body["error"]
     assert error["code"] == "parameter_invalid_string"
     assert error["param"] == "starting_after"
-    error = error_of(read(instance, "/v1/customers", {"ending_before": ""}))
+    with pytest.raises(StripeToolError) as exc_info:
+        read(instance, "/v1/customers", {"ending_before": ""})
+    error = exc_info.value.stripe_body["error"]
     assert error["code"] == "parameter_invalid_empty"
     assert error["param"] == "ending_before"
 
@@ -129,21 +143,23 @@ def test_mutually_exclusive_cursors(instance: seahaven.Instance) -> None:
     `code`** (recorded Phase 5, scenario 09). A bogus cursor alongside a real
     one is the bogus one's `resource_missing` at 400 first — resolution
     precedes exclusivity on the live API."""
-    first = write(instance, "/v1/customers", {})["body"]["id"]
-    second = write(instance, "/v1/customers", {})["body"]["id"]
-    result = read(instance, "/v1/customers", {"starting_after": first, "ending_before": second})
-    assert result["status"] == 400
-    error = result["body"]["error"]
+    first = write(instance, "/v1/customers", {})["id"]
+    second = write(instance, "/v1/customers", {})["id"]
+    with pytest.raises(StripeToolError) as exc_info:
+        read(instance, "/v1/customers", {"starting_after": first, "ending_before": second})
+    error = exc_info.value.stripe_body["error"]
+    assert exc_info.value.status == 400
     assert "code" not in error
     assert (
         error["message"]
         == "Received both starting_after and ending_before parameters. Please pass in only one."
     )
 
-    bogus = read(instance, "/v1/customers", {"starting_after": "cus_aaa", "ending_before": second})
-    assert bogus["status"] == 400
-    assert bogus["body"]["error"]["code"] == "resource_missing"
-    assert bogus["body"]["error"]["param"] == "starting_after"
+    with pytest.raises(StripeToolError) as exc_info:
+        read(instance, "/v1/customers", {"starting_after": "cus_aaa", "ending_before": second})
+    assert exc_info.value.status == 400
+    assert exc_info.value.stripe_body["error"]["code"] == "resource_missing"
+    assert exc_info.value.stripe_body["error"]["param"] == "starting_after"
 
 
 # --- bind() directly: the shapes only a synthetic spec can provoke -------------
@@ -235,43 +251,45 @@ def test_metadata_update_semantics() -> None:
 
 
 def test_metadata_limits(instance: seahaven.Instance) -> None:
-    error = error_of(write(instance, "/v1/customers", {"metadata": {"k": "x" * 501}}))
-    assert error["param"] == "metadata[k]"
-    error = error_of(write(instance, "/v1/customers", {"metadata": {"k" * 41: "x"}}))
-    assert error["param"] == f"metadata[{'k' * 41}]"
-    error = error_of(
+    with pytest.raises(StripeToolError) as exc_info:
+        write(instance, "/v1/customers", {"metadata": {"k": "x" * 501}})
+    assert exc_info.value.stripe_body["error"]["param"] == "metadata[k]"
+    with pytest.raises(StripeToolError) as exc_info:
+        write(instance, "/v1/customers", {"metadata": {"k" * 41: "x"}})
+    assert exc_info.value.stripe_body["error"]["param"] == f"metadata[{'k' * 41}]"
+    with pytest.raises(StripeToolError) as exc_info:
         write(instance, "/v1/customers", {"metadata": {f"k{i}": "x" for i in range(51)}})
-    )
-    assert error["param"] == "metadata"
+    assert exc_info.value.stripe_body["error"]["param"] == "metadata"
 
 
 def test_metadata_clear_all_both_spellings(instance: seahaven.Instance) -> None:
     created = write(instance, "/v1/customers", {"metadata": {"a": "1"}})
-    cus = created["body"]["id"]
+    cus = created["id"]
     cleared = write(instance, f"/v1/customers/{cus}", {"metadata": ""})
-    assert cleared["body"]["metadata"] == {}
+    assert cleared["metadata"] == {}
     again = write(instance, f"/v1/customers/{cus}", {"metadata": {"b": "2"}})
-    assert again["body"]["metadata"] == {"b": "2"}
+    assert again["metadata"] == {"b": "2"}
     cleared_again = write(instance, f"/v1/customers/{cus}", {"metadata": {}})
-    assert cleared_again["body"]["metadata"] == {}
+    assert cleared_again["metadata"] == {}
 
 
 def test_metadata_merge_and_unset(instance: seahaven.Instance) -> None:
     created = write(instance, "/v1/customers", {"metadata": {"a": "1", "b": "2"}})
-    cus = created["body"]["id"]
+    cus = created["id"]
     updated = write(instance, f"/v1/customers/{cus}", {"metadata": {"b": "", "c": "3"}})
-    assert updated["body"]["metadata"] == {"a": "1", "c": "3"}
+    assert updated["metadata"] == {"a": "1", "c": "3"}
 
 
 def test_metadata_refused_where_unsupported(instance: seahaven.Instance) -> None:
     """Every route of the probe resource accepts metadata except the stub
     DELETE, which accepts nothing at all (`expand=False`, no body)."""
     created = write(instance, "/v1/customers", {})
-    result = instance.call(
-        "stripe_api_write",
-        method="DELETE",
-        path=f"/v1/customers/{created['body']['id']}",
-        params={"metadata": {"a": "1"}},
-    )
-    assert result["status"] == 400
-    assert result["body"]["error"]["param"] == "metadata"
+    with pytest.raises(StripeToolError) as exc_info:
+        instance.call(
+            "stripe_api_write",
+            method="DELETE",
+            path=f"/v1/customers/{created['id']}",
+            params={"metadata": {"a": "1"}},
+        )
+    assert exc_info.value.status == 400
+    assert exc_info.value.stripe_body["error"]["param"] == "metadata"

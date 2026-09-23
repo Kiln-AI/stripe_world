@@ -76,11 +76,11 @@ def test_a_live_customer_validates(
     """A whole create-read-list round trip through the registered tools
     validates clean — and the hook captured it without the test opting in."""
     created = instance.call("stripe_api_write", method="POST", path="/v1/customers", params={})
-    read = instance.call("stripe_api_read", path=f"/v1/customers/{created['body']['id']}")
+    read = instance.call("stripe_api_read", path=f"/v1/customers/{created['id']}")
     listed = instance.call("stripe_api_read", path="/v1/customers")
-    assert validate_object(created["body"], source="live") == []
-    assert violations_in_body(read["body"], source="live") == []
-    assert violations_in_body(listed["body"], source="live") == []
+    assert validate_object(created, source="live") == []
+    assert violations_in_body(read, source="live") == []
+    assert violations_in_body(listed, source="live") == []
     assert [call.tool for call in _schema_conformance] == [
         "stripe_api_write",
         "stripe_api_read",
@@ -91,9 +91,12 @@ def test_a_live_customer_validates(
 def test_a_deleted_stub_validates(instance: seahaven.Instance) -> None:
     """The soft-delete stub `{id, object, deleted: true}` validates against
     `deleted_customer`, and the 404 a missing id earns has nothing to flag."""
-    missing = instance.call("stripe_api_write", method="DELETE", path="/v1/customers/cus_1")
-    assert missing["status"] == 404
-    assert violations_in_body(missing["body"], source="live") == []
+    from seahaven_stripe_world.errors import StripeToolError
+
+    with pytest.raises(StripeToolError) as exc_info:
+        instance.call("stripe_api_write", method="DELETE", path="/v1/customers/cus_1")
+    assert exc_info.value.status == 404
+    assert violations_in_body(exc_info.value.stripe_body, source="live") == []
     assert (
         violations_in_body({"id": "cus_1", "object": "customer", "deleted": True}, source="unit")
         == []

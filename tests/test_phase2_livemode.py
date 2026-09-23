@@ -14,6 +14,7 @@ import pytest
 import seahaven
 
 from conftest import BLANK_NOW
+from seahaven_stripe_world.errors import StripeToolError
 from seahaven_stripe_world.serialize.fields import NO_LIVEMODE_OBJECTS
 from seahaven_stripe_world.startup import ACCOUNT_ID
 from seahaven_stripe_world.world import world
@@ -61,7 +62,7 @@ def test_no_hardcoded_livemode() -> None:
 
 def test_livemode_true_on_objects(instance: seahaven.Instance) -> None:
     """Default instance (livemode=True): a customer carries livemode=True."""
-    body = call(instance, "POST", "/v1/customers", {"email": "live@test"})["body"]
+    body = call(instance, "POST", "/v1/customers", {"email": "live@test"})
     assert body["livemode"] is True
 
 
@@ -69,7 +70,7 @@ def test_livemode_false_on_sandbox_instance() -> None:
     """An instance started with ``livemode=False`` produces objects with
     ``livemode=False``."""
     with world.instance(None, now=BLANK_NOW, startup={"livemode": False}) as inst:
-        body = call(inst, "POST", "/v1/customers", {"email": "sandbox@test"})["body"]
+        body = call(inst, "POST", "/v1/customers", {"email": "sandbox@test"})
         assert body["livemode"] is False
 
 
@@ -84,13 +85,13 @@ def test_livemode_absent_on_excluded_objects(instance: seahaven.Instance) -> Non
         == NO_LIVEMODE_OBJECTS
     )
     # Create a confirmed payment intent so a balance_transaction exists.
-    cust = call(instance, "POST", "/v1/customers", {"email": "bt@test"})["body"]["id"]
+    cust = call(instance, "POST", "/v1/customers", {"email": "bt@test"})["id"]
     pm = call(
         instance,
         "POST",
         "/v1/payment_methods",
         {"type": "card", "card": {"token": "tok_visa"}},
-    )["body"]["id"]
+    )["id"]
     call(instance, "POST", f"/v1/payment_methods/{pm}/attach", {"customer": cust})
     pi = call(
         instance,
@@ -103,9 +104,9 @@ def test_livemode_absent_on_excluded_objects(instance: seahaven.Instance) -> Non
             "payment_method": pm,
             "confirm": True,
         },
-    )["body"]
-    charge = call(instance, "GET", f"/v1/charges/{pi['latest_charge']}")["body"]
-    bt = call(instance, "GET", f"/v1/balance_transactions/{charge['balance_transaction']}")["body"]
+    )
+    charge = call(instance, "GET", f"/v1/charges/{pi['latest_charge']}")
+    bt = call(instance, "GET", f"/v1/balance_transactions/{charge['balance_transaction']}")
     assert bt["object"] == "balance_transaction"
     assert "livemode" not in bt
 
@@ -140,15 +141,17 @@ def test_account_id_shape() -> None:
 def test_invoiceitem_error_derives_livemode(instance: seahaven.Instance) -> None:
     """The 404 message for invoice items says ``livemode=true`` under the
     default live instance."""
-    missing = call(instance, "GET", "/v1/invoiceitems/ii_nope")
-    assert missing["status"] == 404
-    assert "livemode=true" in missing["body"]["error"]["message"]
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "GET", "/v1/invoiceitems/ii_nope")
+    assert exc_info.value.status == 404
+    assert "livemode=true" in exc_info.value.stripe_body["error"]["message"]
 
 
 def test_invoiceitem_error_derives_livemode_sandbox() -> None:
     """Under a sandbox instance (``livemode=False``), the 404 says
     ``livemode=false``."""
     with world.instance(None, now=BLANK_NOW, startup={"livemode": False}) as inst:
-        missing = call(inst, "GET", "/v1/invoiceitems/ii_nope")
-        assert missing["status"] == 404
-        assert "livemode=false" in missing["body"]["error"]["message"]
+        with pytest.raises(StripeToolError) as exc_info:
+            call(inst, "GET", "/v1/invoiceitems/ii_nope")
+        assert exc_info.value.status == 404
+        assert "livemode=false" in exc_info.value.stripe_body["error"]["message"]
