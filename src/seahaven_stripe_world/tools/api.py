@@ -272,6 +272,7 @@ def stripe_api_search(
 ) -> Any:
     """Search for Stripe API operations by intent and resource."""
     _context.check(ctx, stripe_context, livemode)
+    # Returns the wrapped envelope: {openapi_spec_version, data}
     return discovery.search(intent, resource, limit=limit)
 
 
@@ -285,11 +286,10 @@ def stripe_api_details(
     """Get parameter details for a specific Stripe API operation."""
     _context.check(ctx, stripe_context, livemode)
     # Absent operations are bucket A regardless of context.
-    # Catalogued ops fall through to discovery; Phase 8 will add full
-    # catalogue coverage to the discovery index so all catalogued ops
-    # return a details document.
     if is_absent(stripe_api_operation_id):
         raise UnknownOperation(stripe_api_operation_id)
+    # The discovery index covers all catalogued operations, so both
+    # routed and catalogued-but-unrouted operations get a details document.
     documented = discovery.details(stripe_api_operation_id)
     if documented is None:
         raise UnknownOperation(stripe_api_operation_id)

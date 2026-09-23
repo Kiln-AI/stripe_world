@@ -70,7 +70,7 @@ A phase is not done until its register rows have dispositions and the full check
 - [x] **Phase 7: The refusal model.** *Needs Phase 1's enumeration finished.* Catalogue gating ahead
       of route matching, buckets A and B, the product table, B1 and B2, and `stripe_analytics` as a
       B1 refusal. The generated refusal-conformance test (§8.2) lands here.
-- [ ] **Phase 8: Discovery.** The pruner's second output and `discovery_index.json`; `intent` +
+- [x] **Phase 8: Discovery.** The pruner's second output and `discovery_index.json`; `intent` +
       `resource` search with the scoring function; the twelve-key details document; `{id}`
       placeholder normalisation in discovery output only.
 - [ ] **Phase 9: Serialization completeness.** The 20 already-in-schema fields; the pruner fix that

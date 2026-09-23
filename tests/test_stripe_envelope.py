@@ -109,8 +109,12 @@ def test_the_discovery_tools_pass_through_untouched() -> None:
             stripe_context=ACCOUNT_ID,
             livemode=True,
         )
-        assert isinstance(results, list) and results
-        assert set(results[0]) == {"id", "method", "path", "summary"}
+        # Phase 8: search returns {openapi_spec_version, data} wrapper
+        assert isinstance(results, dict)
+        assert "openapi_spec_version" in results
+        assert isinstance(results["data"], list)
+        assert results["data"]
+        assert "id" in results["data"][0]
 
         documented = instance.call(
             "stripe_api_details",
@@ -118,14 +122,20 @@ def test_the_discovery_tools_pass_through_untouched() -> None:
             stripe_context=ACCOUNT_ID,
             livemode=True,
         )
-        assert set(documented) == {
+        # Phase 8: details returns twelve-key document with 'id' not 'operation_id'
+        expected_keys = {
+            "id",
             "method",
             "path",
-            "operation_id",
             "summary",
             "description",
+            "tags",
+            "keywords",
             "parameters",
+            "required_permissions",
+            "openapi_spec_version",
         }
+        assert expected_keys <= set(documented)
 
 
 def test_the_request_id_is_minted_per_call_and_carries_the_key(probe, monkeypatch) -> None:

@@ -32,8 +32,8 @@ discover later.
 | ID | Tell | Lane(s) | Cost | Disposition |
 |---|---|---|---|---|
 | EC-04 | Response headers (`Stripe-Version`, `Request-Id`) visible in our world; real MCP surfaces none | envelope | trivial | closed |
-| TS-13, DT-02 | Search output missing `{openapi_spec_version, data}` wrapper; ours returns bare list | tool-surface, discovery | trivial | open |
-| TS-14, DT-03 | Search results missing `id` (operation ID) and optional `llm_context` fields | tool-surface, discovery | trivial | open |
+| TS-13, DT-02 | Search output missing `{openapi_spec_version, data}` wrapper; ours returns bare list | tool-surface, discovery | trivial | closed |
+| TS-14, DT-03 | Search results missing `id` (operation ID) and optional `llm_context` fields | tool-surface, discovery | trivial | closed |
 | TS-08 | `stripe_api_read` description text doesn't match (references paths, not operation IDs) | tool-surface | trivial | closed |
 | TS-09 | `stripe_api_search` description text doesn't match (keyword search vs intent+resource) | tool-surface | trivial | closed |
 | TS-24 | `stripe_api_write` description text doesn't match | tool-surface | trivial | closed |
@@ -46,9 +46,9 @@ discover later.
 | AS-08 | Account ID `acct_1SWTestAccount00` is a human-readable constant; real IDs are 16 random alphanumerics | account-stats | trivial | closed |
 | TS-10, TS-11, EC-01 | Success response is bare JSON body; ours wraps in `{status, body, headers}` | tool-surface, envelope | moderate | closed |
 | TS-12, EC-02 | Errors are MCP tool errors (plain text); ours returns structured `{status, body}` with `error` object | tool-surface, envelope | moderate | closed |
-| TS-15, DT-14 | Details response has 12 keys (`id`, `tags`, `keywords`, `required_permissions`, ...); ours has 6 with `operation_id` not `id` | tool-surface, discovery | moderate | open |
-| TS-16, DT-15 | Details parameters grouped as `{path:{}, query:{}, body:{}}` dicts; ours is a flat list | tool-surface, discovery | moderate | open |
-| TS-18, DT-04 | Path placeholders normalized to `{id}` everywhere; ours uses `{customer}`, `{invoice}`, etc. | tool-surface, discovery | moderate | open |
+| TS-15, DT-14 | Details response has 12 keys (`id`, `tags`, `keywords`, `required_permissions`, ...); ours has 6 with `operation_id` not `id` | tool-surface, discovery | moderate | closed |
+| TS-16, DT-15 | Details parameters grouped as `{path:{}, query:{}, body:{}}` dicts; ours is a flat list | tool-surface, discovery | moderate | closed |
+| TS-18, DT-04 | Path placeholders normalized to `{id}` everywhere; ours uses `{customer}`, `{invoice}`, etc. | tool-surface, discovery | moderate | closed |
 | TS-06, DT-01 | Search tool takes `intent` + `resource` + `limit`; ours takes free-text `query` | tool-surface, discovery | moderate | closed |
 | TS-02 | `get_stripe_account_info` does not exist on real MCP; real uses `list_available_accounts_or_orgs` | tool-surface | moderate | declared |
 | TS-03 | `list_available_accounts_or_orgs` missing; it gates every other tool (provides `stripe_context`/`livemode`) | tool-surface | moderate | closed |
@@ -57,18 +57,18 @@ discover later.
 | AS-02 | Structured IDs (Format B) embed a 10-char account fragment at a fixed position; ours are fully random | account-stats | moderate | closed |
 | TS-04, TS-05, TS-07, TS-26, DT-13 | Read/write/details tools use `stripe_api_operation_id` + `stripe_context` + `livemode`; ours use `method` + `path` | tool-surface, discovery | hard | closed |
 | TS-01 | Tool count: real MCP has 10 tools; ours has 5 (6 missing, 1 extra) | tool-surface | hard | not-a-tell |
-| AR-05, AR-06, DT-06, DT-07, DT-08, DT-09, DT-10, DT-11, DT-12, DT-19, DT-25 | Discovery covers entire Stripe API (Issuing, Connect, Checkout, Treasury, Tax, v2, ...); ours covers only 148 ops | absence-refusal, discovery | hard | open |
+| AR-05, AR-06, DT-06, DT-07, DT-08, DT-09, DT-10, DT-11, DT-12, DT-19, DT-25 | Discovery covers entire Stripe API (Issuing, Connect, Checkout, Treasury, Tax, v2, ...); ours covers only 148 ops | absence-refusal, discovery | hard | closed |
 | EC-03, AR-08 | `idempotency_key` not exposed through MCP (it's an HTTP header); ours accepts it as tool parameter | envelope, absence-refusal | decision | closed |
 
 ## Probable (27)
 
 | ID | Tell | Lane(s) | Cost | Disposition |
 |---|---|---|---|---|
-| TS-17, DT-16 | Details returns full multi-paragraph description; ours truncates to first sentence | tool-surface, discovery | trivial | open |
+| TS-17, DT-16 | Details returns full multi-paragraph description; ours truncates to first sentence | tool-surface, discovery | trivial | closed |
 | EC-06, EC-07 | Out-of-range `limit` (0, -1, 101, 200) silently clamped to 1..100; ours returns 400 | envelope | trivial | open |
 | EC-08, DT-21 | `openapi_spec_version` is `"2026-08-26.preview"`; ours says `"2026-08-26.dahlia"` | envelope, discovery | trivial | declared |
 | AR-03 | Integer-for-string params (e.g. `name: 12345`) silently coerced; ours rejects with 400 | absence-refusal | trivial | open |
-| DT-05 | Default search result count is 5 (configurable 1-20); ours is fixed at 10 | discovery | trivial | open |
+| DT-05 | Default search result count is 5 (configurable 1-20); ours is fixed at 10 | discovery | trivial | closed |
 | AS-07 | Account object has `metadata: {}`; real account response has no `metadata` key | account-stats | trivial | closed |
 | AS-09 | Account `created` is `1704067200` (midnight 2024-01-01); conspicuously round | account-stats | trivial | open |
 | AS-11 | `customer.invoice_prefix` should be 8 chars from `[A-Z0-9]`; format unverified in our code | account-stats | trivial | open |
@@ -86,8 +86,8 @@ discover later.
 | TS-21 | `stripe_analytics` tool missing (Sigma query interface) | tool-surface | moderate | closed |
 | TS-22 | `stripe_implementation_planner` tool missing (decision tree + guide_id) | tool-surface | moderate | declared |
 | TS-23 | `send_stripe_mcp_feedback` tool missing (accepts feedback) | tool-surface | moderate | declared |
-| DT-17 | Real details nests parameters to arbitrary depth (156K chars for CheckoutSessions); ours stops at depth 1 | discovery | moderate | open |
-| DT-20 | `required_permissions` array missing from details response | discovery | moderate | open |
+| DT-17 | Real details nests parameters to arbitrary depth (156K chars for CheckoutSessions); ours stops at depth 1 | discovery | moderate | closed |
+| DT-20 | `required_permissions` array missing from details response | discovery | moderate | closed |
 | DT-23 | Some routed ops hidden on real server (`PostInvoicesInvoicePay`); real MCP curates its whitelist | discovery | moderate | closed |
 | AR-09, DT-22 | v1 events endpoints hidden in real MCP (only v2 event destinations); ours routes them | absence-refusal, discovery | decision | closed |
 | AR-10, AS-10 | Successive creates share identical `created` timestamp (frozen clock); real timestamps advance | absence-refusal, account-stats | decision | declared |
