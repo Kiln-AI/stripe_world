@@ -8,6 +8,9 @@ MCP's ``stripe_api_details`` and records the verdict:
 
 - **catalogued** — the MCP returned a details document; record ``required_permissions``.
 - **absent** — the MCP answered "Operation '...' is not available."
+- **key_restricted** — the MCP answered "... is not available with secret key type."
+  The operation is catalogued for OAuth sessions; probe it over OAuth and record
+  it as ``catalogued`` with ``"key_restricted": true, "via": "oauth"``.
 - **error** — anything else (transport fault, unexpected shape).
 
 Results are written to ``src/seahaven_stripe_world/spec/mcp_catalogue.jsonl``,
@@ -27,10 +30,10 @@ Authentication:
     Stripe's hosted MCP at ``https://mcp.stripe.com`` accepts the secret key as a
     Bearer token directly.
 
-    The ``stripe_context`` and ``livemode`` values needed by every tool call are
-    obtained automatically: ``livemode`` is derived from the key prefix (always
-    ``false`` for test keys), and ``stripe_context`` is read from the server by
-    calling ``list_available_accounts_or_orgs`` at startup.
+    A key-authenticated session exposes a different tool surface from an OAuth
+    one: ``stripe_api_details`` takes only ``stripe_api_operation_id`` (no
+    ``stripe_context``/``livemode``), and ``list_available_accounts_or_orgs`` is
+    absent. The recorded ``tools`` line therefore reflects the key surface.
 
     Override the endpoint with ``STRIPE_MCP_ENDPOINT`` if needed (default:
     ``https://mcp.stripe.com``).
@@ -57,6 +60,7 @@ PROTOCOL_VERSION = "2025-06-18"
 
 NOT_AVAILABLE_PREFIX = "Operation '"
 NOT_AVAILABLE_SUFFIX = "' is not available."
+KEY_RESTRICTED_SUFFIX = "' is not available with secret key type."
 
 
 def _load_operation_ids() -> list[str]:
@@ -244,35 +248,6 @@ class _McpSession:
         tools = result.get("result", {}).get("tools", [])
         return [t["name"] for t in tools]
 
-    def discover_account(self) -> tuple[str, bool]:
-        """Call list_available_accounts_or_orgs to get stripe_context and livemode.
-
-        Returns (stripe_context, livemode).
-        """
-        result = self.call_tool("list_available_accounts_or_orgs", {})
-        tool_result = result.get("result", {})
-        content = tool_result.get("content", [])
-
-        text = ""
-        for item in content:
-            if item.get("type") == "text":
-                text = item.get("text", "")
-                break
-
-        if not text:
-            msg = "list_available_accounts_or_orgs returned no content"
-            raise RuntimeError(msg)
-
-        doc = json.loads(text)
-        accounts = doc.get("accounts", [])
-        if not accounts:
-            msg = "list_available_accounts_or_orgs returned no accounts"
-            raise RuntimeError(msg)
-
-        # Use the first account
-        account = accounts[0]
-        return account["stripe_context"], account["livemode"]
-
 
 def _classify_response(result: dict[str, Any], op_id: str) -> dict[str, Any]:
     """Classify an MCP tool call response into a catalogue record."""
@@ -297,9 +272,22 @@ def _classify_response(result: dict[str, Any], op_id: str) -> dict[str, Any]:
                 break
         if NOT_AVAILABLE_PREFIX in text and NOT_AVAILABLE_SUFFIX in text:
             return {"op": op_id, "verdict": "absent", "probed": probed}
+        # Catalogued, but hidden from secret-key sessions (Balance, Issuing and
+        # Payouts reads). The OAuth surface this world mirrors does serve them, so
+        # these need an OAuth probe; they are not re-probed on resume.
+        if KEY_RESTRICTED_SUFFIX in text:
+            return {"op": op_id, "verdict": "key_restricted", "probed": probed}
         return {"op": op_id, "verdict": "error", "detail": text[:200], "probed": probed}
 
-    # Parse the successful response to extract required_permissions
+    # The details document arrives as ``structuredContent``; ``content`` carries
+    # a Markdown rendering of it, not JSON.
+    structured = tool_result.get("structuredContent")
+    if isinstance(structured, dict) and structured.get("id") == op_id:
+        record = {"op": op_id, "verdict": "catalogued", "probed": probed}
+        if structured.get("required_permissions"):
+            record["permissions"] = structured["required_permissions"]
+        return record
+
     text = ""
     for item in content:
         if item.get("type") == "text":
@@ -382,10 +370,7 @@ def main(argv: list[str] | None = None) -> int:
 
     _validate_key(key)
 
-    # Derive livemode from key prefix (test keys are always livemode=false)
-    livemode = False
     print(f"endpoint: {endpoint}")
-    print(f"livemode: {livemode} (derived from key prefix)")
 
     # Open an MCP session with the server
     session = _McpSession(endpoint, key)
@@ -396,22 +381,6 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: MCP initialize handshake failed: {exc}", file=sys.stderr)
         return 1
     print(f"protocol version: {session.negotiated_version}")
-
-    # Discover the account's stripe_context from the server
-    print("discovering stripe_context via list_available_accounts_or_orgs...")
-    try:
-        stripe_context, server_livemode = session.discover_account()
-    except Exception as exc:
-        print(f"error: could not discover account: {exc}", file=sys.stderr)
-        return 1
-
-    print(f"stripe_context: {stripe_context}")
-    if server_livemode != livemode:
-        print(
-            f"warning: server reports livemode={server_livemode}, "
-            f"key implies livemode={livemode}; using key-derived value",
-            file=sys.stderr,
-        )
 
     all_ops = _load_operation_ids()
     print(f"spec3.json has {len(all_ops)} operation ids")
@@ -468,11 +437,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             result = session.call_tool(
                 "stripe_api_details",
-                {
-                    "stripe_api_operation_id": op_id,
-                    "stripe_context": stripe_context,
-                    "livemode": livemode,
-                },
+                {"stripe_api_operation_id": op_id},
             )
             record = _classify_response(result, op_id)
         except Exception as exc:
