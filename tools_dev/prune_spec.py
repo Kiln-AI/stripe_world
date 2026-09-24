@@ -106,6 +106,13 @@ CUT_CUSTOMER_SUBRESOURCES = frozenset(
     }
 )
 
+# Schemas reachable from tool outputs but not from routed operations
+# (architecture §7, functional spec §11.1). Seeded into the closure after
+# the main walk so the schema-conformance validator can check them, without
+# removing them from STOPLIST_NAMES (which would let every on_behalf_of
+# union inflate the closure).
+TOOL_OUTPUT_SCHEMAS = frozenset({"account"})
+
 # Schemas the closure walker never enters, per the rulings in
 # specs/.../api-surface-and-object-graph/scope-boundary-edges.md. The list is
 # representative of that document's summary table rather than exhaustive; the
@@ -115,7 +122,10 @@ CUT_CUSTOMER_SUBRESOURCES = frozenset(
 # does not route.
 STOPLIST_NAMES = frozenset(
     {
-        # Connect.
+        # Connect (account stays in the stoplist for *reference* resolution —
+        # other schemas' $ref to it are still nulled — but gets seeded
+        # separately via TOOL_OUTPUT_SCHEMAS so its own schema enters the
+        # closure for schema-conformance validation).
         "account",
         "application",
         "transfer",
@@ -834,10 +844,13 @@ def _build_schema_rules(bodies: dict[str, Any]) -> dict[str, Any]:
                 )
                 raise GenerationError(msg)
             table[obj["enum"][0]] = name
-    if bodies and not by_object:
-        # An empty closure is a degenerate spec (a route set with no response
-        # schemas at all); a non-empty closure with no discriminated object
-        # anywhere means a spec bump nuked every `object` discriminator.
+    # Ignore TOOL_OUTPUT_SCHEMAS when checking for a degenerate closure:
+    # they may enter without an object discriminator (they are not routed
+    # responses — they are tool return values seeded separately).
+    non_seed_bodies = {n for n in bodies if n not in TOOL_OUTPUT_SCHEMAS}
+    if non_seed_bodies and not by_object:
+        # A non-empty closure with no discriminated object anywhere means a
+        # spec bump nuked every `object` discriminator.
         msg = "no discriminated object schemas found in the pruned closure"
         raise GenerationError(msg)
 
@@ -1042,6 +1055,31 @@ def build_artifacts(
         for next_name in sorted(found):
             if next_name not in closure:
                 todo.append(next_name)
+
+    # Second pass: seed tool-output schemas (architecture §7). Each seed
+    # bypasses the stoplist for itself but honours it for its refs, so the
+    # account schema enters without inflating every on_behalf_of union.
+    for seed in sorted(TOOL_OUTPUT_SCHEMAS):
+        if seed in closure or seed not in schemas:
+            continue
+        closure.add(seed)
+        body = _strip_all_markup(_drop_rails(_apply_stoplist(schemas[seed]), rails))
+        bodies[seed] = body
+        found_seed: set[str] = set()
+        _harvest_refs(body, found_seed)
+        extra = sorted(name for name in found_seed if name not in closure)
+        while extra:
+            name = extra.pop()
+            if name in closure or name not in schemas or _stoplisted(name):
+                continue
+            closure.add(name)
+            body = _strip_all_markup(_drop_rails(_apply_stoplist(schemas[name]), rails))
+            bodies[name] = body
+            found2: set[str] = set()
+            _harvest_refs(body, found2)
+            for next_name in sorted(found2):
+                if next_name not in closure:
+                    extra.append(next_name)
 
     if len(closure) >= SCHEMA_BUDGET:
         msg = f"closure reached {len(closure)} schemas, over the {SCHEMA_BUDGET} budget"
@@ -1263,6 +1301,338 @@ def _render_routes(routes: Sequence[Route]) -> str:
     return "\n".join(lines) + "\n"
 
 
+# --- Discovery index (architecture §5.1) --------------------------------------
+
+CATALOGUE_PATH = SPEC_DIR / "mcp_catalogue.jsonl"
+
+# Placeholder normalisation: the real MCP uses {id} everywhere
+# (functional spec §7). Our route patterns use {customer}, {invoice} etc.
+_PATH_PLACEHOLDER = re.compile(r"\{[^}]+\}")
+
+
+def _normalise_path(path: str) -> str:
+    """Replace all path placeholders with ``{id}`` (discovery output only)."""
+    return _PATH_PLACEHOLDER.sub("{id}", path)
+
+
+def _derive_tag(path: str, response_ref: str | None) -> str:
+    """Derive the tag from the response schema ref or the path.
+
+    The real MCP returns tags like ``["customer"]``, ``["issuing.card"]``,
+    ``["balance_transaction"]``. The schema ref name matches these exactly
+    (``customer``, ``issuing.card``).  For list endpoints whose response
+    ref is not directly the schema name, we fall back to path-based derivation.
+    """
+    if response_ref:
+        match = REF_PATTERN.fullmatch(response_ref)
+        if match:
+            name = match.group(1)
+            if not name.startswith("deleted_"):
+                return name
+    # Path-based fallback: /v1/customers -> customer, /v1/issuing/cards -> issuing.card
+    segments = [
+        s for s in path.split("/") if s and s != "v1" and s != "v2" and not s.startswith("{")
+    ]
+    if not segments:
+        return ""
+    # Join with dot for multi-level (issuing/cards -> issuing.card)
+    # Singularise the last segment (remove trailing 's' heuristic)
+    parts = []
+    for i, seg in enumerate(segments):
+        if i == len(segments) - 1:
+            # Simple singularisation: remove trailing 's' for common patterns
+            if seg.endswith("ies"):
+                seg = seg[:-3] + "y"
+            elif seg.endswith("ses") or seg.endswith("ches"):
+                seg = seg[:-2]
+            elif seg.endswith("s") and not seg.endswith("ss"):
+                seg = seg[:-1]
+        parts.append(seg)
+    return ".".join(parts)
+
+
+def _response_ref(operation: dict[str, Any]) -> str | None:
+    """Extract the response schema $ref from an operation."""
+    resp_200 = operation.get("responses", {}).get("200", {})
+    content = resp_200.get("content", {}).get("application/json", {}).get("schema", {})
+    # Direct ref
+    if "$ref" in content:
+        return content["$ref"]
+    # List envelope: data.items.$ref
+    items = content.get("properties", {}).get("data", {}).get("items", {})
+    if "$ref" in items:
+        return items["$ref"]
+    return None
+
+
+def _generate_keywords(path: str, method: str, summary: str, tag: str) -> list[str]:
+    """Generate keywords matching the real MCP's pattern.
+
+    Order (from live probe 2026-09-22): path segments (with underscore
+    splits), HTTP verb, path placeholder names (without braces),
+    summary verb, tag (with underscore splits but NOT dot splits).
+
+    Example GetBalanceTransactions:
+      ['v1', 'balance_transactions', 'balance', 'transactions', 'get',
+       'list', 'balance_transaction', 'transaction']
+    Example GetIssuingCardsCard:
+      ['v1', 'issuing', 'cards', 'get', 'card', 'retrieve', 'issuing.card']
+    """
+    kw: list[str] = []
+    seen: set[str] = set()
+
+    def add(word: str) -> None:
+        w = word.lower()
+        if w and w not in seen:
+            seen.add(w)
+            kw.append(w)
+
+    # 1. Path segments (non-placeholder) with underscore splits
+    placeholders: list[str] = []
+    for seg in path.split("/"):
+        if not seg:
+            continue
+        if seg.startswith("{") and seg.endswith("}"):
+            placeholders.append(seg[1:-1])
+        else:
+            add(seg)
+            for part in seg.split("_"):
+                add(part)
+
+    # 2. HTTP verb
+    add(method.lower())
+
+    # 3. Path placeholder names (without braces) -- the live server
+    # places these after the verb and before the summary verb.
+    for ph in placeholders:
+        add(ph)
+
+    # 4. Summary verb (first word of summary, lowered)
+    summary_words = summary.split()
+    if summary_words:
+        add(summary_words[0].lower())
+
+    # 5. Tag and tag underscore parts.  The live server does NOT
+    # dot-split dotted tags (e.g. 'issuing.card' is one keyword,
+    # NOT three).  Underscore splits are included.
+    if tag:
+        add(tag)
+        for part in tag.split("_"):
+            add(part)
+
+    return kw
+
+
+def _discovery_param(
+    name: str, schema: dict[str, Any], required: bool, description: str
+) -> dict[str, Any]:
+    """Build a parameter entry for the discovery index.
+
+    Unlike the old index, this nests to full depth (DT-17) and uses the
+    live server's shape: {type, description, required, enum?, properties?}.
+    """
+    doc: dict[str, Any] = {}
+    doc["type"] = _discovery_type(schema)
+    doc["description"] = _strip_markup(description)
+    doc["required"] = required
+
+    # Enum values
+    enum = schema.get("enum")
+    if enum is None:
+        for union_key in ("anyOf", "oneOf"):
+            for member in schema.get(union_key, []):
+                if isinstance(member, dict) and "enum" in member:
+                    enum = member["enum"]
+                    break
+            if enum is not None:
+                break
+    if enum is not None:
+        doc["enum"] = list(enum)
+
+    # Nested properties (full depth, DT-17)
+    props = _discovery_properties(schema)
+    if props:
+        doc["properties"] = props
+
+    # Array items
+    if schema.get("type") == "array":
+        items_schema = schema.get("items", {})
+        if items_schema:
+            items_doc: dict[str, Any] = {}
+            items_doc["type"] = _discovery_type(items_schema)
+            items_desc = items_schema.get("description", "")
+            items_doc["description"] = _strip_markup(items_desc) if items_desc else ""
+            items_doc["required"] = False
+            items_props = _discovery_properties(items_schema)
+            if items_props:
+                items_doc["properties"] = items_props
+            doc["items"] = items_doc
+
+    return doc
+
+
+def _discovery_type(schema: dict[str, Any]) -> str:
+    """Type string for a discovery parameter."""
+    if "$ref" in schema:
+        return "object"
+    for union_key in ("anyOf", "oneOf"):
+        members = schema.get(union_key)
+        if isinstance(members, list) and members:
+            types = []
+            for member in members:
+                t = _discovery_type(member)
+                if t not in types:
+                    types.append(t)
+            if len(types) == 1:
+                return types[0]
+            return " | ".join(types)
+    return str(schema.get("type", "object"))
+
+
+def _discovery_properties(schema: dict[str, Any]) -> dict[str, Any]:
+    """Nested properties for a discovery parameter, recursing to full depth."""
+    props_schema: dict[str, Any] = {}
+    if "properties" in schema:
+        props_schema = schema["properties"]
+    else:
+        for union_key in ("anyOf", "oneOf"):
+            for member in schema.get(union_key, []):
+                if isinstance(member, dict) and "properties" in member:
+                    props_schema = member["properties"]
+                    break
+            if props_schema:
+                break
+
+    if not props_schema:
+        return {}
+
+    required_set = set(schema.get("required", []))
+    result: dict[str, Any] = {}
+    for name, prop in props_schema.items():
+        result[name] = _discovery_param(
+            name, prop, name in required_set, prop.get("description", "")
+        )
+    return result
+
+
+def _build_discovery_params(
+    operation: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    """Build the {path, query, body} parameter groups for a discovery document."""
+    path_params: dict[str, Any] = {}
+    query_params: dict[str, Any] = {}
+    body_params: dict[str, Any] = {}
+
+    for parameter in operation.get("parameters", []):
+        schema = parameter.get("schema", {})
+        location = parameter.get("in", "query")
+        name = parameter["name"]
+        doc = _discovery_param(
+            name,
+            schema,
+            bool(parameter.get("required")),
+            parameter.get("description", ""),
+        )
+        if location == "path":
+            path_params[name] = doc
+        else:
+            query_params[name] = doc
+
+    content = (
+        operation.get("requestBody", {}).get("content", {}).get("application/x-www-form-urlencoded")
+    )
+    if content:
+        schema = content.get("schema", {})
+        properties = {}
+        if "properties" in schema:
+            properties = schema["properties"]
+        else:
+            for union_key in ("anyOf", "oneOf"):
+                for member in schema.get(union_key, []):
+                    if isinstance(member, dict) and "properties" in member:
+                        properties = member["properties"]
+                        break
+                if properties:
+                    break
+
+        required = set(schema.get("required", []))
+        for name, prop in properties.items():
+            body_params[name] = _discovery_param(
+                name, prop, name in required, prop.get("description", "")
+            )
+
+    return {"path": path_params, "query": query_params, "body": body_params}
+
+
+def build_discovery_index(full_spec: dict[str, Any]) -> dict[str, Any]:
+    """Build the discovery index: one details document per catalogued operation.
+
+    Reads the catalogue from the committed artifact to know which operations
+    are catalogued (architecture §5.1). The index is keyed by operation id.
+    """
+    # Load catalogue
+    if not CATALOGUE_PATH.is_file():
+        msg = f"{CATALOGUE_PATH} not found — run enumerate_catalogue.py first"
+        raise GenerationError(msg)
+    catalogue_text = CATALOGUE_PATH.read_text()
+    catalogued_ops: dict[str, list[str]] = {}  # op_id -> permissions
+    for line in catalogue_text.splitlines():
+        if not line.strip():
+            continue
+        rec = json.loads(line)
+        if rec.get("verdict") == "catalogued":
+            catalogued_ops[rec["op"]] = rec.get("permissions", [])
+
+    api_version = full_spec["info"]["version"]
+    paths = full_spec["paths"]
+    index: dict[str, Any] = {}
+
+    for path, path_item in paths.items():
+        for method_lower, operation in path_item.items():
+            if method_lower not in ("get", "post", "delete"):
+                continue
+            op_id = operation.get("operationId", "")
+            if op_id not in catalogued_ops:
+                continue
+
+            method = method_lower.upper()
+            summary = _strip_markup(operation.get("summary", ""))
+            description = _strip_markup(operation.get("description", ""))
+            ref = _response_ref(operation)
+            tag = _derive_tag(path, ref)
+
+            keywords = _generate_keywords(path, method, summary, tag)
+            parameters = _build_discovery_params(operation)
+            normalised_path = _normalise_path(path)
+
+            # Normalise path parameter names to match {id}.
+            # All placeholders become {id} in the normalised path, so
+            # every path parameter maps to the single key "id".  When
+            # multiple path params exist (e.g. /v1/customers/{customer}/
+            # payment_methods/{payment_method}), we keep the LAST one --
+            # in practice it is the most specific resource identifier,
+            # and the real MCP's details doc shows a single "id" entry.
+            if parameters["path"]:
+                last_val = list(parameters["path"].values())[-1]
+                parameters["path"] = {"id": last_val}
+
+            doc: dict[str, Any] = {
+                "id": op_id,
+                "method": method,
+                "path": normalised_path,
+                "summary": summary,
+                "description": description,
+                "tags": [tag] if tag else [],
+                "keywords": keywords,
+                "parameters": parameters,
+                "required_permissions": catalogued_ops[op_id],
+                "openapi_spec_version": api_version,
+            }
+            index[op_id] = doc
+
+    return index
+
+
 # --- The CLI ------------------------------------------------------------------
 
 
@@ -1312,6 +1682,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     from seahaven_stripe_world.dispatch import routes as routes_module
 
     artifacts = build_artifacts(full_spec, routes_module.ALL, _load_event_types())
+    discovery_index = build_discovery_index(full_spec)
     expected: dict[str, str] = {
         "spec3.min.json": _dump_canonical(artifacts.spec3_min) + "\n",
         "spec3.min.json.sha256": f"{source_sha}\n",
@@ -1319,6 +1690,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "enums.py": _render_enums(artifacts),
         "event_types.py": _render_event_types(artifacts),
         "schema_rules.json": _dump_canonical(artifacts.schema_rules) + "\n",
+        "discovery_index.json": _dump_canonical(discovery_index) + "\n",
     }
 
     if args.check:

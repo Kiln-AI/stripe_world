@@ -6,17 +6,14 @@ transfer, and the filters — all pinned by the Phase 7 live probes at
 import pytest
 import seahaven
 
-from conftest import BLANK_NOW
+from conftest import BLANK_NOW, api_read, api_write
+from seahaven_stripe_world.errors import StripeToolError
 
 pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
 
 
 def product(instance: seahaven.Instance) -> str:
-    result = instance.call(
-        "stripe_api_write", method="POST", path="/v1/products", params={"name": "P"}
-    )
-    assert result["status"] == 200, result
-    return result["body"]["id"]
+    return api_write(instance, "POST", "/v1/products", {"name": "P"})["id"]
 
 
 def create(instance: seahaven.Instance, **params: object) -> dict:
@@ -26,17 +23,13 @@ def create(instance: seahaven.Instance, **params: object) -> dict:
         for key in ("unit_amount", "unit_amount_decimal", "custom_unit_amount", "billing_scheme")
     ):
         params.setdefault("unit_amount", 1000)
-    result = instance.call(
-        "stripe_api_write", method="POST", path="/v1/prices", params=dict(params)
-    )
-    assert result["status"] == 200, result
-    return result["body"]
+    return api_write(instance, "POST", "/v1/prices", dict(params))
 
 
 def call(instance: seahaven.Instance, method: str, path: str, params: dict | None = None):
     if method == "GET":
-        return instance.call("stripe_api_read", path=path, params=params)
-    return instance.call("stripe_api_write", method=method, path=path, params=params)
+        return api_read(instance, path, params)
+    return api_write(instance, method, path, params)
 
 
 def test_one_time_defaults(instance: seahaven.Instance) -> None:
@@ -78,24 +71,24 @@ def test_decimal_amount_leaves_unit_amount_null(instance: seahaven.Instance) -> 
 
 def test_tiered_requires_recurring_and_hides_amounts(instance: seahaven.Instance) -> None:
     prod = product(instance)
-    result = call(
-        instance,
-        "POST",
-        "/v1/prices",
-        {
-            "currency": "usd",
-            "product": prod,
-            "billing_scheme": "tiered",
-            "tiers_mode": "volume",
-            "tiers": [{"up_to": "inf", "unit_amount": 500}],
-        },
-    )
-    assert result["status"] == 400
+    with pytest.raises(StripeToolError) as exc_info:
+        call(
+            instance,
+            "POST",
+            "/v1/prices",
+            {
+                "currency": "usd",
+                "product": prod,
+                "billing_scheme": "tiered",
+                "tiers_mode": "volume",
+                "tiers": [{"up_to": "inf", "unit_amount": 500}],
+            },
+        )
     # Probed verbatim, including the surprising param.
-    assert result["body"]["error"]["message"] == (
+    assert exc_info.value.stripe_body["error"]["message"] == (
         "Prices with `type=one_time` are not supported with tiered billing."
     )
-    assert result["body"]["error"]["param"] == "interval"
+    assert exc_info.value.stripe_body["error"]["param"] == "interval"
     body = create(
         instance,
         product=prod,
@@ -132,58 +125,64 @@ def test_transform_quantity_echoes(instance: seahaven.Instance) -> None:
 
 
 def test_product_xor_product_data_refusals(instance: seahaven.Instance) -> None:
-    result = call(instance, "POST", "/v1/prices", {"currency": "usd", "unit_amount": 1000})
-    assert result["status"] == 400
-    assert result["body"]["error"]["message"] == (
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "POST", "/v1/prices", {"currency": "usd", "unit_amount": 1000})
+    assert exc_info.value.stripe_body["error"]["message"] == (
         "You must specify either `product` or `product_data` when creating a price."
     )
     prod = product(instance)
-    result = call(
-        instance,
-        "POST",
-        "/v1/prices",
-        {"currency": "usd", "unit_amount": 1000, "product": prod, "product_data": {"name": "x"}},
-    )
-    assert result["status"] == 400
-    assert result["body"]["error"]["message"] == (
+    with pytest.raises(StripeToolError) as exc_info:
+        call(
+            instance,
+            "POST",
+            "/v1/prices",
+            {
+                "currency": "usd",
+                "unit_amount": 1000,
+                "product": prod,
+                "product_data": {"name": "x"},
+            },
+        )
+    assert exc_info.value.stripe_body["error"]["message"] == (
         "You may only specify one of these parameters: product, product_data."
     )
-    assert result["body"]["error"]["param"] == "product"
+    assert exc_info.value.stripe_body["error"]["param"] == "product"
 
 
 def test_unknown_product_refuses_at_400(instance: seahaven.Instance) -> None:
-    result = call(
-        instance,
-        "POST",
-        "/v1/prices",
-        {"currency": "usd", "unit_amount": 100, "product": "prod_nope"},
-    )
-    assert result["status"] == 400
-    assert result["body"]["error"]["code"] == "resource_missing"
-    assert result["body"]["error"]["param"] == "product"
+    with pytest.raises(StripeToolError) as exc_info:
+        call(
+            instance,
+            "POST",
+            "/v1/prices",
+            {"currency": "usd", "unit_amount": 100, "product": "prod_nope"},
+        )
+    assert exc_info.value.status == 400
+    assert exc_info.value.stripe_body["error"]["code"] == "resource_missing"
+    assert exc_info.value.stripe_body["error"]["param"] == "product"
 
 
 def test_amount_requirement_and_metered_refusal(instance: seahaven.Instance) -> None:
     prod = product(instance)
     for extra in ({}, {"recurring": {"interval": "month"}}):
-        result = call(instance, "POST", "/v1/prices", {"currency": "usd", "product": prod, **extra})
-        assert result["status"] == 400
-        assert result["body"]["error"]["message"] == (
+        with pytest.raises(StripeToolError) as exc_info:
+            call(instance, "POST", "/v1/prices", {"currency": "usd", "product": prod, **extra})
+        assert exc_info.value.stripe_body["error"]["message"] == (
             "Prices require an `unit_amount` or `unit_amount_decimal` parameter to be set."
         )
-    result = call(
-        instance,
-        "POST",
-        "/v1/prices",
-        {
-            "currency": "usd",
-            "product": prod,
-            "unit_amount": 5,
-            "recurring": {"interval": "month", "usage_type": "metered"},
-        },
-    )
-    assert result["status"] == 400
-    assert result["body"]["error"]["message"] == (
+    with pytest.raises(StripeToolError) as exc_info:
+        call(
+            instance,
+            "POST",
+            "/v1/prices",
+            {
+                "currency": "usd",
+                "product": prod,
+                "unit_amount": 5,
+                "recurring": {"interval": "month", "usage_type": "metered"},
+            },
+        )
+    assert exc_info.value.stripe_body["error"]["message"] == (
         "Starting with Stripe version `2025-03-31.basil`, metered prices must be backed by meters."
     )
 
@@ -192,25 +191,25 @@ def test_product_data_creates_the_inline_product(instance: seahaven.Instance) ->
     body = create(instance, product_data={"name": "inline prod"})
     assert body["product"].startswith("prod_")
     product_body = call(instance, "GET", f"/v1/products/{body['product']}")
-    assert product_body["status"] == 200
-    assert product_body["body"]["name"] == "inline prod"
+    assert product_body["name"] == "inline prod"
 
 
 def test_lookup_key_conflict_and_transfer(instance: seahaven.Instance) -> None:
     prod = product(instance)
     holder = create(instance, product=prod, lookup_key="k1")
-    conflict = call(
-        instance,
-        "POST",
-        "/v1/prices",
-        {"currency": "usd", "product": prod, "unit_amount": 500, "lookup_key": "k1"},
-    )
-    assert conflict["status"] == 400
+    with pytest.raises(StripeToolError) as exc_info:
+        call(
+            instance,
+            "POST",
+            "/v1/prices",
+            {"currency": "usd", "product": prod, "unit_amount": 500, "lookup_key": "k1"},
+        )
+    assert exc_info.value.status == 400
     assert (
-        conflict["body"]["error"]["message"]
+        exc_info.value.stripe_body["error"]["message"]
         == f"A price (`{holder['id']}`) already uses that lookup key."
     )
-    assert conflict["body"]["error"]["param"] == "lookup_key"
+    assert exc_info.value.stripe_body["error"]["param"] == "lookup_key"
 
     # Transfer: the holder's key is cleared, not archived (probed: the holder
     # keeps active). The holder's price.updated is the only update event a
@@ -220,8 +219,8 @@ def test_lookup_key_conflict_and_transfer(instance: seahaven.Instance) -> None:
     )
     assert transferee["lookup_key"] == "k1"
     after = call(instance, "GET", f"/v1/prices/{holder['id']}")
-    assert after["body"]["lookup_key"] is None
-    assert after["body"]["active"] is True
+    assert after["lookup_key"] is None
+    assert after["active"] is True
     events_seen = instance.inspect().rows(
         "SELECT type, json_extract(data, '$.previous_attributes') AS prev,"
         " json_extract(data, '$.object.id') AS id FROM events WHERE type = 'price.updated'"
@@ -242,13 +241,12 @@ def test_lookup_key_transfer_on_update(instance: seahaven.Instance) -> None:
         f"/v1/prices/{two['id']}",
         {"lookup_key": "update-key", "transfer_lookup_key": True},
     )
-    assert result["status"] == 200
-    assert result["body"]["lookup_key"] == "update-key"
+    assert result["lookup_key"] == "update-key"
     cleared = call(instance, "GET", f"/v1/prices/{one['id']}")
-    assert cleared["body"]["lookup_key"] is None
+    assert cleared["lookup_key"] is None
     # Re-sending one's own key is not a conflict.
     again = call(instance, "POST", f"/v1/prices/{two['id']}", {"lookup_key": "update-key"})
-    assert again["status"] == 200
+    assert again["lookup_key"] == "update-key"
 
 
 def test_inactive_holder_still_conflicts(instance: seahaven.Instance) -> None:
@@ -257,14 +255,15 @@ def test_inactive_holder_still_conflicts(instance: seahaven.Instance) -> None:
     prod = product(instance)
     holder = create(instance, product=prod, lookup_key="sticky")
     call(instance, "POST", f"/v1/prices/{holder['id']}", {"active": False})
-    conflict = call(
-        instance,
-        "POST",
-        "/v1/prices",
-        {"currency": "usd", "product": prod, "unit_amount": 1, "lookup_key": "sticky"},
-    )
-    assert conflict["status"] == 400
-    assert "already uses that lookup key" in conflict["body"]["error"]["message"]
+    with pytest.raises(StripeToolError) as exc_info:
+        call(
+            instance,
+            "POST",
+            "/v1/prices",
+            {"currency": "usd", "product": prod, "unit_amount": 1, "lookup_key": "sticky"},
+        )
+    assert exc_info.value.status == 400
+    assert "already uses that lookup key" in exc_info.value.stripe_body["error"]["message"]
 
 
 def test_filters(instance: seahaven.Instance) -> None:
@@ -272,28 +271,29 @@ def test_filters(instance: seahaven.Instance) -> None:
     one_time = create(instance, product=prod)
     recurring = create(instance, product=prod, recurring={"interval": "month"})
     listed = call(instance, "GET", "/v1/prices", {"product": prod, "type": "recurring"})
-    assert [item["id"] for item in listed["body"]["data"]] == [recurring["id"]]
+    assert [item["id"] for item in listed["data"]] == [recurring["id"]]
     by_interval = call(instance, "GET", "/v1/prices", {"recurring": {"interval": "month"}})
-    assert recurring["id"] in [item["id"] for item in by_interval["body"]["data"]]
-    assert one_time["id"] not in [item["id"] for item in by_interval["body"]["data"]]
+    assert recurring["id"] in [item["id"] for item in by_interval["data"]]
+    assert one_time["id"] not in [item["id"] for item in by_interval["data"]]
     keys = call(instance, "GET", "/v1/prices", {"lookup_keys": ["nope"]})
-    assert keys["body"]["data"] == []
-    bad_product = call(instance, "GET", "/v1/prices", {"product": "prod_nope"})
-    assert bad_product["status"] == 400
-    assert bad_product["body"]["error"]["message"] == "No such product: 'prod_nope'"
+    assert keys["data"] == []
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "GET", "/v1/prices", {"product": "prod_nope"})
+    assert exc_info.value.status == 400
+    assert exc_info.value.stripe_body["error"]["message"] == "No such product: 'prod_nope'"
 
 
 def test_no_delete_route(instance: seahaven.Instance) -> None:
-    """Probed: DELETE on a price is the router's 404, `Unrecognized request
-    URL`, not a handler's refusal."""
+    """Probed: no DELETE operation exists for prices."""
+    from seahaven_stripe_world.dispatch.router import ROUTER
+
     body = create(instance, product=product(instance))
-    result = call(instance, "DELETE", f"/v1/prices/{body['id']}")
-    assert result["status"] == 404
-    assert result["body"]["error"]["message"].startswith("Unrecognized request URL")
+    assert ROUTER.resolve("DELETE", f"/v1/prices/{body['id']}") is None
 
 
 def test_bogus_price_id_names_the_placeholder(instance: seahaven.Instance) -> None:
-    result = call(instance, "GET", "/v1/prices/price_nope")
-    assert result["status"] == 404
-    assert result["body"]["error"]["message"] == "No such price: 'price_nope'"
-    assert result["body"]["error"]["param"] == "price"
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "GET", "/v1/prices/price_nope")
+    assert exc_info.value.status == 404
+    assert exc_info.value.stripe_body["error"]["message"] == "No such price: 'price_nope'"
+    assert exc_info.value.stripe_body["error"]["param"] == "price"

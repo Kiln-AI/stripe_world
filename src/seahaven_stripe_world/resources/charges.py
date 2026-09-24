@@ -35,7 +35,7 @@ from seahaven_stripe_world.dispatch.resource import (
 )
 from seahaven_stripe_world.resources import _lookup
 from seahaven_stripe_world.resources.customers import _canonical_shipping, _merge_canonical
-from seahaven_stripe_world.serialize.fields import FieldMap, presence_sets, serializer_for
+from seahaven_stripe_world.serialize.fields import OMIT, FieldMap, presence_sets, serializer_for
 from seahaven_stripe_world.stripe_errors import card_error, invalid_request
 
 if TYPE_CHECKING:
@@ -196,7 +196,6 @@ FIELDS = FieldMap(
     ),
     booleans=frozenset({"captured", "disputed", "paid", "refunded"}),
     constants={
-        "livemode": False,
         "application": None,
         "application_fee": None,
         "application_fee_amount": None,
@@ -205,13 +204,17 @@ FIELDS = FieldMap(
         "source_transfer": None,
         "transfer_data": None,
         "transfer_group": None,
-        # Recorded at the pinned version (Phase 8 probe): `refunds` is
-        # expand-only — absent on every unexpanded charge body, the full
-        # envelope under `expand[]=refunds` — which corrects data_model §7's
-        # always-inline reading. Not mapped until the refunds phase owns the
-        # live envelope; `radar_options` and `transfer` are recorded-only
-        # shapes the pinned spec does not declare (or types literally `null`),
-        # so they stay off this world's wire (allow-listed).
+        # Phase 9 serialization sweep: fields present in the pruned spec
+        # but never serialized until now.
+        "presentment_details": None,
+        # Spec types radar_options as {"type":"null"} — the live API emits {}
+        # but the spec-legal value is null, which is what we emit.
+        "radar_options": None,
+        # Expand-only inline list (absent unexpanded, full envelope under
+        # expand[]=refunds).
+        "refunds": OMIT,
+        # Connect reference, null on non-Connect accounts.
+        "transfer": None,
     },
     always_present=always_present,
     omit_when_none=omit_when_none,
@@ -387,8 +390,8 @@ def insert_charge(
     inside this call takes its ledger row immediately
     (`record_capture_ledger`); a manual hold's row lands at the capture
     transition."""
-    id_ = _ids.stripe_id(ctx, "ch_")
     created = ctx.clock.iso()
+    id_ = _ids.stripe_id(ctx, "ch_", timestamp=created, version_digit="3")
     failed = failure_code is not None
     cols = {
         "id": id_,

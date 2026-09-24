@@ -30,7 +30,12 @@ from seahaven_stripe_world import _ids, _json, _seq, _time
 from seahaven_stripe_world.dispatch.params import Param, ParamSpec
 from seahaven_stripe_world.dispatch.resource import ResourceSpec, register
 from seahaven_stripe_world.resources import _lookup, events
-from seahaven_stripe_world.serialize.fields import FieldMap, presence_sets, serializer_for
+from seahaven_stripe_world.serialize.fields import (
+    FieldMap,
+    instance_livemode,
+    presence_sets,
+    serializer_for,
+)
 from seahaven_stripe_world.stripe_errors import StripeApiError, invalid_request
 
 if TYPE_CHECKING:
@@ -148,8 +153,8 @@ def _mint_one_off_price(
     from seahaven_stripe_world.resources import prices, products
 
     if product_id is None:
-        product_id = _ids.stripe_id(ctx, "prod_")
         now = ctx.clock.iso()
+        product_id = _ids.stripe_id(ctx, "prod_", timestamp=now)
         ctx.db.execute(
             "INSERT INTO products (id, x_seq, created, updated, active, images,"
             " marketing_features, metadata, name)"
@@ -163,14 +168,15 @@ def _mint_one_off_price(
         products._emit_created(
             ctx, _lookup.require_row(ctx, "products", "product", product_id, param="product")
         )
-    price_id = _ids.stripe_id(ctx, "price_")
+    price_created = ctx.clock.iso()
+    price_id = _ids.stripe_id(ctx, "price_", timestamp=price_created)
     ctx.db.execute(
         "INSERT INTO prices (id, x_seq, created, active, billing_scheme, currency,"
         " product, tax_behavior, type, unit_amount, unit_amount_decimal)"
         " VALUES (?, ?, ?, 1, 'per_unit', ?, ?, 'unspecified', 'one_time', ?, ?)",
         price_id,
         _seq.next_seq(ctx, "prices"),
-        ctx.clock.iso(),
+        price_created,
         currency,
         product_id,
         amount,
@@ -196,11 +202,13 @@ def _pricing_body(ctx: seahaven.Ctx, *, amount: int, currency: str, name: str) -
     )
 
 
-def _no_such_invoice_item(id_: str, *, status: int = 404) -> StripeApiError:
+def _no_such_invoice_item(ctx: seahaven.Ctx, id_: str, *, status: int = 404) -> StripeApiError:
     # Wire-verbatim (cassette 13 steps 10/64): the capitalized name and the
     # `(livemode=false)` suffix are Stripe's own odd spellings here.
+    # The mode string is derived from the instance (architecture §6.2).
+    mode = "true" if instance_livemode(ctx) else "false"
     return invalid_request(
-        f"No such Invoice Item: '{id_}'(livemode=false)",
+        f"No such Invoice Item: '{id_}'(livemode={mode})",
         code="resource_missing",
         param="id",
         status=status,
@@ -210,7 +218,7 @@ def _no_such_invoice_item(id_: str, *, status: int = 404) -> StripeApiError:
 def _require_item(ctx: seahaven.Ctx, id_: str) -> dict[str, Any]:
     row = ctx.db.one("SELECT * FROM invoiceitems WHERE id = ?", id_)
     if row is None:
-        raise _no_such_invoice_item(id_)
+        raise _no_such_invoice_item(ctx, id_)
     return row
 
 
@@ -283,7 +291,6 @@ FIELDS = FieldMap(
         "tax_rates": _tax_rate_bodies,
     },
     constants={
-        "livemode": False,
         "customer_account": None,
         "test_clock": None,
     },
@@ -319,7 +326,7 @@ def insert_invoice_item(
     """Write one invoiceitem row (minting its one-off price) and emit
     `invoiceitem.created`."""
     now = ctx.clock.iso()
-    item_id = _ids.stripe_id(ctx, "ii_")
+    item_id = _ids.stripe_id(ctx, "ii_", timestamp=now)
     pricing = _pricing_body(
         ctx, amount=amount, currency=currency, name=description or "One-time item"
     )
@@ -383,7 +390,7 @@ def insert_proration_item(
     prorate-only DELETE): `parent: null` and no `proration_details` at all
     — pass `subscription_item_id=None` and no credited ids to write it."""
     now = ctx.clock.iso()
-    item_id = _ids.stripe_id(ctx, "ii_")
+    item_id = _ids.stripe_id(ctx, "ii_", timestamp=now)
     linked = subscription_item_id is not None
     credited = (
         {
@@ -572,7 +579,7 @@ def create(ctx: seahaven.Ctx, req: Request) -> dict[str, Any]:
 def retrieve(ctx: seahaven.Ctx, req: Request) -> dict[str, Any]:
     row = ctx.db.one("SELECT * FROM invoiceitems WHERE id = ?", req.path_params["invoiceitem"])
     if row is None:
-        raise _no_such_invoice_item(req.path_params["invoiceitem"])
+        raise _no_such_invoice_item(ctx, req.path_params["invoiceitem"])
     return serialize(ctx, row)
 
 

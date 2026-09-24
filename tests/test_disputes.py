@@ -6,26 +6,23 @@ cassette 05 at `2026-08-26.dahlia`."""
 import pytest
 import seahaven
 
-from conftest import BLANK_NOW
+from conftest import BLANK_NOW, api_read, api_write
+from seahaven_stripe_world.errors import StripeToolError
 
 pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
 
 
 def call(instance: seahaven.Instance, method: str, path: str, params: dict | None = None):
     if method == "GET":
-        return instance.call("stripe_api_read", path=path, params=params)
-    return instance.call("stripe_api_write", method=method, path=path, params=params)
+        return api_read(instance, path, params)
+    return api_write(instance, method, path, params)
 
 
 def dispute(
     instance: seahaven.Instance, token: str = "tok_visa_createDispute", amount: int = 6000
 ) -> tuple[dict, dict]:
-    cus = call(
-        instance, "POST", "/v1/customers", {"email": "dp@example.test", "name": "Dee Puted"}
-    )["body"]
-    pm = call(instance, "POST", "/v1/payment_methods", {"type": "card", "card": {"token": token}})[
-        "body"
-    ]
+    cus = call(instance, "POST", "/v1/customers", {"email": "dp@example.test", "name": "Dee Puted"})
+    pm = call(instance, "POST", "/v1/payment_methods", {"type": "card", "card": {"token": token}})
     call(instance, "POST", f"/v1/payment_methods/{pm['id']}/attach", {"customer": cus["id"]})
     pi = call(
         instance,
@@ -39,8 +36,8 @@ def dispute(
             "confirm": True,
             "description": "a disputed charge",
         },
-    )["body"]
-    listed = call(instance, "GET", "/v1/disputes", {"charge": pi["latest_charge"]})["body"]
+    )
+    listed = call(instance, "GET", "/v1/disputes", {"charge": pi["latest_charge"]})
     assert len(listed["data"]) == 1
     return pi, listed["data"][0]
 
@@ -62,7 +59,7 @@ def test_the_chargeback_card_creates_the_dispute_inside_the_charge(
 ) -> None:
     pi, dp = dispute(instance)
     assert dp["object"] == "dispute"
-    assert dp["id"].startswith("du_")  # probed: du_, not dp_
+    assert dp["id"].startswith("du_")
     assert dp["status"] == "needs_response"
     assert dp["reason"] == "fraudulent"
     assert dp["amount"] == 6000
@@ -70,10 +67,9 @@ def test_the_chargeback_card_creates_the_dispute_inside_the_charge(
     assert dp["charge"] == pi["latest_charge"]
     assert dp["payment_intent"] == pi["id"]
     assert dp["is_charge_refundable"] is False
-    assert dp["livemode"] is False
+    assert dp["livemode"] is True
     assert dp["metadata"] == {}
     assert dp["enhanced_eligibility_types"] == []
-    # the chargeback's ledger withdrawal, derived from the ledger (Phase 11)
     [withdrawal] = dp["balance_transactions"]
     assert withdrawal["object"] == "balance_transaction"
     assert withdrawal["type"] == "adjustment"
@@ -82,7 +78,7 @@ def test_the_chargeback_card_creates_the_dispute_inside_the_charge(
     assert withdrawal["fee"] == 1500
     assert withdrawal["net"] == -(dp["amount"] + 1500)
     assert withdrawal["source"] == dp["id"]
-    assert "customer" not in dp  # undeclared on dispute at this version
+    assert "customer" not in dp
     assert dp["payment_method_details"] == {
         "card": {
             "brand": "visa",
@@ -97,7 +93,7 @@ def test_the_chargeback_card_creates_the_dispute_inside_the_charge(
     assert all(value is None for key, value in evidence.items() if key != "enhanced_evidence")
     details = dp["evidence_details"]
     assert details == {
-        "due_by": details["due_by"],  # asserted by shape below
+        "due_by": details["due_by"],
         "enhanced_eligibility": {},
         "has_evidence": False,
         "past_due": False,
@@ -117,9 +113,9 @@ def test_the_charge_carries_the_disputed_flag_and_the_recorded_event_order(
     instance: seahaven.Instance,
 ) -> None:
     pi, dp = dispute(instance)
-    charge = call(instance, "GET", f"/v1/charges/{pi['latest_charge']}")["body"]
+    charge = call(instance, "GET", f"/v1/charges/{pi['latest_charge']}")
     assert charge["disputed"] is True
-    assert "dispute" not in charge  # undeclared on charge; omitted here
+    assert "dispute" not in charge
     kinds = [kind for kind, _ in events_of(instance)]
     assert kinds[-4:] == [
         "charge.succeeded",
@@ -127,7 +123,6 @@ def test_the_charge_carries_the_disputed_flag_and_the_recorded_event_order(
         "charge.dispute.funds_withdrawn",
         "payment_intent.succeeded",
     ]
-    # every dispute event carries the dispute itself as data.object
     for kind, obj in events_of(instance):
         if kind.startswith("charge.dispute."):
             assert obj == dp["id"]
@@ -140,16 +135,16 @@ def test_the_product_not_received_and_inquiry_flavors(instance: seahaven.Instanc
     assert pnr["status"] == "needs_response"
     _, inquiry = dispute(instance, token="tok_visa_createDisputeInquiry", amount=1700)
     assert inquiry["status"] == "warning_needs_response"
-    assert inquiry["is_charge_refundable"] is True  # inquiries pull no funds
+    assert inquiry["is_charge_refundable"] is True
     assert inquiry["payment_method_details"]["card"]["case_type"] == "inquiry"
     assert inquiry["payment_method_details"]["card"]["network_reason_code"] == "10"
 
 
 def test_a_clean_charge_has_no_dispute_row(instance: seahaven.Instance) -> None:
-    cus = call(instance, "POST", "/v1/customers", {"email": "c@example.test"})["body"]
+    cus = call(instance, "POST", "/v1/customers", {"email": "c@example.test"})
     pm = call(
         instance, "POST", "/v1/payment_methods", {"type": "card", "card": {"token": "tok_visa"}}
-    )["body"]
+    )
     call(instance, "POST", f"/v1/payment_methods/{pm['id']}/attach", {"customer": cus["id"]})
     pi = call(
         instance,
@@ -162,10 +157,10 @@ def test_a_clean_charge_has_no_dispute_row(instance: seahaven.Instance) -> None:
             "payment_method": pm["id"],
             "confirm": True,
         },
-    )["body"]
-    charge = call(instance, "GET", f"/v1/charges/{pi['latest_charge']}")["body"]
+    )
+    charge = call(instance, "GET", f"/v1/charges/{pi['latest_charge']}")
     assert charge["disputed"] is False
-    listed = call(instance, "GET", "/v1/disputes", {"charge": pi["latest_charge"]})["body"]
+    listed = call(instance, "GET", "/v1/disputes", {"charge": pi["latest_charge"]})
     assert listed["data"] == []
 
 
@@ -176,12 +171,12 @@ def test_an_open_dispute_blocks_refunds_and_a_won_one_reopens_them(
     instance: seahaven.Instance,
 ) -> None:
     pi, dp = dispute(instance)
-    error = call(instance, "POST", "/v1/refunds", {"charge": pi["latest_charge"], "amount": 100})
-    assert error["status"] == 400
-    err = error["body"]["error"]
-    assert err["code"] == "charge_disputed"
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "POST", "/v1/refunds", {"charge": pi["latest_charge"], "amount": 100})
+    assert exc_info.value.status == 400
+    assert exc_info.value.stripe_body["error"]["code"] == "charge_disputed"
     assert (
-        err["message"]
+        exc_info.value.stripe_body["error"]["message"]
         == f"Charge {pi['latest_charge']} has been charged back; cannot issue a refund."
     )
     won = call(
@@ -189,30 +184,28 @@ def test_an_open_dispute_blocks_refunds_and_a_won_one_reopens_them(
         "POST",
         f"/v1/disputes/{dp['id']}",
         {"evidence": {"uncategorized_text": "winning_evidence"}},
-    )["body"]
+    )
     assert won["status"] == "won"
     assert won["is_charge_refundable"] is True
-    refund = call(instance, "POST", "/v1/refunds", {"charge": pi["latest_charge"], "amount": 100})[
-        "body"
-    ]
+    refund = call(instance, "POST", "/v1/refunds", {"charge": pi["latest_charge"], "amount": 100})
     assert refund["status"] == "succeeded"
-    # `disputed` stays true after resolution — the charge WAS disputed.
-    charge = call(instance, "GET", f"/v1/charges/{pi['latest_charge']}")["body"]
+    charge = call(instance, "GET", f"/v1/charges/{pi['latest_charge']}")
     assert charge["disputed"] is True
 
 
 def test_an_inquiry_does_not_block_refunds(instance: seahaven.Instance) -> None:
     pi, _ = dispute(instance, token="tok_visa_createDisputeInquiry", amount=1700)
     refund = call(instance, "POST", "/v1/refunds", {"charge": pi["latest_charge"], "amount": 100})
-    assert refund["status"] == 200
+    assert refund["status"] == "succeeded"
 
 
 def test_a_lost_dispute_keeps_the_gate_closed(instance: seahaven.Instance) -> None:
     pi, dp = dispute(instance)
     call(instance, "POST", f"/v1/disputes/{dp['id']}/close")
-    error = call(instance, "POST", "/v1/refunds", {"charge": pi["latest_charge"], "amount": 100})
-    assert error["status"] == 400
-    assert error["body"]["error"]["code"] == "charge_disputed"
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "POST", "/v1/refunds", {"charge": pi["latest_charge"], "amount": 100})
+    assert exc_info.value.status == 400
+    assert exc_info.value.stripe_body["error"]["code"] == "charge_disputed"
 
 
 # --- evidence and the state machine -----------------------------------------------------
@@ -225,12 +218,11 @@ def test_plain_evidence_moves_under_review_and_stays(instance: seahaven.Instance
         "POST",
         f"/v1/disputes/{dp['id']}",
         {"evidence": {"product_description": "a widget"}},
-    )["body"]
+    )
     assert body["status"] == "under_review"
     assert body["evidence"]["product_description"] == "a widget"
     assert body["evidence_details"]["has_evidence"] is True
     assert body["evidence_details"]["submission_count"] == 1
-    # the update pair, in the recorded order
     kinds = [kind for kind, _ in events_of(instance)]
     assert kinds[-2:] == ["charge.dispute.updated", "charge.updated"]
 
@@ -242,7 +234,7 @@ def test_winning_evidence_settles_won_with_the_terminal_pair(instance: seahaven.
         "POST",
         f"/v1/disputes/{dp['id']}",
         {"evidence": {"uncategorized_text": "winning_evidence"}},
-    )["body"]
+    )
     assert body["status"] == "won"
     assert body["evidence_details"]["submission_count"] == 1
     kinds = [kind for kind, _ in events_of(instance)]
@@ -252,7 +244,7 @@ def test_winning_evidence_settles_won_with_the_terminal_pair(instance: seahaven.
         "charge.dispute.funds_reinstated",
         "charge.dispute.closed",
     ]
-    assert call(instance, "GET", f"/v1/disputes/{dp['id']}")["body"]["status"] == "won"
+    assert call(instance, "GET", f"/v1/disputes/{dp['id']}")["status"] == "won"
 
 
 def test_losing_evidence_settles_lost_without_a_reinstatement(instance: seahaven.Instance) -> None:
@@ -262,7 +254,7 @@ def test_losing_evidence_settles_lost_without_a_reinstatement(instance: seahaven
         "POST",
         f"/v1/disputes/{dp['id']}",
         {"evidence": {"uncategorized_text": "losing_evidence"}},
-    )["body"]
+    )
     assert body["status"] == "lost"
     assert body["is_charge_refundable"] is False
     kinds = [kind for kind, _ in events_of(instance)]
@@ -276,14 +268,14 @@ def test_escalate_inquiry_evidence_lands_needs_response(instance: seahaven.Insta
         "POST",
         f"/v1/disputes/{dp['id']}",
         {"evidence": {"uncategorized_text": "escalate_inquiry_evidence"}},
-    )["body"]
+    )
     assert body["status"] == "needs_response"
-    assert body["is_charge_refundable"] is False  # escalated: funds now pulled
+    assert body["is_charge_refundable"] is False
 
 
 def test_close_is_synchronously_lost(instance: seahaven.Instance) -> None:
     _pi, dp = dispute(instance)
-    body = call(instance, "POST", f"/v1/disputes/{dp['id']}/close")["body"]
+    body = call(instance, "POST", f"/v1/disputes/{dp['id']}/close")
     assert body["status"] == "lost"
     assert body["is_charge_refundable"] is False
     kinds = [kind for kind, _ in events_of(instance)]
@@ -297,33 +289,35 @@ def test_a_closed_dispute_refuses_further_updates(instance: seahaven.Instance) -
         (f"/v1/disputes/{dp['id']}", {"evidence": {"uncategorized_text": "winning_evidence"}}),
         (f"/v1/disputes/{dp['id']}/close", None),
     ):
-        error = call(instance, "POST", path, params)
-        assert error["status"] == 400
-        err = error["body"]["error"]
+        with pytest.raises(StripeToolError) as exc_info:
+            call(instance, "POST", path, params)
+        assert exc_info.value.status == 400
+        err = exc_info.value.stripe_body["error"]
         assert err["message"] == "This dispute is already closed"
         assert "code" not in err and "param" not in err
 
 
 def test_dispute_metadata_updates_and_merges(instance: seahaven.Instance) -> None:
     _, dp = dispute(instance)
-    body = call(instance, "POST", f"/v1/disputes/{dp['id']}", {"metadata": {"a": "1"}})["body"]
+    body = call(instance, "POST", f"/v1/disputes/{dp['id']}", {"metadata": {"a": "1"}})
     assert body["metadata"] == {"a": "1"}
-    assert body["status"] == "needs_response"  # metadata alone moves nothing
+    assert body["status"] == "needs_response"
     assert body["evidence_details"]["submission_count"] == 0
-    body = call(instance, "POST", f"/v1/disputes/{dp['id']}", {"metadata": {"b": "2"}})["body"]
+    body = call(instance, "POST", f"/v1/disputes/{dp['id']}", {"metadata": {"b": "2"}})
     assert body["metadata"] == {"a": "1", "b": "2"}
 
 
 def test_the_file_holding_evidence_fields_are_cut(instance: seahaven.Instance) -> None:
     _, dp = dispute(instance)
-    error = call(
-        instance,
-        "POST",
-        f"/v1/disputes/{dp['id']}",
-        {"evidence": {"customer_communication": "some emails"}},
-    )
-    assert error["status"] == 400
-    assert error["body"]["error"]["message"] == (
+    with pytest.raises(StripeToolError) as exc_info:
+        call(
+            instance,
+            "POST",
+            f"/v1/disputes/{dp['id']}",
+            {"evidence": {"customer_communication": "some emails"}},
+        )
+    assert exc_info.value.status == 400
+    assert exc_info.value.stripe_body["error"]["message"] == (
         "Received unknown parameter: evidence[customer_communication]"
     )
 
@@ -333,24 +327,26 @@ def test_the_file_holding_evidence_fields_are_cut(instance: seahaven.Instance) -
 
 def test_retrieve_and_list(instance: seahaven.Instance) -> None:
     pi, dp = dispute(instance)
-    got = call(instance, "GET", f"/v1/disputes/{dp['id']}")["body"]
+    got = call(instance, "GET", f"/v1/disputes/{dp['id']}")
     assert got["id"] == dp["id"]
-    listed = call(instance, "GET", "/v1/disputes", {"payment_intent": pi["id"]})["body"]
+    listed = call(instance, "GET", "/v1/disputes", {"payment_intent": pi["id"]})
     assert [item["id"] for item in listed["data"]] == [dp["id"]]
-    everything = call(instance, "GET", "/v1/disputes", {"limit": 100})["body"]
+    everything = call(instance, "GET", "/v1/disputes", {"limit": 100})
     assert dp["id"] in [item["id"] for item in everything["data"]]
 
 
 def test_the_missing_shapes(instance: seahaven.Instance) -> None:
     _pi, _dp = dispute(instance)
-    missing = call(instance, "GET", "/v1/disputes/du_missing000000000000000")
-    assert missing["status"] == 404
-    err = missing["body"]["error"]
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "GET", "/v1/disputes/du_missing000000000000000")
+    assert exc_info.value.status == 404
+    err = exc_info.value.stripe_body["error"]
     assert err["message"] == "No such dispute: 'du_missing000000000000000'"
     assert err["param"] == "dispute"
-    bogus_parent = call(instance, "GET", "/v1/charges/ch_missing00000000000000000/dispute")
-    assert bogus_parent["status"] == 404
-    assert bogus_parent["body"]["error"]["message"] == (
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "GET", "/v1/charges/ch_missing00000000000000000/dispute")
+    assert exc_info.value.status == 404
+    assert exc_info.value.stripe_body["error"]["message"] == (
         "No such charge: 'ch_missing00000000000000000'"
     )
 
@@ -358,17 +354,13 @@ def test_the_missing_shapes(instance: seahaven.Instance) -> None:
 def test_a_manual_capture_hold_creates_no_dispute_until_the_capture(
     instance: seahaven.Instance,
 ) -> None:
-    """Probed (Phase 9 CR round): an authorized-but-uncaptured hold on a
-    dispute card mints no dispute — the issuer disputes captured funds —
-    and the capture transition creates it, in the same recorded event
-    order (`charge.captured`, the dispute pair, `payment_intent.succeeded`)."""
-    cus = call(instance, "POST", "/v1/customers", {"email": "m@example.test"})["body"]
+    cus = call(instance, "POST", "/v1/customers", {"email": "m@example.test"})
     pm = call(
         instance,
         "POST",
         "/v1/payment_methods",
         {"type": "card", "card": {"token": "tok_visa_createDispute"}},
-    )["body"]
+    )
     call(instance, "POST", f"/v1/payment_methods/{pm['id']}/attach", {"customer": cus["id"]})
     pi = call(
         instance,
@@ -382,20 +374,20 @@ def test_a_manual_capture_hold_creates_no_dispute_until_the_capture(
             "confirm": True,
             "capture_method": "manual",
         },
-    )["body"]
+    )
     assert pi["status"] == "requires_capture"
-    charge = call(instance, "GET", f"/v1/charges/{pi['latest_charge']}")["body"]
+    charge = call(instance, "GET", f"/v1/charges/{pi['latest_charge']}")
     assert charge["disputed"] is False
-    listed = call(instance, "GET", "/v1/disputes", {"charge": pi["latest_charge"]})["body"]
+    listed = call(instance, "GET", "/v1/disputes", {"charge": pi["latest_charge"]})
     assert listed["data"] == []
-    captured = call(instance, "POST", f"/v1/payment_intents/{pi['id']}/capture")["body"]
+    captured = call(instance, "POST", f"/v1/payment_intents/{pi['id']}/capture")
     assert captured["status"] == "succeeded"
-    listed = call(instance, "GET", "/v1/disputes", {"charge": pi["latest_charge"]})["body"]
+    listed = call(instance, "GET", "/v1/disputes", {"charge": pi["latest_charge"]})
     assert len(listed["data"]) == 1
     dp = listed["data"][0]
     assert dp["status"] == "needs_response"
     assert dp["amount"] == 4400
-    charge = call(instance, "GET", f"/v1/charges/{pi['latest_charge']}")["body"]
+    charge = call(instance, "GET", f"/v1/charges/{pi['latest_charge']}")
     assert charge["disputed"] is True
     kinds = [kind for kind, _ in events_of(instance)]
     assert kinds[-4:] == [
@@ -404,7 +396,6 @@ def test_a_manual_capture_hold_creates_no_dispute_until_the_capture(
         "charge.dispute.funds_withdrawn",
         "payment_intent.succeeded",
     ]
-    # a partial capture disputes the captured amount (the captured-funds rule)
     pi2 = call(
         instance,
         "POST",
@@ -417,40 +408,40 @@ def test_a_manual_capture_hold_creates_no_dispute_until_the_capture(
             "confirm": True,
             "capture_method": "manual",
         },
-    )["body"]
+    )
     call(
         instance,
         "POST",
         f"/v1/payment_intents/{pi2['id']}/capture",
         {"amount_to_capture": 2000},
     )
-    listed = call(instance, "GET", "/v1/disputes", {"charge": pi2["latest_charge"]})["body"]
+    listed = call(instance, "GET", "/v1/disputes", {"charge": pi2["latest_charge"]})
     assert listed["data"][0]["amount"] == 2000
 
 
 def test_the_charge_scoped_read_and_aliases(instance: seahaven.Instance) -> None:
     pi, dp = dispute(instance)
     ch = pi["latest_charge"]
-    scoped = call(instance, "GET", f"/v1/charges/{ch}/dispute")["body"]
+    scoped = call(instance, "GET", f"/v1/charges/{ch}/dispute")
     assert scoped["id"] == dp["id"]
-    # the POST aliases drive the same machine through the charge path
     updated = call(
         instance,
         "POST",
         f"/v1/charges/{ch}/dispute",
         {"evidence": {"uncategorized_text": "winning_evidence"}},
-    )["body"]
+    )
     assert updated["status"] == "won"
-    again = call(instance, "POST", f"/v1/charges/{ch}/dispute/close")
-    assert again["status"] == 400
-    assert again["body"]["error"]["message"] == "This dispute is already closed"
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "POST", f"/v1/charges/{ch}/dispute/close")
+    assert exc_info.value.status == 400
+    assert exc_info.value.stripe_body["error"]["message"] == "This dispute is already closed"
 
 
 def test_the_charge_scoped_read_of_a_clean_charge(instance: seahaven.Instance) -> None:
-    cus = call(instance, "POST", "/v1/customers", {"email": "n@example.test"})["body"]
+    cus = call(instance, "POST", "/v1/customers", {"email": "n@example.test"})
     pm = call(
         instance, "POST", "/v1/payment_methods", {"type": "card", "card": {"token": "tok_visa"}}
-    )["body"]
+    )
     call(instance, "POST", f"/v1/payment_methods/{pm['id']}/attach", {"customer": cus["id"]})
     pi = call(
         instance,
@@ -463,9 +454,10 @@ def test_the_charge_scoped_read_of_a_clean_charge(instance: seahaven.Instance) -
             "payment_method": pm["id"],
             "confirm": True,
         },
-    )["body"]
-    error = call(instance, "GET", f"/v1/charges/{pi['latest_charge']}/dispute")
-    assert error["status"] == 404
-    err = error["body"]["error"]
+    )
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "GET", f"/v1/charges/{pi['latest_charge']}/dispute")
+    assert exc_info.value.status == 404
+    err = exc_info.value.stripe_body["error"]
     assert err["message"] == f"No dispute for charge: {pi['latest_charge']}"
     assert "code" not in err and "param" not in err

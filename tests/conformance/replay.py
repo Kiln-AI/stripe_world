@@ -1,9 +1,11 @@
 """The replayer: a cassette walked against a live world instance.
 
-Dispatch goes through the same tools an agent calls — read for `GET`, write
-for `POST`/`DELETE` — via `instance.call(...)`, never the bare handler, so
-parameter validation, the error envelope and (later) idempotency middleware
-are genuinely in play during a conformance replay.
+Dispatch goes through ``call_stripe`` via ``instance.call(...)``.  The
+instance must come from a world that has ``call_stripe`` registered as a
+tool (typically a probe world built via ``conftest.dispatch_tool()``), so
+the full middleware chain — error handler, stripe envelope, and
+idempotency — is genuinely in play.  The idempotency middleware is the
+shipped code, not a copy.
 
 Comparison is a structural tree diff over `{"status", "body"}`: same JSON
 type at every path, same value unless an `AllowedDifference` permits it, same
@@ -70,18 +72,25 @@ class ConformanceFailure(AssertionError):
 
 
 def _dispatch(instance: seahaven.Instance, wire: Wire) -> tuple[int, dict[str, Any]]:
-    params = wire.params or None
-    if wire.method == "GET":
-        result = instance.call("stripe_api_read", path=wire.path, params=params)
-    else:
-        result = instance.call(
-            "stripe_api_write",
-            method=wire.method,
-            path=wire.path,
-            params=params,
-            idempotency_key=wire.idempotency_key,
-        )
-    return int(result["status"]), result["body"]
+    """Dispatch through ``call_stripe`` via ``instance.call``.
+
+    The instance must come from a probe world that has ``call_stripe``
+    registered (see ``conftest.dispatch_tool()``).  This routes through
+    the real middleware chain (error handler, stripe envelope, idempotency),
+    so the conformance replay exercises the shipped code -- including
+    idempotency key reservation, replay, and mismatch detection.
+
+    The stripe envelope renders ``call_stripe`` results as
+    ``{status, body, headers}``; this function extracts ``(status, body)``.
+    """
+    result = instance.call(
+        "call_stripe",
+        method=wire.method,
+        path=wire.path,
+        params=wire.params or None,
+        idempotency_key=wire.idempotency_key,
+    )
+    return result["status"], result["body"]
 
 
 def _concrete(step: Step, bindings: dict[str, Any]) -> tuple[str, dict[str, Any]]:

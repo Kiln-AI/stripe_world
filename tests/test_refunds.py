@@ -6,22 +6,23 @@ recorded refusals, the lists and scoped paths, the legacy alias, and
 import pytest
 import seahaven
 
-from conftest import BLANK_NOW
+from conftest import BLANK_NOW, api_read, api_write
+from seahaven_stripe_world.errors import StripeToolError
 
 pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
 
 
 def call(instance: seahaven.Instance, method: str, path: str, params: dict | None = None):
     if method == "GET":
-        return instance.call("stripe_api_read", path=path, params=params)
-    return instance.call("stripe_api_write", method=method, path=path, params=params)
+        return api_read(instance, path, params)
+    return api_write(instance, method, path, params)
 
 
 def confirmed_intent(instance: seahaven.Instance, amount: int = 5000, **extra) -> dict:
-    cus = call(instance, "POST", "/v1/customers", {"email": "rf@example.test"})["body"]["id"]
+    cus = call(instance, "POST", "/v1/customers", {"email": "rf@example.test"})["id"]
     pm = call(
         instance, "POST", "/v1/payment_methods", {"type": "card", "card": {"token": "tok_visa"}}
-    )["body"]["id"]
+    )["id"]
     call(instance, "POST", f"/v1/payment_methods/{pm}/attach", {"customer": cus})
     return call(
         instance,
@@ -35,7 +36,7 @@ def confirmed_intent(instance: seahaven.Instance, amount: int = 5000, **extra) -
             "confirm": True,
             **extra,
         },
-    )["body"]
+    )
 
 
 def events_of(instance: seahaven.Instance) -> list[str]:
@@ -59,7 +60,7 @@ def test_the_refund_body(instance: seahaven.Instance) -> None:
             "reason": "duplicate",
             "metadata": {"p": "9"},
         },
-    )["body"]
+    )
     assert refund["object"] == "refund"
     assert refund["amount"] == 1500
     assert refund["charge"] == pi["latest_charge"]
@@ -71,7 +72,6 @@ def test_the_refund_body(instance: seahaven.Instance) -> None:
     assert refund["reason"] == "duplicate"
     assert refund["metadata"] == {"p": "9"}
     assert "livemode" not in refund  # one of the four objects without it
-    # absent while valueless (recorded, cassette 05)
     for absent in (
         "description",
         "failure_reason",
@@ -81,12 +81,10 @@ def test_the_refund_body(instance: seahaven.Instance) -> None:
         "pending_reason",
     ):
         assert absent not in refund
-    # the always-present nullables
     assert refund["receipt_number"] is None
     assert refund["customer_account"] is None
     assert refund["transfer_reversal"] is None
     assert refund["source_transfer_reversal"] is None
-    # the refund's ledger row, written at creation (Phase 11, recorded)
     assert isinstance(refund["balance_transaction"], str)
     assert refund["balance_transaction"].startswith("txn_")
     assert refund["destination_details"] == {
@@ -102,21 +100,24 @@ def test_the_refund_body(instance: seahaven.Instance) -> None:
 def test_partial_then_remainder_then_refused(instance: seahaven.Instance) -> None:
     pi = confirmed_intent(instance, 5000)
     ch = pi["latest_charge"]
-    first = call(instance, "POST", "/v1/refunds", {"charge": ch, "amount": 1500})["body"]
+    first = call(instance, "POST", "/v1/refunds", {"charge": ch, "amount": 1500})
     assert first["amount"] == 1500
-    charge = call(instance, "GET", f"/v1/charges/{ch}")["body"]
+    charge = call(instance, "GET", f"/v1/charges/{ch}")
     assert charge["amount_refunded"] == 1500
     assert charge["refunded"] is False
-    assert "refunds" not in charge  # expand-only at this version
-    second = call(instance, "POST", "/v1/refunds", {"charge": ch})["body"]
-    assert second["amount"] == 3500  # the remainder, without an amount
-    charge = call(instance, "GET", f"/v1/charges/{ch}")["body"]
+    assert "refunds" not in charge
+    second = call(instance, "POST", "/v1/refunds", {"charge": ch})
+    assert second["amount"] == 3500
+    charge = call(instance, "GET", f"/v1/charges/{ch}")
     assert charge["amount_refunded"] == 5000
     assert charge["refunded"] is True
-    error = call(instance, "POST", "/v1/refunds", {"charge": ch, "amount": 1})
-    assert error["status"] == 400
-    assert error["body"]["error"]["code"] == "charge_already_refunded"
-    assert error["body"]["error"]["message"] == f"Charge {ch} has already been refunded."
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "POST", "/v1/refunds", {"charge": ch, "amount": 1})
+    assert exc_info.value.status == 400
+    assert exc_info.value.stripe_body["error"]["code"] == "charge_already_refunded"
+    assert (
+        exc_info.value.stripe_body["error"]["message"] == f"Charge {ch} has already been refunded."
+    )
 
 
 def test_the_over_refund_on_a_partial_charge_is_the_recorded_form(
@@ -124,9 +125,10 @@ def test_the_over_refund_on_a_partial_charge_is_the_recorded_form(
 ) -> None:
     pi = confirmed_intent(instance, 8000)
     call(instance, "POST", "/v1/refunds", {"charge": pi["latest_charge"], "amount": 5000})
-    error = call(instance, "POST", "/v1/refunds", {"charge": pi["latest_charge"], "amount": 4000})
-    assert error["status"] == 400
-    err = error["body"]["error"]
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "POST", "/v1/refunds", {"charge": pi["latest_charge"], "amount": 4000})
+    assert exc_info.value.status == 400
+    err = exc_info.value.stripe_body["error"]
     assert err["type"] == "invalid_request_error"
     assert err["param"] == "amount"
     assert "code" not in err
@@ -140,7 +142,6 @@ def test_the_events_are_the_recorded_pair_in_order(instance: seahaven.Instance) 
     call(instance, "POST", "/v1/refunds", {"charge": pi["latest_charge"], "amount": 400})
     kinds = events_of(instance)
     assert kinds[-2:] == ["refund.created", "charge.refunded"]
-    # `charge.refunded` carries the charge with its fresh bookkeeping.
     assert instance.inspect().one(
         "SELECT data->>'$.object.object' AS kind,"
         " CAST(data->>'$.object.amount_refunded' AS INTEGER) AS refunded"
@@ -151,24 +152,34 @@ def test_the_events_are_the_recorded_pair_in_order(instance: seahaven.Instance) 
 # --- the refusals ----------------------------------------------------------------------
 
 
-def test_zero_and_negative_amounts_refuse_the_recorded_form(instance: seahaven.Instance) -> None:
+def test_zero_and_negative_amounts_refuse_the_recorded_form(
+    instance: seahaven.Instance,
+) -> None:
     pi = confirmed_intent(instance, 2000)
     for bad in (0, -5):
-        error = call(
-            instance, "POST", "/v1/refunds", {"charge": pi["latest_charge"], "amount": bad}
+        with pytest.raises(StripeToolError) as exc_info:
+            call(
+                instance,
+                "POST",
+                "/v1/refunds",
+                {"charge": pi["latest_charge"], "amount": bad},
+            )
+        assert exc_info.value.status == 400
+        assert exc_info.value.stripe_body["error"]["code"] == "parameter_invalid_integer"
+        assert exc_info.value.stripe_body["error"]["param"] == "amount"
+        assert (
+            exc_info.value.stripe_body["error"]["message"]
+            == "This value must be greater than or equal to 1."
         )
-        assert error["status"] == 400
-        assert error["body"]["error"]["code"] == "parameter_invalid_integer"
-        assert error["body"]["error"]["param"] == "amount"
-        assert error["body"]["error"]["message"] == "This value must be greater than or equal to 1."
 
 
 def test_neither_charge_nor_intent_refuses_with_the_recorded_message(
     instance: seahaven.Instance,
 ) -> None:
-    error = call(instance, "POST", "/v1/refunds", {"amount": 100})
-    assert error["status"] == 400
-    err = error["body"]["error"]
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "POST", "/v1/refunds", {"amount": 100})
+    assert exc_info.value.status == 400
+    err = exc_info.value.stripe_body["error"]
     assert err["message"] == (
         "One of the following params should be provided for this request: payment_intent or charge."
     )
@@ -176,87 +187,126 @@ def test_neither_charge_nor_intent_refuses_with_the_recorded_message(
 
 
 def test_unknown_charge_names_param_id(instance: seahaven.Instance) -> None:
-    error = call(instance, "POST", "/v1/refunds", {"charge": "ch_missing00000000000000000"})
-    assert error["status"] == 404
-    err = error["body"]["error"]
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "POST", "/v1/refunds", {"charge": "ch_missing00000000000000000"})
+    assert exc_info.value.status == 404
+    err = exc_info.value.stripe_body["error"]
     assert err["code"] == "resource_missing"
     assert err["param"] == "id"
     assert err["message"] == "No such charge: 'ch_missing00000000000000000'"
 
 
-def test_reason_is_create_limited_to_the_caller_enum(instance: seahaven.Instance) -> None:
+def test_reason_is_create_limited_to_the_caller_enum(
+    instance: seahaven.Instance,
+) -> None:
     pi = confirmed_intent(instance, 1200)
-    error = call(
-        instance,
-        "POST",
-        "/v1/refunds",
-        {"charge": pi["latest_charge"], "reason": "expired_uncaptured_charge"},
-    )
-    assert error["status"] == 400
-    err = error["body"]["error"]
+    with pytest.raises(StripeToolError) as exc_info:
+        call(
+            instance,
+            "POST",
+            "/v1/refunds",
+            {"charge": pi["latest_charge"], "reason": "expired_uncaptured_charge"},
+        )
+    assert exc_info.value.status == 400
+    err = exc_info.value.stripe_body["error"]
     assert err["param"] == "reason"
     assert err["message"] == (
         "Invalid reason: must be one of duplicate, fraudulent, or requested_by_customer"
     )
 
 
-def test_the_uncaptured_hold_refuses_with_the_recorded_message(instance: seahaven.Instance) -> None:
+def test_the_uncaptured_hold_refuses_with_the_recorded_message(
+    instance: seahaven.Instance,
+) -> None:
     pi = confirmed_intent(instance, 3300, capture_method="manual")
-    error = call(instance, "POST", "/v1/refunds", {"charge": pi["latest_charge"], "amount": 100})
-    assert error["status"] == 400
-    err = error["body"]["error"]
+    with pytest.raises(StripeToolError) as exc_info:
+        call(
+            instance,
+            "POST",
+            "/v1/refunds",
+            {"charge": pi["latest_charge"], "amount": 100},
+        )
+    assert exc_info.value.status == 400
+    err = exc_info.value.stripe_body["error"]
     assert err["message"] == (
         f"This uncaptured Charge was created by a PaymentIntent ({pi['id']}). "
-        "You must cancel the PaymentIntent to reverse the authorization instead of refunding "
-        "the Charge directly. For more information, see "
+        "You must cancel the PaymentIntent to reverse the authorization instead of "
+        "refunding the Charge directly. For more information, see "
         "https://stripe.com/docs/payments/place-a-hold-on-a-payment-method"
     )
 
 
-def test_a_failed_charge_refuses_naming_its_intent(instance: seahaven.Instance) -> None:
-    cus = call(instance, "POST", "/v1/customers", {"email": "f@example.test"})["body"]["id"]
+def test_a_failed_charge_refuses_naming_its_intent(
+    instance: seahaven.Instance,
+) -> None:
+    cus = call(instance, "POST", "/v1/customers", {"email": "f@example.test"})["id"]
     declined = call(
         instance,
         "POST",
         "/v1/payment_methods",
-        {"type": "card", "card": {"token": "tok_visa_chargeDeclinedInsufficientFunds"}},
-    )["body"]
-    call(instance, "POST", f"/v1/payment_methods/{declined['id']}/attach", {"customer": cus})
-    error = call(
+        {"type": "card", "card": {"number": "4000000000000341", "exp_month": 9, "exp_year": 2027}},
+    )
+    call(
         instance,
         "POST",
-        "/v1/payment_intents",
-        {
-            "amount": 1500,
-            "currency": "usd",
-            "customer": cus,
-            "payment_method": declined["id"],
-            "confirm": True,
-        },
+        f"/v1/payment_methods/{declined['id']}/attach",
+        {"customer": cus},
     )
-    failed_charge = error["body"]["error"]["charge"]
-    refused = call(instance, "POST", "/v1/refunds", {"charge": failed_charge, "amount": 100})
-    assert refused["status"] == 400
-    assert refused["body"]["error"]["message"] == (
-        f"This PaymentIntent ({error['body']['error']['payment_intent']['id']}) does not have "
-        "a successful charge to refund."
+    with pytest.raises(StripeToolError) as exc_info:
+        call(
+            instance,
+            "POST",
+            "/v1/payment_intents",
+            {
+                "amount": 1500,
+                "currency": "usd",
+                "customer": cus,
+                "payment_method": declined["id"],
+                "confirm": True,
+            },
+        )
+    failed_charge = exc_info.value.stripe_body["error"]["charge"]
+    pi_id = exc_info.value.stripe_body["error"]["payment_intent"]["id"]
+    with pytest.raises(StripeToolError) as exc_info:
+        call(
+            instance,
+            "POST",
+            "/v1/refunds",
+            {"charge": failed_charge, "amount": 100},
+        )
+    assert exc_info.value.status == 400
+    assert exc_info.value.stripe_body["error"]["message"] == (
+        f"This PaymentIntent ({pi_id}) does not have a successful charge to refund."
     )
 
 
-def test_by_intent_refund_cross_fills_the_charge(instance: seahaven.Instance) -> None:
+def test_by_intent_refund_cross_fills_the_charge(
+    instance: seahaven.Instance,
+) -> None:
     pi = confirmed_intent(instance, 3200)
-    refund = call(instance, "POST", "/v1/refunds", {"payment_intent": pi["id"], "amount": 700})[
-        "body"
-    ]
+    refund = call(
+        instance,
+        "POST",
+        "/v1/refunds",
+        {"payment_intent": pi["id"], "amount": 700},
+    )
     assert refund["charge"] == pi["latest_charge"]
     assert refund["payment_intent"] == pi["id"]
 
 
-def test_a_plain_intent_with_no_charge_refuses(instance: seahaven.Instance) -> None:
-    pi = call(instance, "POST", "/v1/payment_intents", {"amount": 900, "currency": "usd"})["body"]
-    error = call(instance, "POST", "/v1/refunds", {"payment_intent": pi["id"]})
-    assert error["status"] == 400
-    assert error["body"]["error"]["message"] == (
+def test_a_plain_intent_with_no_charge_refuses(
+    instance: seahaven.Instance,
+) -> None:
+    pi = call(
+        instance,
+        "POST",
+        "/v1/payment_intents",
+        {"amount": 900, "currency": "usd"},
+    )
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "POST", "/v1/refunds", {"payment_intent": pi["id"]})
+    assert exc_info.value.status == 400
+    assert exc_info.value.stripe_body["error"]["message"] == (
         f"This PaymentIntent ({pi['id']}) does not have a successful charge to refund."
     )
 
@@ -264,30 +314,49 @@ def test_a_plain_intent_with_no_charge_refuses(instance: seahaven.Instance) -> N
 # --- reads, updates, cancel ------------------------------------------------------------
 
 
-def test_metadata_update_and_the_cancel_refusal(instance: seahaven.Instance) -> None:
+def test_metadata_update_and_the_cancel_refusal(
+    instance: seahaven.Instance,
+) -> None:
     pi = confirmed_intent(instance, 2200)
-    refund = call(instance, "POST", "/v1/refunds", {"charge": pi["latest_charge"]})["body"]
-    updated = call(instance, "POST", f"/v1/refunds/{refund['id']}", {"metadata": {"k": "v"}})[
-        "body"
-    ]
+    refund = call(instance, "POST", "/v1/refunds", {"charge": pi["latest_charge"]})
+    updated = call(
+        instance,
+        "POST",
+        f"/v1/refunds/{refund['id']}",
+        {"metadata": {"k": "v"}},
+    )
     assert updated["metadata"] == {"k": "v"}
-    error = call(instance, "POST", f"/v1/refunds/{refund['id']}/cancel")
-    assert error["status"] == 400
-    err = error["body"]["error"]
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "POST", f"/v1/refunds/{refund['id']}/cancel")
+    assert exc_info.value.status == 400
+    err = exc_info.value.stripe_body["error"]
     assert err["message"] == "Canceling this refund is unsupported."
     assert "code" not in err
 
 
-def test_the_async_success_card_begins_pending_and_cancels(instance: seahaven.Instance) -> None:
-    cus = call(instance, "POST", "/v1/customers", {"email": "a@example.test"})["body"]["id"]
-    # The async-success number behind the token table's …7726 row.
+def test_the_async_success_card_begins_pending_and_cancels(
+    instance: seahaven.Instance,
+) -> None:
+    cus = call(instance, "POST", "/v1/customers", {"email": "a@example.test"})["id"]
     async_pm = call(
         instance,
         "POST",
         "/v1/payment_methods",
-        {"type": "card", "card": {"number": "4000000000007726", "exp_month": 9, "exp_year": 2027}},
-    )["body"]
-    call(instance, "POST", f"/v1/payment_methods/{async_pm['id']}/attach", {"customer": cus})
+        {
+            "type": "card",
+            "card": {
+                "number": "4000000000007726",
+                "exp_month": 9,
+                "exp_year": 2027,
+            },
+        },
+    )
+    call(
+        instance,
+        "POST",
+        f"/v1/payment_methods/{async_pm['id']}/attach",
+        {"customer": cus},
+    )
     pi = call(
         instance,
         "POST",
@@ -299,33 +368,50 @@ def test_the_async_success_card_begins_pending_and_cancels(instance: seahaven.In
             "payment_method": async_pm["id"],
             "confirm": True,
         },
-    )["body"]
-    refund = call(instance, "POST", "/v1/refunds", {"charge": pi["latest_charge"]})["body"]
+    )
+    refund = call(
+        instance,
+        "POST",
+        "/v1/refunds",
+        {"charge": pi["latest_charge"]},
+    )
     assert refund["status"] == "pending"
-    # A pending refund books nothing (I7) and emits only its creation.
-    charge = call(instance, "GET", f"/v1/charges/{pi['latest_charge']}")["body"]
+    charge = call(instance, "GET", f"/v1/charges/{pi['latest_charge']}")
     assert charge["amount_refunded"] == 0 and charge["refunded"] is False
     assert events_of(instance)[-1] == "refund.created"
-    # The 30-minute test-mode window never closes under a frozen clock.
-    canceled = call(instance, "POST", f"/v1/refunds/{refund['id']}/cancel")["body"]
+    canceled = call(instance, "POST", f"/v1/refunds/{refund['id']}/cancel")
     assert canceled["status"] == "canceled"
-    charge = call(instance, "GET", f"/v1/charges/{pi['latest_charge']}")["body"]
-    assert charge["amount_refunded"] == 0  # still nothing settled
+    charge = call(instance, "GET", f"/v1/charges/{pi['latest_charge']}")
+    assert charge["amount_refunded"] == 0
 
 
-def test_the_async_failure_card_stays_succeeded_and_books(instance: seahaven.Instance) -> None:
+def test_the_async_failure_card_stays_succeeded_and_books(
+    instance: seahaven.Instance,
+) -> None:
     """The declared behavior of `4000000000005126`: the refund begins
     `succeeded` and its async `failed` flip never fires on a frozen clock —
     so the bookkeeping applies and stays applied (STRUCTURAL_DIFFERENCES,
     Phase 9)."""
-    cus = call(instance, "POST", "/v1/customers", {"email": "af@example.test"})["body"]
+    cus = call(instance, "POST", "/v1/customers", {"email": "af@example.test"})
     pm = call(
         instance,
         "POST",
         "/v1/payment_methods",
-        {"type": "card", "card": {"number": "4000000000005126", "exp_month": 9, "exp_year": 2027}},
-    )["body"]
-    call(instance, "POST", f"/v1/payment_methods/{pm['id']}/attach", {"customer": cus["id"]})
+        {
+            "type": "card",
+            "card": {
+                "number": "4000000000005126",
+                "exp_month": 9,
+                "exp_year": 2027,
+            },
+        },
+    )
+    call(
+        instance,
+        "POST",
+        f"/v1/payment_methods/{pm['id']}/attach",
+        {"customer": cus["id"]},
+    )
     pi = call(
         instance,
         "POST",
@@ -337,13 +423,16 @@ def test_the_async_failure_card_stays_succeeded_and_books(instance: seahaven.Ins
             "payment_method": pm["id"],
             "confirm": True,
         },
-    )["body"]
-    refund = call(instance, "POST", "/v1/refunds", {"charge": pi["latest_charge"], "amount": 1100})[
-        "body"
-    ]
+    )
+    refund = call(
+        instance,
+        "POST",
+        "/v1/refunds",
+        {"charge": pi["latest_charge"], "amount": 1100},
+    )
     assert refund["status"] == "succeeded"
     assert "failure_reason" not in refund
-    charge = call(instance, "GET", f"/v1/charges/{pi['latest_charge']}")["body"]
+    charge = call(instance, "GET", f"/v1/charges/{pi['latest_charge']}")
     assert charge["amount_refunded"] == 1100
     assert charge["refunded"] is False
 
@@ -351,25 +440,41 @@ def test_the_async_failure_card_stays_succeeded_and_books(instance: seahaven.Ins
 def test_lists_filter_and_the_scoped_paths(instance: seahaven.Instance) -> None:
     one = confirmed_intent(instance, 5000)
     two = confirmed_intent(instance, 3200)
-    r_one = call(instance, "POST", "/v1/refunds", {"charge": one["latest_charge"], "amount": 1500})[
-        "body"
-    ]
-    call(instance, "POST", "/v1/refunds", {"payment_intent": two["id"], "amount": 700})
-    by_charge = call(instance, "GET", "/v1/refunds", {"charge": one["latest_charge"]})["body"]
+    r_one = call(
+        instance,
+        "POST",
+        "/v1/refunds",
+        {"charge": one["latest_charge"], "amount": 1500},
+    )
+    call(
+        instance,
+        "POST",
+        "/v1/refunds",
+        {"payment_intent": two["id"], "amount": 700},
+    )
+    by_charge = call(instance, "GET", "/v1/refunds", {"charge": one["latest_charge"]})
     assert [item["id"] for item in by_charge["data"]] == [r_one["id"]]
     assert by_charge["url"] == "/v1/refunds"
-    by_intent = call(instance, "GET", "/v1/refunds", {"payment_intent": two["id"]})["body"]
+    by_intent = call(instance, "GET", "/v1/refunds", {"payment_intent": two["id"]})
     assert len(by_intent["data"]) == 1
-    scoped = call(instance, "GET", f"/v1/charges/{one['latest_charge']}/refunds")["body"]
+    scoped = call(instance, "GET", f"/v1/charges/{one['latest_charge']}/refunds")
     assert [item["id"] for item in scoped["data"]] == [r_one["id"]]
     assert scoped["url"] == f"/v1/charges/{one['latest_charge']}/refunds"
-    got = call(instance, "GET", f"/v1/charges/{one['latest_charge']}/refunds/{r_one['id']}")["body"]
+    got = call(
+        instance,
+        "GET",
+        f"/v1/charges/{one['latest_charge']}/refunds/{r_one['id']}",
+    )
     assert got["id"] == r_one["id"]
-    # A refund of another charge is the scoped 404 (recorded).
-    missing = call(instance, "GET", f"/v1/charges/{two['latest_charge']}/refunds/{r_one['id']}")
-    assert missing["status"] == 404
-    assert missing["body"]["error"]["message"] == f"No such refund: '{r_one['id']}'"
-    assert missing["body"]["error"]["param"] == "refund"
+    with pytest.raises(StripeToolError) as exc_info:
+        call(
+            instance,
+            "GET",
+            f"/v1/charges/{two['latest_charge']}/refunds/{r_one['id']}",
+        )
+    assert exc_info.value.status == 404
+    assert exc_info.value.stripe_body["error"]["message"] == f"No such refund: '{r_one['id']}'"
+    assert exc_info.value.stripe_body["error"]["param"] == "refund"
 
 
 def test_the_scoped_update_merges_metadata(instance: seahaven.Instance) -> None:
@@ -379,20 +484,23 @@ def test_the_scoped_update_merges_metadata(instance: seahaven.Instance) -> None:
         "POST",
         "/v1/refunds",
         {"charge": pi["latest_charge"], "metadata": {"a": "1"}},
-    )["body"]
+    )
     updated = call(
         instance,
         "POST",
         f"/v1/charges/{pi['latest_charge']}/refunds/{refund['id']}",
         {"metadata": {"b": "2"}},
-    )["body"]
+    )
     assert updated["metadata"] == {"a": "1", "b": "2"}
 
 
-def test_missing_refund_keeps_the_placeholder_param(instance: seahaven.Instance) -> None:
-    error = call(instance, "GET", "/v1/refunds/re_missing0000000000000000")
-    assert error["status"] == 404
-    err = error["body"]["error"]
+def test_missing_refund_keeps_the_placeholder_param(
+    instance: seahaven.Instance,
+) -> None:
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "GET", "/v1/refunds/re_missing0000000000000000")
+    assert exc_info.value.status == 404
+    err = exc_info.value.stripe_body["error"]
     assert err["message"] == "No such refund: 're_missing0000000000000000'"
     assert err["param"] == "refund"
 
@@ -400,67 +508,102 @@ def test_missing_refund_keeps_the_placeholder_param(instance: seahaven.Instance)
 # --- the legacy alias and the inline list ----------------------------------------------
 
 
-def test_the_legacy_singular_create_answers_with_the_charge(instance: seahaven.Instance) -> None:
+def test_the_legacy_singular_create_answers_with_the_charge(
+    instance: seahaven.Instance,
+) -> None:
     pi = confirmed_intent(instance, 4100)
-    result = call(instance, "POST", f"/v1/charges/{pi['latest_charge']}/refund", {"amount": 800})[
-        "body"
-    ]
+    result = call(
+        instance,
+        "POST",
+        f"/v1/charges/{pi['latest_charge']}/refund",
+        {"amount": 800},
+    )
     assert result["object"] == "charge"
     assert result["id"] == pi["latest_charge"]
     assert result["amount_refunded"] == 800
     assert result["refunded"] is False
 
 
-def test_the_legacy_plural_create_answers_with_the_refund(instance: seahaven.Instance) -> None:
+def test_the_legacy_plural_create_answers_with_the_refund(
+    instance: seahaven.Instance,
+) -> None:
     pi = confirmed_intent(instance, 1300)
-    result = call(instance, "POST", f"/v1/charges/{pi['latest_charge']}/refunds", {"amount": 300})[
-        "body"
-    ]
+    result = call(
+        instance,
+        "POST",
+        f"/v1/charges/{pi['latest_charge']}/refunds",
+        {"amount": 300},
+    )
     assert result["object"] == "refund"
     assert result["amount"] == 300
     assert result["charge"] == pi["latest_charge"]
 
 
-def test_expand_refunds_builds_the_inline_envelope(instance: seahaven.Instance) -> None:
+def test_expand_refunds_builds_the_inline_envelope(
+    instance: seahaven.Instance,
+) -> None:
     pi = confirmed_intent(instance, 5000)
-    first = call(instance, "POST", "/v1/refunds", {"charge": pi["latest_charge"], "amount": 1500})[
-        "body"
-    ]
-    body = call(instance, "GET", f"/v1/charges/{pi['latest_charge']}", {"expand": ["refunds"]})[
-        "body"
-    ]
+    first = call(
+        instance,
+        "POST",
+        "/v1/refunds",
+        {"charge": pi["latest_charge"], "amount": 1500},
+    )
+    body = call(
+        instance,
+        "GET",
+        f"/v1/charges/{pi['latest_charge']}",
+        {"expand": ["refunds"]},
+    )
     envelope = body["refunds"]
     assert envelope["object"] == "list"
     assert [item["id"] for item in envelope["data"]] == [first["id"]]
     assert envelope["has_more"] is False
     assert envelope["url"] == f"/v1/charges/{pi['latest_charge']}/refunds"
-    assert "total_count" not in envelope  # undeclared by the pinned spec
+    assert "total_count" not in envelope
 
 
-def test_expand_refunds_caps_at_ten_and_marks_has_more(instance: seahaven.Instance) -> None:
+def test_expand_refunds_caps_at_ten_and_marks_has_more(
+    instance: seahaven.Instance,
+) -> None:
     pi = confirmed_intent(instance, 1200)
     for _ in range(11):
-        call(instance, "POST", "/v1/refunds", {"charge": pi["latest_charge"], "amount": 100})
-    body = call(instance, "GET", f"/v1/charges/{pi['latest_charge']}", {"expand": ["refunds"]})[
-        "body"
-    ]
+        call(
+            instance,
+            "POST",
+            "/v1/refunds",
+            {"charge": pi["latest_charge"], "amount": 100},
+        )
+    body = call(
+        instance,
+        "GET",
+        f"/v1/charges/{pi['latest_charge']}",
+        {"expand": ["refunds"]},
+    )
     assert len(body["refunds"]["data"]) == 10
     assert body["refunds"]["has_more"] is True
-    # unexpanded stays absent
-    assert "refunds" not in call(instance, "GET", f"/v1/charges/{pi['latest_charge']}")["body"]
+    assert "refunds" not in call(instance, "GET", f"/v1/charges/{pi['latest_charge']}")
 
 
 def test_expand_refunds_on_a_list_and_nested_under_latest_charge(
     instance: seahaven.Instance,
 ) -> None:
     pi = confirmed_intent(instance, 900)
-    refund = call(instance, "POST", "/v1/refunds", {"charge": pi["latest_charge"]})["body"]
-    listed = call(instance, "GET", "/v1/charges", {"expand": ["data.refunds"]})["body"]
+    refund = call(
+        instance,
+        "POST",
+        "/v1/refunds",
+        {"charge": pi["latest_charge"]},
+    )
+    listed = call(instance, "GET", "/v1/charges", {"expand": ["data.refunds"]})
     mine = next(item for item in listed["data"] if item["id"] == pi["latest_charge"])
     assert [item["id"] for item in mine["refunds"]["data"]] == [refund["id"]]
     nested = call(
-        instance, "GET", f"/v1/payment_intents/{pi['id']}", {"expand": ["latest_charge.refunds"]}
-    )["body"]
+        instance,
+        "GET",
+        f"/v1/payment_intents/{pi['id']}",
+        {"expand": ["latest_charge.refunds"]},
+    )
     assert [item["id"] for item in nested["latest_charge"]["refunds"]["data"]] == [refund["id"]]
 
 
@@ -472,33 +615,51 @@ def test_nested_expansion_under_the_inline_page_is_not_silently_ignored(
     path that inflated nothing would be the silent-ignore functional spec
     §6.3 forbids."""
     pi = confirmed_intent(instance, 700)
-    call(instance, "POST", "/v1/refunds", {"charge": pi["latest_charge"], "amount": 200})
+    call(
+        instance,
+        "POST",
+        "/v1/refunds",
+        {"charge": pi["latest_charge"], "amount": 200},
+    )
     body = call(
-        instance, "GET", f"/v1/charges/{pi['latest_charge']}", {"expand": ["refunds.data.charge"]}
-    )["body"]
+        instance,
+        "GET",
+        f"/v1/charges/{pi['latest_charge']}",
+        {"expand": ["refunds.data.charge"]},
+    )
     item = body["refunds"]["data"][0]
     assert item["charge"]["object"] == "charge"
     assert item["charge"]["id"] == pi["latest_charge"]
     assert item["charge"]["amount"] == 700
-    listed = call(instance, "GET", "/v1/charges", {"expand": ["data.refunds.data.charge"]})["body"]
+    listed = call(
+        instance,
+        "GET",
+        "/v1/charges",
+        {"expand": ["data.refunds.data.charge"]},
+    )
     mine = next(item for item in listed["data"] if item["id"] == pi["latest_charge"])
     assert mine["refunds"]["data"][0]["charge"]["id"] == pi["latest_charge"]
-    # Rows past the 10-item page are never expanded — only the response's
-    # own page is.
     pi_many = confirmed_intent(instance, 1500)
     for _ in range(11):
-        call(instance, "POST", "/v1/refunds", {"charge": pi_many["latest_charge"], "amount": 100})
+        call(
+            instance,
+            "POST",
+            "/v1/refunds",
+            {"charge": pi_many["latest_charge"], "amount": 100},
+        )
     page = call(
         instance,
         "GET",
         f"/v1/charges/{pi_many['latest_charge']}",
         {"expand": ["refunds.data.charge"]},
-    )["body"]["refunds"]
+    )["refunds"]
     assert len(page["data"]) == 10
     assert all(entry["charge"]["id"] == pi_many["latest_charge"] for entry in page["data"])
 
 
-def test_no_over_refund_across_succeeded_refunds(instance: seahaven.Instance) -> None:
+def test_no_over_refund_across_succeeded_refunds(
+    instance: seahaven.Instance,
+) -> None:
     """Invariant I7 in motion: the ceiling is the captured amount however
     many refunds reach it, and `amount_refunded` always equals the sum of
     settled refunds."""
@@ -506,9 +667,10 @@ def test_no_over_refund_across_succeeded_refunds(instance: seahaven.Instance) ->
     ch = pi["latest_charge"]
     call(instance, "POST", "/v1/refunds", {"charge": ch, "amount": 300})
     call(instance, "POST", "/v1/refunds", {"charge": ch, "amount": 300})
-    error = call(instance, "POST", "/v1/refunds", {"charge": ch, "amount": 500})
-    assert error["status"] == 400
-    assert error["body"]["error"]["param"] == "amount"
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "POST", "/v1/refunds", {"charge": ch, "amount": 500})
+    assert exc_info.value.status == 400
+    assert exc_info.value.stripe_body["error"]["param"] == "amount"
     assert instance.inspect().one(
         "SELECT c.amount_refunded AS refunded,"
         " (SELECT COALESCE(SUM(amount), 0) FROM refunds r"

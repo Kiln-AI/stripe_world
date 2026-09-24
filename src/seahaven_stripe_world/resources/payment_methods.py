@@ -384,7 +384,6 @@ _FIELDS = FieldMap(
     timestamps=frozenset({"created"}),
     json_columns=frozenset({"billing_details", "metadata"}),
     constants={
-        "livemode": False,
         "customer_account": None,
         "radar_options": None,
     },

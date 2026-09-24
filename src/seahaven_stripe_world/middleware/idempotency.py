@@ -51,10 +51,18 @@ def request_hash(method: str, path: str, params: Any) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+#: Tools that carry ``idempotency_key``.  Only ``call_stripe`` exposes
+#: the parameter (functional spec section 16); the MCP-facing
+#: ``stripe_api_write`` dropped it in Phase 5.  ``call_stripe`` is
+#: deliberately unregistered on the production world (section 2.5) but
+#: test callers register it on probe worlds via ``conftest.dispatch_tool()``.
+_IDEMPOTENT_TOOLS = frozenset(("call_stripe",))
+
+
 @world.middleware
 def idempotency(ctx: seahaven.Ctx, call: seahaven.Call, next_: Handler) -> Any:
     """Replay a POST that has been made before (§3.1.4's four outcomes)."""
-    if call.name != "stripe_api_write":
+    if call.name not in _IDEMPOTENT_TOOLS:
         return next_(ctx, call)
     method = call.arguments.get("method")
     if not isinstance(method, str) or method.upper() != "POST":

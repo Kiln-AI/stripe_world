@@ -8,22 +8,23 @@ reads canceled within moments)."""
 import pytest
 import seahaven
 
-from conftest import BLANK_NOW
+from conftest import BLANK_NOW, api_read, api_write
+from seahaven_stripe_world.errors import StripeToolError
 
 pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
 
 
 def call(instance: seahaven.Instance, method: str, path: str, params: dict | None = None):
     if method == "GET":
-        return instance.call("stripe_api_read", path=path, params=params)
-    return instance.call("stripe_api_write", method=method, path=path, params=params)
+        return api_read(instance, path, params)
+    return api_write(instance, method, path, params)
 
 
 def setup_catalog(instance: seahaven.Instance) -> tuple[str, str, str]:
-    cus = call(instance, "POST", "/v1/customers", {"email": "sm@example.test"})["body"]["id"]
+    cus = call(instance, "POST", "/v1/customers", {"email": "sm@example.test"})["id"]
     pm = call(
         instance, "POST", "/v1/payment_methods", {"type": "card", "card": {"token": "tok_visa"}}
-    )["body"]["id"]
+    )["id"]
     call(instance, "POST", f"/v1/payment_methods/{pm}/attach", {"customer": cus})
     call(
         instance,
@@ -31,7 +32,7 @@ def setup_catalog(instance: seahaven.Instance) -> tuple[str, str, str]:
         f"/v1/customers/{cus}",
         {"invoice_settings": {"default_payment_method": pm}},
     )
-    prod = call(instance, "POST", "/v1/products", {"name": "machine"})["body"]["id"]
+    prod = call(instance, "POST", "/v1/products", {"name": "machine"})["id"]
     price = call(
         instance,
         "POST",
@@ -42,7 +43,7 @@ def setup_catalog(instance: seahaven.Instance) -> tuple[str, str, str]:
             "currency": "cad",
             "recurring": {"interval": "month"},
         },
-    )["body"]["id"]
+    )["id"]
     return cus, pm, price
 
 
@@ -63,7 +64,7 @@ def test_create_active_with_paid_first_invoice(instance: seahaven.Instance) -> N
     cus, _, price = setup_catalog(instance)
     body = call(
         instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": price}]}
-    )["body"]
+    )
     assert body["status"] == "active"
     assert body["collection_method"] == "charge_automatically"
     assert body["currency"] == "cad"
@@ -110,7 +111,7 @@ def test_create_trialing_carries_the_paid_zero_invoice(instance: seahaven.Instan
         "POST",
         "/v1/subscriptions",
         {"customer": cus, "items": [{"price": price}], "trial_end": 1798761600},
-    )["body"]
+    )
     assert body["status"] == "trialing"
     assert body["trial_start"] == body["created"]
     assert body["trial_end"] == 1798761600
@@ -137,7 +138,7 @@ def test_create_send_invoice_leaves_the_draft(instance: seahaven.Instance) -> No
             "collection_method": "send_invoice",
             "days_until_due": 30,
         },
-    )["body"]
+    )
     # Recorded: activation does not wait on the invoice, which stays draft
     assert body["status"] == "active"
     invoice = one_row(instance, "SELECT * FROM invoices WHERE id = ?", body["latest_invoice"])
@@ -155,14 +156,14 @@ def test_create_incomplete_on_three_ds(instance: seahaven.Instance) -> None:
         "POST",
         "/v1/payment_methods",
         {"type": "card", "card": {"token": "tok_threeDSecure2Required"}},
-    )["body"]["id"]
+    )["id"]
     call(instance, "POST", f"/v1/payment_methods/{tds}/attach", {"customer": cus})
     body = call(
         instance,
         "POST",
         "/v1/subscriptions",
         {"customer": cus, "items": [{"price": price}], "default_payment_method": tds},
-    )["body"]
+    )
     assert body["status"] == "incomplete"
     invoice = one_row(instance, "SELECT * FROM invoices WHERE id = ?", body["latest_invoice"])
     assert invoice["status"] == "open"
@@ -178,22 +179,23 @@ def test_error_if_incomplete_raises_and_writes_nothing(instance: seahaven.Instan
         "POST",
         "/v1/payment_methods",
         {"type": "card", "card": {"token": "tok_threeDSecure2Required"}},
-    )["body"]["id"]
+    )["id"]
     call(instance, "POST", f"/v1/payment_methods/{tds}/attach", {"customer": cus})
-    result = call(
-        instance,
-        "POST",
-        "/v1/subscriptions",
-        {
-            "customer": cus,
-            "items": [{"price": price}],
-            "default_payment_method": tds,
-            "payment_behavior": "error_if_incomplete",
-        },
-    )
     # Recorded: the 402 card_error with its long message
-    assert result["status"] == 402
-    error = result["body"]["error"]
+    with pytest.raises(StripeToolError) as exc_info:
+        call(
+            instance,
+            "POST",
+            "/v1/subscriptions",
+            {
+                "customer": cus,
+                "items": [{"price": price}],
+                "default_payment_method": tds,
+                "payment_behavior": "error_if_incomplete",
+            },
+        )
+    error = exc_info.value.stripe_body["error"]
+    assert exc_info.value.status == 402
     assert error["code"] == "subscription_payment_intent_requires_action"
     assert "requires additional user action" in error["message"]
     # nothing survives the refusal — asserted on the change log and the
@@ -205,12 +207,11 @@ def test_error_if_incomplete_raises_and_writes_nothing(instance: seahaven.Instan
 
 def test_create_without_a_payment_method_refuses(instance: seahaven.Instance) -> None:
     _cus, _, price = setup_catalog(instance)
-    bare = call(instance, "POST", "/v1/customers", {"email": "bare@example.test"})["body"]["id"]
-    result = call(
-        instance, "POST", "/v1/subscriptions", {"customer": bare, "items": [{"price": price}]}
-    )
-    assert result["status"] == 400
-    error = result["body"]["error"]
+    bare = call(instance, "POST", "/v1/customers", {"email": "bare@example.test"})["id"]
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "POST", "/v1/subscriptions", {"customer": bare, "items": [{"price": price}]})
+    assert exc_info.value.status == 400
+    error = exc_info.value.stripe_body["error"]
     assert error["code"] == "resource_missing"
     assert error["message"].startswith("This customer has no attached payment source")
     assert "param" not in error
@@ -221,7 +222,7 @@ def test_the_customer_default_is_never_copied_onto_the_row(instance: seahaven.In
     cus, _pm, price = setup_catalog(instance)
     body = call(
         instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": price}]}
-    )["body"]
+    )
     # Recorded: the charge resolves through the customer's default, but the
     # subscription's own field stays null
     assert body["default_payment_method"] is None
@@ -237,8 +238,8 @@ def test_trial_end_now_with_a_method_becomes_active(instance: seahaven.Instance)
         "POST",
         "/v1/subscriptions",
         {"customer": cus, "items": [{"price": price}], "trial_end": 1798761600},
-    )["body"]
-    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": "now"})["body"]
+    )
+    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": "now"})
     assert body["status"] == "active"
     invoice = one_row(instance, "SELECT * FROM invoices WHERE id = ?", body["latest_invoice"])
     assert invoice["status"] == "paid"
@@ -264,7 +265,7 @@ def test_trial_end_now_with_a_method_becomes_active(instance: seahaven.Instance)
 
 
 def test_trial_end_now_without_a_method_refuses(instance: seahaven.Instance) -> None:
-    bare = call(instance, "POST", "/v1/customers", {"email": "bare@example.test"})["body"]["id"]
+    bare = call(instance, "POST", "/v1/customers", {"email": "bare@example.test"})["id"]
     _, _, price = setup_catalog(instance)
     sub = call(
         instance,
@@ -276,15 +277,16 @@ def test_trial_end_now_without_a_method_refuses(instance: seahaven.Instance) -> 
             "trial_end": 1798761600,
             # the default create_invoice behavior — recorded: it refuses
         },
-    )["body"]
-    result = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": "now"})
-    assert result["status"] == 400
-    assert result["body"]["error"]["code"] == "resource_missing"
+    )
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": "now"})
+    assert exc_info.value.status == 400
+    assert exc_info.value.stripe_body["error"]["code"] == "resource_missing"
 
 
 def test_trial_end_now_pauses_without_a_method(instance: seahaven.Instance) -> None:
     _cus, _pm_unused, price = setup_catalog(instance)
-    bare = call(instance, "POST", "/v1/customers", {"email": "bare@example.test"})["body"]["id"]
+    bare = call(instance, "POST", "/v1/customers", {"email": "bare@example.test"})["id"]
     sub = call(
         instance,
         "POST",
@@ -295,10 +297,10 @@ def test_trial_end_now_pauses_without_a_method(instance: seahaven.Instance) -> N
             "trial_end": 1798761600,
             "trial_settings": {"end_behavior": {"missing_payment_method": "pause"}},
         },
-    )["body"]
+    )
     # the no-method trial mints the add-a-method SetupIntent immediately
     assert sub["pending_setup_intent"].startswith("seti_")
-    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": "now"})["body"]
+    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": "now"})
     assert body["status"] == "paused"
     assert body["pending_setup_intent"] == sub["pending_setup_intent"]
     # no cycle invoice exists while paused
@@ -311,7 +313,7 @@ def test_trial_end_now_pauses_without_a_method(instance: seahaven.Instance) -> N
 
 def test_trial_end_now_cancels_when_configured(instance: seahaven.Instance) -> None:
     _, _, price = setup_catalog(instance)
-    bare = call(instance, "POST", "/v1/customers", {"email": "bare@example.test"})["body"]["id"]
+    bare = call(instance, "POST", "/v1/customers", {"email": "bare@example.test"})["id"]
     sub = call(
         instance,
         "POST",
@@ -322,8 +324,8 @@ def test_trial_end_now_cancels_when_configured(instance: seahaven.Instance) -> N
             "trial_end": 1798761600,
             "trial_settings": {"end_behavior": {"missing_payment_method": "cancel"}},
         },
-    )["body"]
-    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": "now"})["body"]
+    )
+    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": "now"})
     # Recorded: the cancel-behavior stamp, and the reason is
     # cancellation_requested — not payment_failed
     assert body["status"] == "canceled"
@@ -340,7 +342,7 @@ def test_resume_parks_a_pending_update_and_the_confirm_applies_it(
     instance: seahaven.Instance,
 ) -> None:
     _, _, price = setup_catalog(instance)
-    bare = call(instance, "POST", "/v1/customers", {"email": "bare@example.test"})["body"]["id"]
+    bare = call(instance, "POST", "/v1/customers", {"email": "bare@example.test"})["id"]
     sub = call(
         instance,
         "POST",
@@ -351,11 +353,11 @@ def test_resume_parks_a_pending_update_and_the_confirm_applies_it(
             "trial_end": 1798761600,
             "trial_settings": {"end_behavior": {"missing_payment_method": "pause"}},
         },
-    )["body"]
+    )
     call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": "now"})
     # Recorded: resume answers 200 with the status STILL paused, the seti
     # exposed and the update parked for 23 hours
-    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}/resume", {})["body"]
+    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}/resume", {})
     assert body["status"] == "paused"
     assert body["pending_setup_intent"].startswith("seti_")
     # the parked anchor is the default resume instant (the recording parks
@@ -370,16 +372,16 @@ def test_resume_parks_a_pending_update_and_the_confirm_applies_it(
     # seti reads canceled within moments; declared structural difference)
     pm = call(
         instance, "POST", "/v1/payment_methods", {"type": "card", "card": {"token": "tok_visa"}}
-    )["body"]["id"]
+    )["id"]
     call(instance, "POST", f"/v1/payment_methods/{pm}/attach", {"customer": bare})
     confirmed = call(
         instance,
         "POST",
         f"/v1/setup_intents/{body['pending_setup_intent']}/confirm",
         {"payment_method": pm},
-    )["body"]
+    )
     assert confirmed["status"] == "succeeded"
-    fresh = call(instance, "GET", f"/v1/subscriptions/{sub['id']}")["body"]
+    fresh = call(instance, "GET", f"/v1/subscriptions/{sub['id']}")
     assert fresh["status"] == "active"
     assert fresh["pending_setup_intent"] is None
     assert fresh["pending_update"] is None
@@ -395,7 +397,7 @@ def test_resume_unchanged_anchor_restarts_at_the_stored_anchor(instance: seahave
     confirming SetupIntent restarts the periods there — not at the confirm
     moment (the frozen clock makes the two coincide only when they do)."""
     _, _, price = setup_catalog(instance)
-    bare = call(instance, "POST", "/v1/customers", {"email": "bare2@example.test"})["body"]["id"]
+    bare = call(instance, "POST", "/v1/customers", {"email": "bare2@example.test"})["id"]
     sub = call(
         instance,
         "POST",
@@ -406,7 +408,7 @@ def test_resume_unchanged_anchor_restarts_at_the_stored_anchor(instance: seahave
             "trial_end": 1798761600,
             "trial_settings": {"end_behavior": {"missing_payment_method": "pause"}},
         },
-    )["body"]
+    )
     stored_anchor = sub["billing_cycle_anchor"]
     call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": "now"})
     body = call(
@@ -414,12 +416,12 @@ def test_resume_unchanged_anchor_restarts_at_the_stored_anchor(instance: seahave
         "POST",
         f"/v1/subscriptions/{sub['id']}/resume",
         {"billing_cycle_anchor": "unchanged"},
-    )["body"]
+    )
     # the parked target is the stored anchor, not the resume moment
     assert body["pending_update"]["billing_cycle_anchor"] == stored_anchor
     pm = call(
         instance, "POST", "/v1/payment_methods", {"type": "card", "card": {"token": "tok_visa"}}
-    )["body"]["id"]
+    )["id"]
     call(instance, "POST", f"/v1/payment_methods/{pm}/attach", {"customer": bare})
     call(
         instance,
@@ -427,7 +429,7 @@ def test_resume_unchanged_anchor_restarts_at_the_stored_anchor(instance: seahave
         f"/v1/setup_intents/{body['pending_setup_intent']}/confirm",
         {"payment_method": pm},
     )
-    fresh = call(instance, "GET", f"/v1/subscriptions/{sub['id']}")["body"]
+    fresh = call(instance, "GET", f"/v1/subscriptions/{sub['id']}")
     assert fresh["status"] == "active"
     assert fresh["billing_cycle_anchor"] == stored_anchor
     item = fresh["items"]["data"][0]
@@ -438,11 +440,12 @@ def test_resume_refuses_a_non_paused_subscription(instance: seahaven.Instance) -
     cus, _, price = setup_catalog(instance)
     sub = call(
         instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": price}]}
-    )["body"]
-    result = call(instance, "POST", f"/v1/subscriptions/{sub['id']}/resume", {})
-    assert result["status"] == 400
+    )
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "POST", f"/v1/subscriptions/{sub['id']}/resume", {})
+    assert exc_info.value.status == 400
     assert (
-        result["body"]["error"]["message"]
+        exc_info.value.stripe_body["error"]["message"]
         == "You can only resume a subscription if it is `paused`."
     )
 
@@ -454,17 +457,18 @@ def test_cancel_is_immediate_and_a_second_cancel_is_missing(instance: seahaven.I
     cus, _, price = setup_catalog(instance)
     sub = call(
         instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": price}]}
-    )["body"]
-    body = call(instance, "DELETE", f"/v1/subscriptions/{sub['id']}")["body"]
+    )
+    body = call(instance, "DELETE", f"/v1/subscriptions/{sub['id']}")
     assert body["object"] == "subscription"  # the full body, not a stub
     assert body["status"] == "canceled"
     assert body["canceled_at"] is not None
     assert body["ended_at"] is not None
     assert body["cancellation_details"]["reason"] == "cancellation_requested"
     assert "customer.subscription.deleted" in events_of(instance)
-    again = call(instance, "DELETE", f"/v1/subscriptions/{sub['id']}")
-    assert again["status"] == 404
-    assert again["body"]["error"]["message"] == f"No such subscription: '{sub['id']}'"
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "DELETE", f"/v1/subscriptions/{sub['id']}")
+    assert exc_info.value.status == 404
+    assert exc_info.value.stripe_body["error"]["message"] == f"No such subscription: '{sub['id']}'"
 
 
 def test_canceled_subscription_updates_follow_the_recorded_rule(
@@ -473,16 +477,15 @@ def test_canceled_subscription_updates_follow_the_recorded_rule(
     cus, _, price = setup_catalog(instance)
     sub = call(
         instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": price}]}
-    )["body"]
+    )
     call(instance, "DELETE", f"/v1/subscriptions/{sub['id']}")
-    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"metadata": {"k": "v"}})[
-        "body"
-    ]
+    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"metadata": {"k": "v"}})
     assert body["metadata"] == {"k": "v"}
     for offending in ({"description": "x"}, {"cancel_at_period_end": True}):
-        result = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", offending)
-        assert result["status"] == 400
-        error = result["body"]["error"]
+        with pytest.raises(StripeToolError) as exc_info:
+            call(instance, "POST", f"/v1/subscriptions/{sub['id']}", offending)
+        assert exc_info.value.status == 400
+        error = exc_info.value.stripe_body["error"]
         assert error["code"] == "invalid_canceled_subscription_fields"
         assert error["message"] == (
             "A canceled subscription can only update its cancellation_details and metadata."
@@ -493,18 +496,14 @@ def test_cancel_at_period_end_stamps_without_moving_the_status(instance: seahave
     cus, _, price = setup_catalog(instance)
     sub = call(
         instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": price}]}
-    )["body"]
-    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"cancel_at_period_end": True})[
-        "body"
-    ]
+    )
+    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"cancel_at_period_end": True})
     assert body["status"] == "active"
     assert body["cancel_at_period_end"] is True
     assert body["cancel_at"] == body["items"]["data"][0]["current_period_end"]
     # Recorded: scheduling the cancel stamps the reason; un-scheduling clears it
     assert body["cancellation_details"]["reason"] == "cancellation_requested"
-    body = call(
-        instance, "POST", f"/v1/subscriptions/{sub['id']}", {"cancel_at_period_end": False}
-    )["body"]
+    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"cancel_at_period_end": False})
     assert body["cancel_at_period_end"] is False
     assert body["cancel_at"] is None
     assert body["cancellation_details"]["reason"] is None
@@ -514,18 +513,16 @@ def test_pause_collection_leaves_the_status_unchanged(instance: seahaven.Instanc
     cus, _, price = setup_catalog(instance)
     sub = call(
         instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": price}]}
-    )["body"]
+    )
     body = call(
         instance,
         "POST",
         f"/v1/subscriptions/{sub['id']}",
         {"pause_collection": {"behavior": "void"}},
-    )["body"]
+    )
     assert body["status"] == "active"
     assert body["pause_collection"] == {"behavior": "void", "resumes_at": None}
-    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"pause_collection": ""})[
-        "body"
-    ]
+    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"pause_collection": ""})
     assert body["pause_collection"] is None
 
 
@@ -542,14 +539,14 @@ def test_advance_cycle_renews_and_the_deferred_cancel_fires(instance: seahaven.I
     cus, _, price = setup_catalog(instance)
     sub = call(
         instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": price}]}
-    )["body"]
+    )
     first_invoice = sub["latest_invoice"]
     item_before = one_row(
         instance, "SELECT * FROM subscription_items WHERE subscription = ?", sub["id"]
     )
     with instance.bulk() as ctx:
         lifecycle.advance_cycle(ctx, sub["id"])
-    fresh = call(instance, "GET", f"/v1/subscriptions/{sub['id']}")["body"]
+    fresh = call(instance, "GET", f"/v1/subscriptions/{sub['id']}")
     assert fresh["status"] == "active"
     assert fresh["latest_invoice"] != first_invoice
     invoice = one_row(instance, "SELECT * FROM invoices WHERE id = ?", fresh["latest_invoice"])
@@ -584,14 +581,14 @@ def test_expire_incomplete_voids_and_is_terminal(instance: seahaven.Instance) ->
         "POST",
         "/v1/payment_methods",
         {"type": "card", "card": {"token": "tok_threeDSecure2Required"}},
-    )["body"]["id"]
+    )["id"]
     call(instance, "POST", f"/v1/payment_methods/{tds}/attach", {"customer": cus})
     sub = call(
         instance,
         "POST",
         "/v1/subscriptions",
         {"customer": cus, "items": [{"price": price}], "default_payment_method": tds},
-    )["body"]
+    )
     with instance.bulk() as ctx:
         lifecycle.expire_incomplete(ctx, sub["id"])
     expired = subscription_row(instance, sub["id"])
@@ -600,8 +597,9 @@ def test_expire_incomplete_voids_and_is_terminal(instance: seahaven.Instance) ->
     invoice = one_row(instance, "SELECT * FROM invoices WHERE id = ?", sub["latest_invoice"])
     assert invoice["status"] == "void"
     # terminal: update refuses
-    result = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"description": "x"})
-    assert result["status"] == 400
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"description": "x"})
+    assert exc_info.value.status == 400
 
 
 def test_on_invoice_paid_recovers_incomplete(instance: seahaven.Instance) -> None:
@@ -615,14 +613,14 @@ def test_on_invoice_paid_recovers_incomplete(instance: seahaven.Instance) -> Non
         "POST",
         "/v1/payment_methods",
         {"type": "card", "card": {"token": "tok_threeDSecure2Required"}},
-    )["body"]["id"]
+    )["id"]
     call(instance, "POST", f"/v1/payment_methods/{tds}/attach", {"customer": cus})
     sub = call(
         instance,
         "POST",
         "/v1/subscriptions",
         {"customer": cus, "items": [{"price": price}], "default_payment_method": tds},
-    )["body"]
+    )
     assert sub["status"] == "incomplete"
     visa_row = one_row(instance, "SELECT * FROM payment_methods WHERE id = ?", pm)
     with instance.bulk() as ctx:
@@ -646,7 +644,7 @@ def test_the_decline_card_lands_incomplete_with_its_attempt_counted(instance: se
             "type": "card",
             "card": {"number": "4000000000000341", "exp_month": 9, "exp_year": 2027, "cvc": "123"},
         },
-    )["body"]["id"]
+    )["id"]
     call(instance, "POST", f"/v1/payment_methods/{dec}/attach", {"customer": cus})
     call(
         instance,
@@ -656,7 +654,7 @@ def test_the_decline_card_lands_incomplete_with_its_attempt_counted(instance: se
     )
     body = call(
         instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": price}]}
-    )["body"]
+    )
     assert body["status"] == "incomplete"
     invoice = one_row(instance, "SELECT * FROM invoices WHERE id = ?", body["latest_invoice"])
     assert invoice["status"] == "open"
@@ -675,7 +673,7 @@ def test_terminal_states_are_stamped(instance: seahaven.Instance) -> None:
     cus, _, price = setup_catalog(instance)
     sub = call(
         instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": price}]}
-    )["body"]
+    )
     call(instance, "DELETE", f"/v1/subscriptions/{sub['id']}")
     rows = instance.inspect().rows("SELECT * FROM subscriptions")
     assert rows, "the canceled row survives"
@@ -726,9 +724,8 @@ def test_trial_end_future_on_trialing_emits_its_update(instance: seahaven.Instan
         "POST",
         "/v1/subscriptions",
         {"customer": cus, "items": [{"price": price}], "trial_end": 1798761600},
-    )["body"]
-    result = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": 1801353600})
-    assert result["status"] == 200
+    )
+    call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": 1801353600})
     import json
 
     last = one_row(
@@ -750,28 +747,23 @@ def test_incomplete_accepts_default_payment_method_updates(instance: seahaven.In
         "POST",
         "/v1/payment_methods",
         {"type": "card", "card": {"token": "tok_threeDSecure2Required"}},
-    )["body"]["id"]
+    )["id"]
     call(instance, "POST", f"/v1/payment_methods/{tds}/attach", {"customer": cus})
     sub = call(
         instance,
         "POST",
         "/v1/subscriptions",
         {"customer": cus, "items": [{"price": price}], "default_payment_method": tds},
-    )["body"]
+    )
     assert sub["status"] == "incomplete"
-    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"default_payment_method": pm})[
-        "body"
-    ]
+    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"default_payment_method": pm})
     assert body["default_payment_method"] == pm
-    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"default_payment_method": ""})[
-        "body"
-    ]
+    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"default_payment_method": ""})
     assert body["default_payment_method"] is None
     # a wider change still refuses
-    result = call(
-        instance, "POST", f"/v1/subscriptions/{sub['id']}", {"cancel_at_period_end": True}
-    )
-    assert result["status"] == 400
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"cancel_at_period_end": True})
+    assert exc_info.value.status == 400
 
 
 def test_trial_end_now_keeps_cosupplied_field_deltas(instance: seahaven.Instance) -> None:
@@ -781,7 +773,7 @@ def test_trial_end_now_keeps_cosupplied_field_deltas(instance: seahaven.Instance
         "POST",
         "/v1/subscriptions",
         {"customer": cus, "items": [{"price": price}], "trial_end": 1798761600},
-    )["body"]
+    )
     call(
         instance,
         "POST",
@@ -803,7 +795,7 @@ def test_trial_end_now_keeps_cosupplied_field_deltas(instance: seahaven.Instance
 
 def test_resume_and_item_writes_carry_previous_attributes(instance: seahaven.Instance) -> None:
     _, _, price = setup_catalog(instance)
-    bare = call(instance, "POST", "/v1/customers", {"email": "pa@example.test"})["body"]["id"]
+    bare = call(instance, "POST", "/v1/customers", {"email": "pa@example.test"})["id"]
     sub = call(
         instance,
         "POST",
@@ -814,9 +806,9 @@ def test_resume_and_item_writes_carry_previous_attributes(instance: seahaven.Ins
             "trial_end": 1798761600,
             "trial_settings": {"end_behavior": {"missing_payment_method": "pause"}},
         },
-    )["body"]
+    )
     call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": "now"})
-    resumed = call(instance, "POST", f"/v1/subscriptions/{sub['id']}/resume", {})["body"]
+    resumed = call(instance, "POST", f"/v1/subscriptions/{sub['id']}/resume", {})
     import json
 
     last = one_row(
@@ -831,7 +823,7 @@ def test_resume_and_item_writes_carry_previous_attributes(instance: seahaven.Ins
 
     # an item change through the sub-update path: the added item's absence
     # in the previous items
-    prod = call(instance, "POST", "/v1/products", {"name": "pa2"})["body"]["id"]
+    prod = call(instance, "POST", "/v1/products", {"name": "pa2"})["id"]
     price2 = call(
         instance,
         "POST",
@@ -842,7 +834,7 @@ def test_resume_and_item_writes_carry_previous_attributes(instance: seahaven.Ins
             "currency": "cad",
             "recurring": {"interval": "month"},
         },
-    )["body"]["id"]
+    )["id"]
     call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"items": [{"price": price2}]})
     last = one_row(
         instance,
@@ -865,17 +857,17 @@ def test_advance_cycle_refuses_non_renewing_statuses(instance: seahaven.Instance
         "POST",
         "/v1/subscriptions",
         {"customer": cus_of(instance), "items": [{"price": price}]},
-    )["body"]
+    )
     call(instance, "DELETE", f"/v1/subscriptions/{sub['id']}")
     with instance.bulk() as ctx, _pytest.raises(seahaven.WorldBug):
         lifecycle.advance_cycle(ctx, sub["id"])
 
 
 def cus_of(instance: seahaven.Instance) -> str:
-    cus = call(instance, "POST", "/v1/customers", {"email": "ac@example.test"})["body"]["id"]
+    cus = call(instance, "POST", "/v1/customers", {"email": "ac@example.test"})["id"]
     pm = call(
         instance, "POST", "/v1/payment_methods", {"type": "card", "card": {"token": "tok_visa"}}
-    )["body"]["id"]
+    )["id"]
     call(instance, "POST", f"/v1/payment_methods/{pm}/attach", {"customer": cus})
     call(
         instance,
@@ -898,7 +890,7 @@ def test_create_with_trial_end_now_collapses_to_no_trial(instance: seahaven.Inst
         "POST",
         "/v1/subscriptions",
         {"customer": cus, "items": [{"price": price}], "trial_end": "now"},
-    )["body"]
+    )
     assert body["status"] == "active"
     assert body["trial_start"] is None
     assert body["trial_end"] is None
@@ -917,11 +909,9 @@ def test_future_trial_end_converts_an_active_subscription(instance: seahaven.Ins
     cus, _, price = setup_catalog(instance)
     sub = call(
         instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": price}]}
-    )["body"]
+    )
     first_invoice = sub["latest_invoice"]
-    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": 1798761600})[
-        "body"
-    ]
+    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": 1798761600})
     assert body["status"] == "trialing"
     assert body["trial_start"] == body["created"]
     assert body["trial_end"] == 1798761600
@@ -955,15 +945,13 @@ def test_renewals_apply_the_persisted_discounts_and_tax(instance: seahaven.Insta
     import seahaven_stripe_world.billing.subscription_lifecycle as lifecycle
 
     cus, _, price = setup_catalog(instance)
-    coupon = call(instance, "POST", "/v1/coupons", {"percent_off": 10, "duration": "forever"})[
-        "body"
-    ]["id"]
+    coupon = call(instance, "POST", "/v1/coupons", {"percent_off": 10, "duration": "forever"})["id"]
     txr = call(
         instance,
         "POST",
         "/v1/tax_rates",
         {"display_name": "GST", "percentage": 5, "jurisdiction": "CA", "inclusive": False},
-    )["body"]["id"]
+    )["id"]
     sub = call(
         instance,
         "POST",
@@ -974,13 +962,13 @@ def test_renewals_apply_the_persisted_discounts_and_tax(instance: seahaven.Insta
             "discounts": [{"coupon": coupon}],
             "default_tax_rates": [txr],
         },
-    )["body"]
+    )
     assert sub["discounts"]  # forever persists on the row
     first = one_row(instance, "SELECT * FROM invoices WHERE id = ?", sub["latest_invoice"])
     assert first["total"] == 1890  # 2000 - 200 + 90
     with instance.bulk() as ctx:
         lifecycle.advance_cycle(ctx, sub["id"])
-    fresh = call(instance, "GET", f"/v1/subscriptions/{sub['id']}")["body"]
+    fresh = call(instance, "GET", f"/v1/subscriptions/{sub['id']}")
     renewal = one_row(instance, "SELECT * FROM invoices WHERE id = ?", fresh["latest_invoice"])
     assert renewal["billing_reason"] == "subscription_cycle"
     assert renewal["total"] == 1890  # the persisted state bills again
@@ -998,21 +986,22 @@ def test_the_incomplete_refusal_names_the_real_allow_set(instance: seahaven.Inst
         "POST",
         "/v1/payment_methods",
         {"type": "card", "card": {"token": "tok_threeDSecure2Required"}},
-    )["body"]["id"]
+    )["id"]
     call(instance, "POST", f"/v1/payment_methods/{tds}/attach", {"customer": cus})
     sub = call(
         instance,
         "POST",
         "/v1/subscriptions",
         {"customer": cus, "items": [{"price": price}], "default_payment_method": tds},
-    )["body"]
-    result = call(
-        instance,
-        "POST",
-        f"/v1/subscriptions/{sub['id']}",
-        {"cancel_at_period_end": True},
     )
-    error = result["body"]["error"]
+    with pytest.raises(StripeToolError) as exc_info:
+        call(
+            instance,
+            "POST",
+            f"/v1/subscriptions/{sub['id']}",
+            {"cancel_at_period_end": True},
+        )
+    error = exc_info.value.stripe_body["error"]
     assert error["code"] == "status_transition_invalid"
     assert error["message"] == (
         "Cannot update cancel_at_period_end on an incomplete subscription. Only "
@@ -1034,14 +1023,14 @@ def test_recovery_events_carry_previous_attributes(instance: seahaven.Instance) 
         "POST",
         "/v1/payment_methods",
         {"type": "card", "card": {"token": "tok_threeDSecure2Required"}},
-    )["body"]["id"]
+    )["id"]
     call(instance, "POST", f"/v1/payment_methods/{tds}/attach", {"customer": cus})
     sub = call(
         instance,
         "POST",
         "/v1/subscriptions",
         {"customer": cus, "items": [{"price": price}], "default_payment_method": tds},
-    )["body"]
+    )
     visa_row = one_row(instance, "SELECT * FROM payment_methods WHERE id = ?", pm)
     with instance.bulk() as ctx:
         invoicing.pay_invoice(ctx, sub["latest_invoice"], pm_row=visa_row)
@@ -1060,7 +1049,7 @@ def test_recovery_events_carry_previous_attributes(instance: seahaven.Instance) 
         "POST",
         "/v1/subscriptions",
         {"customer": cus, "items": [{"price": price}], "default_payment_method": tds},
-    )["body"]
+    )
     with instance.bulk() as ctx:
         lifecycle.expire_incomplete(ctx, sub2["id"])
     last = one_row(
@@ -1083,9 +1072,7 @@ def test_once_coupon_parks_on_a_trial_and_consumes_at_trial_end(
     the trialing row, applies to the first PAID invoice at trial end, and
     the row clears to [] after."""
     cus, _, price = setup_catalog(instance)
-    coupon = call(instance, "POST", "/v1/coupons", {"percent_off": 10, "duration": "once"})["body"][
-        "id"
-    ]
+    coupon = call(instance, "POST", "/v1/coupons", {"percent_off": 10, "duration": "once"})["id"]
     sub = call(
         instance,
         "POST",
@@ -1096,12 +1083,12 @@ def test_once_coupon_parks_on_a_trial_and_consumes_at_trial_end(
             "trial_end": 1798761600,
             "discounts": [{"coupon": coupon}],
         },
-    )["body"]
+    )
     assert sub["status"] == "trialing"
     assert len(sub["discounts"]) == 1  # parked, not dropped
     trial_invoice = one_row(instance, "SELECT * FROM invoices WHERE id = ?", sub["latest_invoice"])
     assert trial_invoice["total"] == 0  # the $0 trial invoice bills nothing
-    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": "now"})["body"]
+    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": "now"})
     assert body["status"] == "active"
     invoice = one_row(instance, "SELECT * FROM invoices WHERE id = ?", body["latest_invoice"])
     assert invoice["subtotal"] == 2000
@@ -1114,7 +1101,7 @@ def test_once_coupon_parks_on_a_trial_and_consumes_at_trial_end(
     assert [d["id"] for d in applied] == sub["discounts"]
     assert all(d["object"] == "discount" for d in applied)
     # and the row cleared
-    fresh = call(instance, "GET", f"/v1/subscriptions/{sub['id']}")["body"]
+    fresh = call(instance, "GET", f"/v1/subscriptions/{sub['id']}")
     assert fresh["discounts"] == []
 
 
@@ -1129,10 +1116,8 @@ def test_the_conversion_credit_line_carries_the_probed_flags(instance: seahaven.
     cus, _, price = setup_catalog(instance)
     sub = call(
         instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": price}]}
-    )["body"]
-    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": 1798761600})[
-        "body"
-    ]
+    )
+    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": 1798761600})
     invoice = one_row(instance, "SELECT * FROM invoices WHERE id = ?", body["latest_invoice"])
     lines = json.loads(invoice["lines"])
     credit = next(line for line in lines if line["description"].startswith("Unused time on"))
@@ -1149,7 +1134,7 @@ def test_the_conversion_credit_line_carries_the_probed_flags(instance: seahaven.
 def test_conversion_refuses_unprobed_source_statuses(instance: seahaven.Instance) -> None:
     """Only `active` (the probed source) converts; paused refuses."""
     _, _, price = setup_catalog(instance)
-    bare = call(instance, "POST", "/v1/customers", {"email": "guard@example.test"})["body"]["id"]
+    bare = call(instance, "POST", "/v1/customers", {"email": "guard@example.test"})["id"]
     sub = call(
         instance,
         "POST",
@@ -1160,13 +1145,14 @@ def test_conversion_refuses_unprobed_source_statuses(instance: seahaven.Instance
             "trial_end": 1798761600,
             "trial_settings": {"end_behavior": {"missing_payment_method": "pause"}},
         },
-    )["body"]
+    )
     call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": "now"})
-    paused = call(instance, "GET", f"/v1/subscriptions/{sub['id']}")["body"]
+    paused = call(instance, "GET", f"/v1/subscriptions/{sub['id']}")
     assert paused["status"] == "paused"
-    result = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": 1798761600})
-    assert result["status"] == 400
-    error = result["body"]["error"]
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": 1798761600})
+    assert exc_info.value.status == 400
+    error = exc_info.value.stripe_body["error"]
     # Probed (round 5): the paused refusal carries no code and no param
     assert "code" not in error
     assert "param" not in error
@@ -1184,31 +1170,29 @@ def test_once_coupon_set_via_update_parks_and_consumes(instance: seahaven.Instan
     included, on both active and trialing rows — and the next invoice that
     pays consumes it."""
     cus, _, price = setup_catalog(instance)
-    coupon = call(instance, "POST", "/v1/coupons", {"percent_off": 10, "duration": "once"})["body"][
-        "id"
-    ]
+    coupon = call(instance, "POST", "/v1/coupons", {"percent_off": 10, "duration": "once"})["id"]
     # the trialing row: parked via update, billed at trial end, cleared
     sub = call(
         instance,
         "POST",
         "/v1/subscriptions",
         {"customer": cus, "items": [{"price": price}], "trial_end": 1798761600},
-    )["body"]
+    )
     body = call(
         instance, "POST", f"/v1/subscriptions/{sub['id']}", {"discounts": [{"coupon": coupon}]}
-    )["body"]
+    )
     assert len(body["discounts"]) == 1
-    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": "now"})["body"]
+    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": "now"})
     invoice = one_row(instance, "SELECT * FROM invoices WHERE id = ?", body["latest_invoice"])
     assert invoice["total"] == 1800
-    assert call(instance, "GET", f"/v1/subscriptions/{sub['id']}")["body"]["discounts"] == []
+    assert call(instance, "GET", f"/v1/subscriptions/{sub['id']}")["discounts"] == []
     # the active row: parked via update, consumed by the paid renewal
     sub2 = call(
         instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": price}]}
-    )["body"]
+    )
     body = call(
         instance, "POST", f"/v1/subscriptions/{sub2['id']}", {"discounts": [{"coupon": coupon}]}
-    )["body"]
+    )
     assert len(body["discounts"]) == 1
     import seahaven_stripe_world.billing.subscription_lifecycle as lifecycle
 
@@ -1217,11 +1201,11 @@ def test_once_coupon_set_via_update_parks_and_consumes(instance: seahaven.Instan
     renewal = one_row(
         instance,
         "SELECT * FROM invoices WHERE id = ?",
-        call(instance, "GET", f"/v1/subscriptions/{sub2['id']}")["body"]["latest_invoice"],
+        call(instance, "GET", f"/v1/subscriptions/{sub2['id']}")["latest_invoice"],
     )
     assert renewal["billing_reason"] == "subscription_cycle"
     assert renewal["total"] == 1800  # parked, then consumed — not forever
-    assert call(instance, "GET", f"/v1/subscriptions/{sub2['id']}")["body"]["discounts"] == []
+    assert call(instance, "GET", f"/v1/subscriptions/{sub2['id']}")["discounts"] == []
 
 
 def test_send_invoice_trial_end_leaves_the_draft(instance: seahaven.Instance) -> None:
@@ -1239,9 +1223,9 @@ def test_send_invoice_trial_end_leaves_the_draft(instance: seahaven.Instance) ->
             "collection_method": "send_invoice",
             "days_until_due": 30,
         },
-    )["body"]
+    )
     assert sub["status"] == "trialing"
-    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": "now"})["body"]
+    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": "now"})
     assert body["status"] == "active"
     invoice = one_row(instance, "SELECT * FROM invoices WHERE id = ?", body["latest_invoice"])
     assert invoice["status"] == "draft"
@@ -1255,7 +1239,7 @@ def test_send_invoice_trial_end_leaves_the_draft(instance: seahaven.Instance) ->
 
 
 def test_send_invoice_trial_end_without_a_pm_answers_active(instance: seahaven.Instance) -> None:
-    bare = call(instance, "POST", "/v1/customers", {"email": "sib@example.test"})["body"]["id"]
+    bare = call(instance, "POST", "/v1/customers", {"email": "sib@example.test"})["id"]
     _cus, _pm, price = setup_catalog(instance)
     sub = call(
         instance,
@@ -1268,10 +1252,8 @@ def test_send_invoice_trial_end_without_a_pm_answers_active(instance: seahaven.I
             "collection_method": "send_invoice",
             "days_until_due": 30,
         },
-    )["body"]
-    result = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": "now"})
-    assert result["status"] == 200
-    body = result["body"]
+    )
+    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": "now"})
     assert body["status"] == "active"
     invoice = one_row(instance, "SELECT * FROM invoices WHERE id = ?", body["latest_invoice"])
     assert invoice["status"] == "draft"
@@ -1285,15 +1267,13 @@ def test_conversion_applies_the_rows_coupon_and_tax(instance: seahaven.Instance)
     import json
 
     cus, _, price = setup_catalog(instance)
-    coupon = call(instance, "POST", "/v1/coupons", {"percent_off": 10, "duration": "forever"})[
-        "body"
-    ]["id"]
+    coupon = call(instance, "POST", "/v1/coupons", {"percent_off": 10, "duration": "forever"})["id"]
     txr = call(
         instance,
         "POST",
         "/v1/tax_rates",
         {"display_name": "GST", "percentage": 5, "jurisdiction": "CA", "inclusive": False},
-    )["body"]["id"]
+    )["id"]
     sub = call(
         instance,
         "POST",
@@ -1304,10 +1284,8 @@ def test_conversion_applies_the_rows_coupon_and_tax(instance: seahaven.Instance)
             "discounts": [{"coupon": coupon}],
             "default_tax_rates": [txr],
         },
-    )["body"]
-    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": 1798761600})[
-        "body"
-    ]
+    )
+    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": 1798761600})
     invoice = one_row(instance, "SELECT * FROM invoices WHERE id = ?", body["latest_invoice"])
     assert invoice["subtotal"] == -1800
     assert invoice["total"] == -1890
@@ -1321,7 +1299,7 @@ def test_conversion_applies_the_rows_coupon_and_tax(instance: seahaven.Instance)
     assert tax["amount"] == -90
     assert tax["taxable_amount"] == -1800
     # a forever coupon survives the conversion
-    assert call(instance, "GET", f"/v1/subscriptions/{sub['id']}")["body"]["discounts"] == [
+    assert call(instance, "GET", f"/v1/subscriptions/{sub['id']}")["discounts"] == [
         sub["discounts"][0]
     ]
 
@@ -1335,10 +1313,10 @@ def test_advance_cycles_trial_at_the_boundary(instance: seahaven.Instance) -> No
         "POST",
         "/v1/subscriptions",
         {"customer": cus, "items": [{"price": price}], "trial_end": 1798761600},
-    )["body"]
+    )
     with instance.bulk() as ctx:
         lifecycle.advance_cycle(ctx, sub["id"])
-    fresh = call(instance, "GET", f"/v1/subscriptions/{sub['id']}")["body"]
+    fresh = call(instance, "GET", f"/v1/subscriptions/{sub['id']}")
     assert fresh["status"] == "active"
     item = fresh["items"]["data"][0]
     # the boundary is the trial end: the new period starts there, one
@@ -1359,7 +1337,7 @@ def test_keep_as_draft_pause_leaves_the_renewal_in_draft(instance: seahaven.Inst
     cus, _, price = setup_catalog(instance)
     sub = call(
         instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": price}]}
-    )["body"]
+    )
     call(
         instance,
         "POST",
@@ -1368,7 +1346,7 @@ def test_keep_as_draft_pause_leaves_the_renewal_in_draft(instance: seahaven.Inst
     )
     with instance.bulk() as ctx:
         lifecycle.advance_cycle(ctx, sub["id"])
-    fresh = call(instance, "GET", f"/v1/subscriptions/{sub['id']}")["body"]
+    fresh = call(instance, "GET", f"/v1/subscriptions/{sub['id']}")
     invoice = one_row(instance, "SELECT * FROM invoices WHERE id = ?", fresh["latest_invoice"])
     assert invoice["status"] == "draft"
     assert invoice["auto_advance"] == 0  # the pause owns this invoice now
@@ -1397,8 +1375,8 @@ def test_send_invoice_trial_end_bills_the_new_period(instance: seahaven.Instance
             "collection_method": "send_invoice",
             "days_until_due": 30,
         },
-    )["body"]
-    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": "now"})["body"]
+    )
+    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": "now"})
     invoice = one_row(instance, "SELECT * FROM invoices WHERE id = ?", body["latest_invoice"])
     line = json.loads(invoice["lines"])[0]
     item = body["items"]["data"][0]
@@ -1421,7 +1399,7 @@ def test_resume_cycle_invoice_bills_the_parked_anchor_period(instance: seahaven.
     import json
 
     _, _, price = setup_catalog(instance)
-    bare = call(instance, "POST", "/v1/customers", {"email": "r7@example.test"})["body"]["id"]
+    bare = call(instance, "POST", "/v1/customers", {"email": "r7@example.test"})["id"]
     sub = call(
         instance,
         "POST",
@@ -1432,9 +1410,9 @@ def test_resume_cycle_invoice_bills_the_parked_anchor_period(instance: seahaven.
             "trial_end": 1798761600,
             "trial_settings": {"end_behavior": {"missing_payment_method": "pause"}},
         },
-    )["body"]
+    )
     call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": "now"})
-    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}/resume", {})["body"]
+    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}/resume", {})
     invoice = one_row(instance, "SELECT * FROM invoices WHERE id = ?", body["latest_invoice"])
     assert invoice["status"] == "open"
     line = json.loads(invoice["lines"])[0]
@@ -1451,21 +1429,16 @@ def test_a_deleted_coupons_parked_discount_keeps_billing(instance: seahaven.Inst
     already applied: the parked discount bills on, and never 400s a call
     that never passed `discounts`."""
     cus, _, price = setup_catalog(instance)
-    coupon = call(instance, "POST", "/v1/coupons", {"percent_off": 10, "duration": "forever"})[
-        "body"
-    ]["id"]
+    coupon = call(instance, "POST", "/v1/coupons", {"percent_off": 10, "duration": "forever"})["id"]
     sub = call(
         instance,
         "POST",
         "/v1/subscriptions",
         {"customer": cus, "items": [{"price": price}], "discounts": [{"coupon": coupon}]},
-    )["body"]
+    )
     call(instance, "DELETE", f"/v1/coupons/{coupon}")
     result = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": 1798761600})
-    assert result["status"] == 200  # the conversion nets it, refusal-free
-    invoice = one_row(
-        instance, "SELECT * FROM invoices WHERE id = ?", result["body"]["latest_invoice"]
-    )
+    invoice = one_row(instance, "SELECT * FROM invoices WHERE id = ?", result["latest_invoice"])
     assert invoice["subtotal"] == -1800  # the tombstoned coupon still applied
 
 
@@ -1473,14 +1446,12 @@ def test_cancel_at_clears_with_the_empty_string(instance: seahaven.Instance) -> 
     cus, _, price = setup_catalog(instance)
     sub = call(
         instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": price}]}
-    )["body"]
-    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"cancel_at": 1798761600})[
-        "body"
-    ]
+    )
+    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"cancel_at": 1798761600})
     assert body["cancel_at"] == 1798761600
-    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"cancel_at": ""})["body"]
+    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"cancel_at": ""})
     assert body["cancel_at"] is None
-    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"cancel_at": None})["body"]
+    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"cancel_at": None})
     assert body["cancel_at"] is None
 
 
@@ -1499,7 +1470,7 @@ def test_advance_cycle_emits_from_the_true_pre_stamp_body(instance: seahaven.Ins
         "POST",
         "/v1/subscriptions",
         {"customer": cus, "items": [{"price": price}], "trial_end": 1798761600},
-    )["body"]
+    )
     with instance.bulk() as ctx:
         lifecycle.advance_cycle(ctx, sub["id"])
     last = one_row(
@@ -1521,7 +1492,7 @@ def _unpaid_subscription(instance: seahaven.Instance, price: str) -> str:
     stored state, not a routed outcome."""
     import seahaven_stripe_world.billing.subscription_lifecycle as lifecycle
 
-    cus = call(instance, "POST", "/v1/customers", {"email": "u8@example.test"})["body"]["id"]
+    cus = call(instance, "POST", "/v1/customers", {"email": "u8@example.test"})["id"]
     dec = call(
         instance,
         "POST",
@@ -1530,7 +1501,7 @@ def _unpaid_subscription(instance: seahaven.Instance, price: str) -> str:
             "type": "card",
             "card": {"number": "4000000000000341", "exp_month": 9, "exp_year": 2027, "cvc": "123"},
         },
-    )["body"]["id"]
+    )["id"]
     call(instance, "POST", f"/v1/payment_methods/{dec}/attach", {"customer": cus})
     call(
         instance,
@@ -1540,7 +1511,7 @@ def _unpaid_subscription(instance: seahaven.Instance, price: str) -> str:
     )
     sub = call(
         instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": price}]}
-    )["body"]
+    )
     with instance.bulk() as ctx:
         lifecycle._set_status(ctx, sub["id"], "unpaid")
     return sub["id"]
@@ -1564,7 +1535,7 @@ def test_unpaid_wins_over_pause_behaviors(instance: seahaven.Instance) -> None:
         )
         with instance.bulk() as ctx:
             lifecycle.advance_cycle(ctx, sub_id)
-        fresh = call(instance, "GET", f"/v1/subscriptions/{sub_id}")["body"]
+        fresh = call(instance, "GET", f"/v1/subscriptions/{sub_id}")
         invoice = one_row(instance, "SELECT * FROM invoices WHERE id = ?", fresh["latest_invoice"])
         assert invoice["status"] == "draft", behavior
         assert invoice["attempted"] == 0, behavior
@@ -1584,7 +1555,7 @@ def test_mark_uncollectible_stamp_on_the_standard_cell(instance: seahaven.Instan
     cus, _pm, price = setup_catalog(instance)
     sub = call(
         instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": price}]}
-    )["body"]
+    )
     call(
         instance,
         "POST",
@@ -1593,7 +1564,7 @@ def test_mark_uncollectible_stamp_on_the_standard_cell(instance: seahaven.Instan
     )
     with instance.bulk() as ctx:
         lifecycle.advance_cycle(ctx, sub["id"])
-    fresh = call(instance, "GET", f"/v1/subscriptions/{sub['id']}")["body"]
+    fresh = call(instance, "GET", f"/v1/subscriptions/{sub['id']}")
     invoice = one_row(instance, "SELECT * FROM invoices WHERE id = ?", fresh["latest_invoice"])
     assert invoice["status"] == "uncollectible"
     transitions = json.loads(invoice["status_transitions"])
@@ -1601,7 +1572,7 @@ def test_mark_uncollectible_stamp_on_the_standard_cell(instance: seahaven.Instan
 
     sub2 = call(
         instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": price}]}
-    )["body"]
+    )
     call(
         instance,
         "POST",
@@ -1610,7 +1581,7 @@ def test_mark_uncollectible_stamp_on_the_standard_cell(instance: seahaven.Instan
     )
     with instance.bulk() as ctx:
         lifecycle.advance_cycle(ctx, sub2["id"])
-    fresh = call(instance, "GET", f"/v1/subscriptions/{sub2['id']}")["body"]
+    fresh = call(instance, "GET", f"/v1/subscriptions/{sub2['id']}")
     invoice = one_row(instance, "SELECT * FROM invoices WHERE id = ?", fresh["latest_invoice"])
     assert invoice["status"] == "void"
     assert json.loads(invoice["status_transitions"])["voided_at"] is not None
@@ -1622,20 +1593,16 @@ def test_the_itemless_subscription_answers_graceful_shapes(instance: seahaven.In
     cus, _, price = setup_catalog(instance)
     sub = call(
         instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": price}]}
-    )["body"]
+    )
     only = sub["items"]["data"][0]["id"]
-    assert call(instance, "DELETE", f"/v1/subscription_items/{only}")["status"] == 200
-    assert call(instance, "GET", f"/v1/subscriptions/{sub['id']}")["body"]["items"]["data"] == []
+    call(instance, "DELETE", f"/v1/subscription_items/{only}")
+    assert call(instance, "GET", f"/v1/subscriptions/{sub['id']}")["items"]["data"] == []
     # the flag stands, the scheduled instant is null
-    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"cancel_at_period_end": True})[
-        "body"
-    ]
+    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"cancel_at_period_end": True})
     assert body["cancel_at_period_end"] is True
     assert body["cancel_at"] is None
     # a new item spans its own [now, +interval)
-    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"items": [{"price": price}]})[
-        "body"
-    ]
+    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"items": [{"price": price}]})
     item = body["items"]["data"][0]
     assert item["current_period_start"] == body["created"]
     assert item["current_period_end"] - item["current_period_start"] == 30 * 86_400
@@ -1648,11 +1615,11 @@ def test_an_itemless_trial_end_bills_nothing(instance: seahaven.Instance) -> Non
         "POST",
         "/v1/subscriptions",
         {"customer": cus, "items": [{"price": price}], "trial_end": 1798761600},
-    )["body"]
+    )
     invoices_before = one_row(instance, "SELECT count(*) AS n FROM invoices")["n"]
     only = sub["items"]["data"][0]["id"]
     call(instance, "DELETE", f"/v1/subscription_items/{only}")
-    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": "now"})["body"]
+    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": "now"})
     assert body["status"] == "active"
     assert one_row(instance, "SELECT count(*) AS n FROM invoices")["n"] == invoices_before
 
@@ -1665,7 +1632,7 @@ def test_the_itemless_resume_chain_confirms_without_crashing(instance: seahaven.
     -> resume (no invoice minted) -> attach + confirm -> the parked update
     applies against the non-open latest, with the resumed events."""
     _, _, price = setup_catalog(instance)
-    bare = call(instance, "POST", "/v1/customers", {"email": "r9@example.test"})["body"]["id"]
+    bare = call(instance, "POST", "/v1/customers", {"email": "r9@example.test"})["id"]
     sub = call(
         instance,
         "POST",
@@ -1676,12 +1643,12 @@ def test_the_itemless_resume_chain_confirms_without_crashing(instance: seahaven.
             "trial_end": 1798761600,
             "trial_settings": {"end_behavior": {"missing_payment_method": "pause"}},
         },
-    )["body"]
+    )
     call(instance, "DELETE", f"/v1/subscription_items/{sub['items']['data'][0]['id']}")
-    paused = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": "now"})["body"]
+    paused = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": "now"})
     assert paused["status"] == "paused"
     invoices_before = one_row(instance, "SELECT count(*) AS n FROM invoices")["n"]
-    resumed = call(instance, "POST", f"/v1/subscriptions/{sub['id']}/resume", {})["body"]
+    resumed = call(instance, "POST", f"/v1/subscriptions/{sub['id']}/resume", {})
     assert resumed["status"] == "paused"
     assert one_row(instance, "SELECT count(*) AS n FROM invoices")["n"] == invoices_before
     # the latest is still the paid $0 trial invoice — the confirm must not
@@ -1690,7 +1657,7 @@ def test_the_itemless_resume_chain_confirms_without_crashing(instance: seahaven.
     assert latest["status"] == "paid"
     pm = call(
         instance, "POST", "/v1/payment_methods", {"type": "card", "card": {"token": "tok_visa"}}
-    )["body"]["id"]
+    )["id"]
     call(instance, "POST", f"/v1/payment_methods/{pm}/attach", {"customer": bare})
     confirmed = call(
         instance,
@@ -1698,8 +1665,8 @@ def test_the_itemless_resume_chain_confirms_without_crashing(instance: seahaven.
         f"/v1/setup_intents/{resumed['pending_setup_intent']}/confirm",
         {"payment_method": pm},
     )
-    assert confirmed["status"] == 200
-    fresh = call(instance, "GET", f"/v1/subscriptions/{sub['id']}")["body"]
+    assert confirmed["status"] == "succeeded"
+    fresh = call(instance, "GET", f"/v1/subscriptions/{sub['id']}")
     assert fresh["status"] == "active"
     assert fresh["pending_setup_intent"] is None
     assert fresh["pending_update"] is None
@@ -1711,12 +1678,10 @@ def test_the_itemless_conversion_mints_no_invoice(instance: seahaven.Instance) -
     cus, _, price = setup_catalog(instance)
     sub = call(
         instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": price}]}
-    )["body"]
+    )
     call(instance, "DELETE", f"/v1/subscription_items/{sub['items']['data'][0]['id']}")
     invoices_before = one_row(instance, "SELECT count(*) AS n FROM invoices")["n"]
-    result = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": 1798761600})
-    assert result["status"] == 200
-    body = result["body"]
+    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": 1798761600})
     assert body["status"] == "trialing"
     assert one_row(instance, "SELECT count(*) AS n FROM invoices")["n"] == invoices_before
 
@@ -1730,7 +1695,7 @@ def test_advance_cycle_refuses_the_itemless_state(instance: seahaven.Instance) -
     cus, _, price = setup_catalog(instance)
     sub = call(
         instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": price}]}
-    )["body"]
+    )
     call(instance, "DELETE", f"/v1/subscription_items/{sub['items']['data'][0]['id']}")
     with instance.bulk() as ctx, pytest.raises(seahaven.WorldBug):
         lifecycle.advance_cycle(ctx, sub["id"])

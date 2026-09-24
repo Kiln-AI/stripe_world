@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 import seahaven
 
-from conftest import BLANK_NOW
+from conftest import BLANK_NOW, api_write
 from seahaven_stripe_world.billing import invoicing
 
 pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
@@ -133,14 +133,9 @@ def test_add_interval_is_calendar_true() -> None:
 
 
 def test_the_number_comes_from_the_customer_sequence(instance: seahaven.Instance) -> None:
-    result = instance.call(
-        "stripe_api_write",
-        method="POST",
-        path="/v1/customers",
-        params={"email": "numbers@example.test"},
-    )
-    prefix = result["body"]["invoice_prefix"]
-    row = instance.inspect().one("SELECT * FROM customers WHERE id = ?", result["body"]["id"])
+    result = api_write(instance, "POST", "/v1/customers", {"email": "numbers@example.test"})
+    prefix = result["invoice_prefix"]
+    row = instance.inspect().one("SELECT * FROM customers WHERE id = ?", result["id"])
     assert row is not None
     with instance.bulk() as ctx:
         first = invoicing.finalize_invoice(ctx, _draft_invoice(ctx, row, total=1000))
@@ -186,13 +181,10 @@ def _draft_invoice(ctx: seahaven.Ctx, customer: dict[str, Any], *, total: int) -
 
 
 def test_the_customer_balance_settles_into_the_cbt_row(instance: seahaven.Instance) -> None:
-    result = instance.call(
-        "stripe_api_write",
-        method="POST",
-        path="/v1/customers",
-        params={"email": "credit@example.test", "balance": -1000},
+    result = api_write(
+        instance, "POST", "/v1/customers", {"email": "credit@example.test", "balance": -1000}
     )
-    cus = result["body"]
+    cus = result
     row = instance.inspect().one("SELECT * FROM customers WHERE id = ?", cus["id"])
     assert row is not None
     with instance.bulk() as ctx:

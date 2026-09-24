@@ -199,8 +199,10 @@ FIELDS = FieldMap(
     ),
     booleans=frozenset({"delinquent"}),
     constants={
-        "livemode": False,
+        "business_name": None,
         "default_source": None,
+        "individual_name": None,
+        "invoice_credit_balance": None,
         "test_clock": None,
         # Always emitted `null` on a fresh customer at the pinned version
         # (recorded Phase 5, scenario 02); no column exists until something

@@ -52,11 +52,12 @@ def test_scenario_scoping_does_not_leak() -> None:
 
 
 def test_predicate_mode_rejects_where_the_predicate_fails() -> None:
-    """`**.livemode` permits only both-false: a livemode that is ever true on
-    either side is a real divergence, not a permitted difference."""
+    """`**.livemode` permits any boolean pair: recorded is sandbox (false),
+    replayed is the instance's mode (true by default). Non-booleans fail."""
     assert allowed("body.livemode", False, False, "any_scenario") is not None
-    assert allowed("body.livemode", False, True, "any_scenario") is None
-    assert allowed("body.data[2].livemode", False, False, "any_scenario") is not None
+    assert allowed("body.livemode", False, True, "any_scenario") is not None
+    assert allowed("body.data[2].livemode", False, True, "any_scenario") is not None
+    assert allowed("body.livemode", False, "false", "any_scenario") is None
 
 
 def test_an_allow_listed_path_covers_key_presence() -> None:

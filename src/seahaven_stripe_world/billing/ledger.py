@@ -40,6 +40,7 @@ import seahaven
 from seahaven_stripe_world import _ids, _json, _seq, _time
 from seahaven_stripe_world.billing._money import FeeSchedule
 from seahaven_stripe_world.resources import _lookup, events
+from seahaven_stripe_world.serialize.fields import instance_livemode
 from seahaven_stripe_world.spec import spec_document
 from seahaven_stripe_world.stripe_errors import invalid_request
 
@@ -174,7 +175,7 @@ def record(
         if available_on_iso is not None
         else available_on(now_iso, type_, ledger_spec(ctx))
     )
-    id_ = _ids.stripe_id(ctx, "txn_")
+    id_ = _ids.stripe_id(ctx, "txn_", timestamp=now_iso, version_digit="3")
     ctx.db.execute(
         "INSERT INTO balance_transactions (id, x_seq, created, amount, available_on,"
         " balance_type, currency, description, fee, fee_details, net, reporting_category,"
@@ -208,7 +209,7 @@ def read_balance(ctx: seahaven.Ctx) -> dict[str, Any]:
     prefunding block) are omitted while empty, which the spec's required set
     allows and the recorded body's zeros never exercise on this side."""
     now_iso = ctx.clock.iso()
-    out: dict[str, Any] = {"object": "balance", "livemode": False}
+    out: dict[str, Any] = {"object": "balance", "livemode": instance_livemode(ctx)}
     for field, comparator in (("available", "<="), ("pending", ">")):
         rows = ctx.db.rows(
             "SELECT currency, SUM(net) AS total FROM balance_transactions"
@@ -340,7 +341,7 @@ def create_payout(
     arrival = _time.from_unix(
         (_time.to_unix(now_iso) // 86_400) * 86_400 + spec.settlement_business_days * 86_400
     )
-    id_ = _ids.stripe_id(ctx, "po_")
+    id_ = _ids.stripe_id(ctx, "po_", timestamp=now_iso)
     ctx.db.execute(
         "INSERT INTO payouts (id, x_seq, created, amount, arrival_date, automatic,"
         " currency, description, destination, metadata, method, reconciliation_status,"
@@ -354,7 +355,7 @@ def create_payout(
         arrival,
         currency,
         description,
-        destination if destination is not None else _ids.stripe_id(ctx, "ba_"),
+        destination if destination is not None else _ids.stripe_id(ctx, "ba_", timestamp=now_iso),
         metadata_text,
         method,
         statement_descriptor,
@@ -459,7 +460,7 @@ def reverse_payout(ctx: seahaven.Ctx, payout_id: str) -> dict[str, Any]:
     row = _require_payout(ctx, payout_id)
     _refuse_unless(row, ("paid",), "reversed")
     now_iso = ctx.clock.iso()
-    id_ = _ids.stripe_id(ctx, "po_")
+    id_ = _ids.stripe_id(ctx, "po_", timestamp=now_iso)
     ctx.db.execute(
         "INSERT INTO payouts (id, x_seq, created, amount, arrival_date, automatic,"
         " currency, description, destination, metadata, method, original_payout,"

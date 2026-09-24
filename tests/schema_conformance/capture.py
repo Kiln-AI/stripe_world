@@ -20,11 +20,14 @@ from schema_conformance.validate import violations_in_body
 
 __all__ = ["CapturedCall", "begin", "check"]
 
-#: The tools whose results are HTTP responses — the two registered faces
-#: plus the escape hatch. Deliberately the same set `stripe_envelope` applies
-#: to; it is a private constant there, so `test_http_tool_names_match_the_
-#: envelope_middleware` pins the two together and fails if either grows.
+#: The tools whose results are HTTP responses: the two MCP faces
+#: (which return bare body on success) and the raw-HTTP escape hatch
+#: (which wraps in ``{status, body, headers}``).
 HTTP_TOOL_NAMES = frozenset(("stripe_api_read", "stripe_api_write", "call_stripe"))
+
+#: The raw-HTTP face keeps ``{status, body, headers}``; the MCP faces
+#: return the body directly on success.
+_RAW_TOOLS = frozenset(("call_stripe",))
 
 
 @dataclass(frozen=True)
@@ -45,13 +48,15 @@ def begin(monkeypatch: pytest.MonkeyPatch) -> list[CapturedCall]:
 
     def call(self: seahaven.Instance, tool: Any, /, *args: Any, **arguments: Any) -> Any:
         result = original(self, tool, *args, **arguments)
-        if (
-            isinstance(tool, str)
-            and tool in HTTP_TOOL_NAMES
-            and isinstance(result, dict)
-            and "status" in result
-            and "body" in result
-        ):
+        if isinstance(tool, str) and tool in HTTP_TOOL_NAMES and isinstance(result, dict):
+            # Two shapes: raw-HTTP ``{status, body, headers}`` from call_stripe,
+            # and bare body from the MCP tools.
+            if tool in _RAW_TOOLS and "status" in result and "body" in result:
+                body = result["body"]
+            elif tool not in _RAW_TOOLS:
+                body = result
+            else:
+                return result
             method = arguments.get("method")
             path = arguments.get("path")
             label = (
@@ -62,7 +67,7 @@ def begin(monkeypatch: pytest.MonkeyPatch) -> list[CapturedCall]:
                 else ""
             )
             captured.append(
-                CapturedCall(ordinal=len(captured) + 1, tool=tool, label=label, body=result["body"])
+                CapturedCall(ordinal=len(captured) + 1, tool=tool, label=label, body=body)
             )
         return result
 

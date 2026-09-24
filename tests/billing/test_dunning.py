@@ -6,8 +6,9 @@ end-of-schedule outcomes — plus the frozen-clock facts pinned as tests
 import pytest
 import seahaven
 
-from conftest import BLANK_NOW
+from conftest import BLANK_NOW, api_read, api_write
 from seahaven_stripe_world.billing import dunning
+from seahaven_stripe_world.errors import StripeToolError
 from seahaven_stripe_world.spec.enums import DECLINE_CODES
 
 pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
@@ -113,7 +114,7 @@ def test_the_policy_is_not_a_subscription_field(instance: seahaven.Instance) -> 
 
 
 def _armed(instance: seahaven.Instance) -> tuple[str, str]:
-    cus = call(instance, "POST", "/v1/customers", {"email": "dun@example.test"})["body"]["id"]
+    cus = call(instance, "POST", "/v1/customers", {"email": "dun@example.test"})["id"]
     pm = call(
         instance,
         "POST",
@@ -122,7 +123,7 @@ def _armed(instance: seahaven.Instance) -> tuple[str, str]:
             "type": "card",
             "card": {"number": "4000000000000341", "exp_month": 1, "exp_year": 2031},
         },
-    )["body"]["id"]
+    )["id"]
     call(instance, "POST", f"/v1/payment_methods/{pm}/attach", {"customer": cus})
     call(
         instance,
@@ -135,8 +136,8 @@ def _armed(instance: seahaven.Instance) -> tuple[str, str]:
 
 def call(instance: seahaven.Instance, method: str, path: str, params: dict | None = None):
     if method == "GET":
-        return instance.call("stripe_api_read", path=path, params=params)
-    return instance.call("stripe_api_write", method=method, path=path, params=params)
+        return api_read(instance, path, params)
+    return api_write(instance, method, path, params)
 
 
 def one_row(instance: seahaven.Instance, sql: str, *params):
@@ -148,7 +149,7 @@ def _open_declining_invoice(instance: seahaven.Instance) -> str:
     """An OPEN invoice whose card declines, through the routed surface: an
     always_invoice proration switch against the decline card."""
     cus, _pm = _armed(instance)
-    prod = call(instance, "POST", "/v1/products", {"name": "dun"})["body"]["id"]
+    prod = call(instance, "POST", "/v1/products", {"name": "dun"})["id"]
     p10 = call(
         instance,
         "POST",
@@ -159,13 +160,13 @@ def _open_declining_invoice(instance: seahaven.Instance) -> str:
             "currency": "usd",
             "recurring": {"interval": "month"},
         },
-    )["body"]["id"]
+    )["id"]
     sub = call(
         instance,
         "POST",
         "/v1/subscriptions",
         {"customer": cus, "items": [{"price": p10}], "payment_behavior": "allow_incomplete"},
-    )["body"]
+    )
     assert sub["status"] == "incomplete"
     return sub["latest_invoice"]
 
@@ -187,7 +188,8 @@ def test_manual_pay_after_the_first_never_increments(instance: seahaven.Instance
         invoice_id,
     )
     for _ in range(3):
-        call(instance, "POST", f"/v1/invoices/{invoice_id}/pay", {})
+        with pytest.raises(StripeToolError):
+            call(instance, "POST", f"/v1/invoices/{invoice_id}/pay", {})
     after = one_row(
         instance,
         "SELECT attempt_count, next_payment_attempt FROM invoices WHERE id = ?",
@@ -276,7 +278,7 @@ def test_end_behavior_cancel_leaves_the_invoice_open(instance: seahaven.Instance
 def test_end_behavior_mark_unpaid(instance: seahaven.Instance) -> None:
     sub, invoice_id = _past_due_invoice(instance)
     with instance.bulk() as ctx:
-        ctx.state["account"] = {"dunning": {"end_behavior": "mark_unpaid"}}
+        ctx.state["account"]["dunning"] = {"end_behavior": "mark_unpaid"}
         for _ in range(7):
             dunning.record_failed_attempt(ctx, invoice_id, decline_code="insufficient_funds")
     assert one_row(instance, "SELECT status FROM subscriptions WHERE id = ?", sub)["status"] == (
@@ -287,7 +289,7 @@ def test_end_behavior_mark_unpaid(instance: seahaven.Instance) -> None:
 def test_end_behavior_leave_past_due(instance: seahaven.Instance) -> None:
     sub, invoice_id = _past_due_invoice(instance)
     with instance.bulk() as ctx:
-        ctx.state["account"] = {"dunning": {"end_behavior": "leave_past_due"}}
+        ctx.state["account"]["dunning"] = {"end_behavior": "leave_past_due"}
         for _ in range(7):
             dunning.record_failed_attempt(ctx, invoice_id, decline_code="insufficient_funds")
     assert one_row(instance, "SELECT status FROM subscriptions WHERE id = ?", sub)["status"] == (
@@ -302,7 +304,7 @@ def test_leave_past_due_fires_no_event(instance: seahaven.Instance) -> None:
     would be noise."""
     _sub, invoice_id = _past_due_invoice(instance)
     with instance.bulk() as ctx:
-        ctx.state["account"] = {"dunning": {"end_behavior": "leave_past_due"}}
+        ctx.state["account"]["dunning"] = {"end_behavior": "leave_past_due"}
         for _ in range(7):
             dunning.record_failed_attempt(ctx, invoice_id, decline_code="insufficient_funds")
     events = instance.inspect().rows(

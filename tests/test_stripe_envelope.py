@@ -1,17 +1,25 @@
-"""The Stripe envelope boundary: the one place a Stripe error stops being an
-exception, and the shape it answers with."""
+"""The Stripe envelope boundary: two rendering paths verified.
+
+The raw-HTTP face (``call_stripe``) keeps ``{status, body, headers}`` -- the
+full HTTP contract used by conformance cassettes. The MCP faces
+(``stripe_api_read``, ``stripe_api_write``) return bare body on success and
+raise ``StripeToolError`` on failure -- the shape the real Stripe MCP server
+presents to agents.
+"""
 
 import pytest
 import seahaven
 
-from conftest import BLANK_NOW, dispatch_tool
+from conftest import BLANK_NOW, api_read, api_write, dispatch_tool
+from seahaven_stripe_world.errors import StripeToolError
+from seahaven_stripe_world.startup import ACCOUNT_ID
 
 NOW = BLANK_NOW
 
 
 def test_a_raised_error_is_rendered_and_rolls_the_call_back(probe, monkeypatch) -> None:
     """The subtle one, through a real chain: a handler that writes then raises
-    leaves **no** change-log records, and the agent reads the envelope."""
+    leaves **no** change-log records, and the raw face shows the envelope."""
     from seahaven_stripe_world.dispatch import routes as routes_module
     from seahaven_stripe_world.dispatch.params import ParamSpec
     from seahaven_stripe_world.dispatch.response import Request
@@ -94,33 +102,61 @@ def test_the_discovery_tools_pass_through_untouched() -> None:
     import seahaven_stripe_world
 
     with seahaven_stripe_world.world.instance(None, now=NOW) as instance:
-        results = instance.call("stripe_api_search", query="customer")
-        assert isinstance(results, list) and results
-        assert set(results[0]) == {"method", "path", "summary"}
+        results = instance.call(
+            "stripe_api_search",
+            intent="list",
+            resource="customer",
+            stripe_context=ACCOUNT_ID,
+            livemode=True,
+        )
+        # Phase 8: search returns {openapi_spec_version, data} wrapper
+        assert isinstance(results, dict)
+        assert "openapi_spec_version" in results
+        assert isinstance(results["data"], list)
+        assert results["data"]
+        assert "id" in results["data"][0]
 
-        documented = instance.call("stripe_api_details", method="GET", path="/v1/customers")
-        assert set(documented) == {
+        documented = instance.call(
+            "stripe_api_details",
+            stripe_api_operation_id="GetCustomers",
+            stripe_context=ACCOUNT_ID,
+            livemode=True,
+        )
+        # Phase 8: details returns twelve-key document with 'id' not 'operation_id'
+        expected_keys = {
+            "id",
             "method",
             "path",
-            "operation_id",
             "summary",
             "description",
+            "tags",
+            "keywords",
             "parameters",
+            "required_permissions",
+            "openapi_spec_version",
         }
+        assert expected_keys <= set(documented)
 
 
-def test_the_request_id_is_minted_per_call_and_carries_the_key() -> None:
-    import seahaven_stripe_world
-
-    with seahaven_stripe_world.world.instance(None, now=NOW) as instance:
+def test_the_request_id_is_minted_per_call_and_carries_the_key(probe, monkeypatch) -> None:
+    """Request ids are minted per call.  The idempotency key round-trip is
+    tested through ``call_stripe`` — the MCP surface no longer carries the
+    ``idempotency_key`` parameter."""
+    world = probe(dispatch_tool())
+    with world.instance(None, now=NOW) as instance:
         instance.call(
-            "stripe_api_write",
+            "call_stripe",
             method="POST",
             path="/v1/customers",
             params={},
             idempotency_key="ik_123",
         )
-        instance.call("stripe_api_write", method="POST", path="/v1/customers", params={})
+        instance.call(
+            "call_stripe",
+            method="POST",
+            path="/v1/customers",
+            params={},
+        )
         rows = instance.inspect().rows(
             "SELECT request_id, request_idempotency_key FROM events ORDER BY x_seq"
         )
@@ -143,3 +179,78 @@ def test_a_bug_in_the_boundary_is_the_error_handlers_internal(probe) -> None:
     world = probe(a_tool(exploding, "exploding"))
     with world.instance(None, now=NOW) as instance, pytest.raises(Internal):
         instance.call("exploding")
+
+
+def test_mcp_success_returns_bare_body() -> None:
+    """The MCP tools return the object directly -- no ``{status, body}`` wrapper."""
+    import seahaven_stripe_world
+
+    with seahaven_stripe_world.world.instance(None, now=NOW) as instance:
+        result = api_write(instance, "POST", "/v1/customers", {})
+        assert isinstance(result, dict)
+        assert result["object"] == "customer"
+        # No wrapper keys.
+        assert "status" not in result
+        assert "body" not in result
+        assert "headers" not in result
+
+
+def test_mcp_error_raises_stripe_tool_error() -> None:
+    """A non-2xx from an MCP tool raises ``StripeToolError`` with the message
+    text the real MCP server would show: ``Stripe API error: {message}``."""
+    import seahaven_stripe_world
+
+    with seahaven_stripe_world.world.instance(None, now=NOW) as instance:
+        with pytest.raises(StripeToolError) as exc_info:
+            api_read(instance, "/v1/customers/cus_nope")
+        assert exc_info.value.status == 404
+        assert "Stripe API error:" in exc_info.value.message
+        assert "No such customer" in exc_info.value.message
+
+
+def test_a_402_decline_raises_but_keeps_the_rows() -> None:
+    """The transaction-semantics property: a 402 decline returned by a handler
+    commits its writes (the failed charge, the event), and the middleware then
+    raises so the agent sees a tool error, not a dict."""
+    import seahaven_stripe_world
+
+    with seahaven_stripe_world.world.instance(None, now=NOW) as instance:
+        cus = api_write(
+            instance,
+            "POST",
+            "/v1/customers",
+            {"email": "dec@example.test"},
+        )["id"]
+        pm = api_write(
+            instance,
+            "POST",
+            "/v1/payment_methods",
+            {
+                "type": "card",
+                "card": {"number": "4000000000000341", "exp_month": 9, "exp_year": 2027},
+            },
+        )["id"]
+        api_write(
+            instance,
+            "POST",
+            f"/v1/payment_methods/{pm}/attach",
+            {"customer": cus},
+        )
+        with pytest.raises(StripeToolError) as exc_info:
+            api_write(
+                instance,
+                "POST",
+                "/v1/payment_intents",
+                {
+                    "amount": 1000,
+                    "currency": "usd",
+                    "customer": cus,
+                    "payment_method": pm,
+                    "confirm": True,
+                },
+            )
+        assert exc_info.value.status == 402
+        # The failed charge row survived the raise.
+        assert instance.inspect().one(
+            "SELECT count(*) AS n FROM charges WHERE status = 'failed'"
+        ) == {"n": 1}

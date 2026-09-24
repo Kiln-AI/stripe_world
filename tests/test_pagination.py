@@ -3,26 +3,24 @@
 import pytest
 import seahaven
 
-from conftest import BLANK_NOW
+from conftest import BLANK_NOW, api_read, api_write
+from seahaven_stripe_world.errors import StripeToolError
 
 pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
 
 
 def create(instance: seahaven.Instance, name: str) -> str:
-    result = instance.call(
-        "stripe_api_write", method="POST", path="/v1/customers", params={"name": name}
-    )
-    assert result["status"] == 200
-    return result["body"]["id"]
+    result = api_write(instance, "POST", "/v1/customers", {"name": name})
+    return result["id"]
 
 
 def list_customers(instance: seahaven.Instance, **params: object) -> dict:
-    return instance.call("stripe_api_read", path="/v1/customers", params=params)
+    return api_read(instance, "/v1/customers", params)
 
 
 def test_envelope_has_exactly_four_keys(instance: seahaven.Instance) -> None:
     create(instance, "one")
-    body = list_customers(instance)["body"]
+    body = list_customers(instance)
     assert set(body) == {"object", "data", "has_more", "url"}
     assert body["object"] == "list"
     assert body["url"] == "/v1/customers"
@@ -38,7 +36,7 @@ def test_walk_forward_covers_every_row_exactly_once(instance: seahaven.Instance)
         params: dict[str, object] = {"limit": 3}
         if cursor is not None:
             params["starting_after"] = cursor
-        page = list_customers(instance, **params)["body"]
+        page = list_customers(instance, **params)
         seen.extend(item["id"] for item in page["data"])
         if not page["has_more"]:
             break
@@ -50,7 +48,7 @@ def test_ending_before_returns_the_previous_page_newest_first(instance: seahaven
     ids = [create(instance, f"c{i:02}") for i in range(5)]
     newest_first = list(reversed(ids))
 
-    page = list_customers(instance, ending_before=newest_first[2], limit=2)["body"]
+    page = list_customers(instance, ending_before=newest_first[2], limit=2)
     # The two rows *newer* than the cursor — the page above it — newest first.
     assert [item["id"] for item in page["data"]] == newest_first[0:2]
     # Nothing newer than the newest: the direction of travel is exhausted.
@@ -174,15 +172,15 @@ def test_page_embedded_resolves_both_cursors_before_refusing_the_pair() -> None:
 def test_has_more_on_an_exactly_full_last_page(instance: seahaven.Instance) -> None:
     for i in range(4):
         create(instance, f"c{i:02}")
-    full = list_customers(instance, limit=4)["body"]
+    full = list_customers(instance, limit=4)
     assert full["has_more"] is False  # exactly full, and the last: the probe row earns its keep
-    partial = list_customers(instance, limit=3)["body"]
+    partial = list_customers(instance, limit=3)
     assert partial["has_more"] is True
 
 
 def test_has_more_on_an_empty_page_past_the_end(instance: seahaven.Instance) -> None:
     newest = create(instance, "only")
-    past_end = list_customers(instance, starting_after=newest)["body"]
+    past_end = list_customers(instance, starting_after=newest)
     assert past_end == {
         "object": "list",
         "data": [],
@@ -195,18 +193,18 @@ def test_starting_after_is_exclusive(instance: seahaven.Instance) -> None:
     """The cursor walks toward older rows, and the named object never appears."""
     older = create(instance, "older")
     newest = create(instance, "newest")
-    page = list_customers(instance, starting_after=newest)["body"]
+    page = list_customers(instance, starting_after=newest)
     assert [item["id"] for item in page["data"]] == [older]
-    page = list_customers(instance, starting_after=older)["body"]
+    page = list_customers(instance, starting_after=older)
     assert page["data"] == []
 
 
 def test_unknown_cursor_is_400_resource_missing(instance: seahaven.Instance) -> None:
     """A query-side `resource_missing` is a 400, unlike the 404 a path id
     earns — recorded Phase 5, scenario 09."""
-    result = list_customers(instance, starting_after="cus_nope")
-    assert result["status"] == 400
-    error = result["body"]["error"]
+    with pytest.raises(StripeToolError) as exc_info:
+        list_customers(instance, starting_after="cus_nope")
+    error = exc_info.value.stripe_body["error"]
     assert error["code"] == "resource_missing"
     assert error["param"] == "starting_after"
     assert error["message"] == "No such customer: 'cus_nope'"
@@ -219,13 +217,13 @@ def test_deleted_cursor_resolves_and_excludes_the_object(instance: seahaven.Inst
     oldest = create(instance, "oldest")
     middle = create(instance, "middle")
     create(instance, "newest")
-    instance.call("stripe_api_write", method="DELETE", path=f"/v1/customers/{middle}")
+    api_write(instance, "DELETE", f"/v1/customers/{middle}")
 
     # The deleted row's coordinate still cuts the page: below it sits the
     # oldest row, and the deleted row itself never appears.
-    page = list_customers(instance, starting_after=middle)["body"]
+    page = list_customers(instance, starting_after=middle)
     assert [item["id"] for item in page["data"]] == [oldest]
-    every = list_customers(instance, limit=10)["body"]
+    every = list_customers(instance, limit=10)
     assert middle not in [item["id"] for item in every["data"]]
 
 
@@ -236,8 +234,8 @@ def test_listing_writes_nothing(instance: seahaven.Instance) -> None:
     marker = len(instance.change_log())
     list_customers(instance, limit=1)
     assert len(instance.change_log()) == marker
-    result = list_customers(instance, starting_after="cus_missing")
-    assert result["status"] == 400
+    with pytest.raises(StripeToolError):
+        list_customers(instance, starting_after="cus_missing")
     assert len(instance.change_log()) == marker
 
 
@@ -248,7 +246,7 @@ def test_default_limit_is_ten(instance: seahaven.Instance) -> None:
     """Absent `limit` defaults to 10."""
     for i in range(12):
         create(instance, f"c{i:02}")
-    page = list_customers(instance)["body"]
+    page = list_customers(instance)
     assert len(page["data"]) == 10
     assert page["has_more"] is True
 
@@ -261,16 +259,14 @@ def test_limit_bounds_are_clamped(instance: seahaven.Instance) -> None:
         create(instance, f"c{i}")
     # limit=0 is clamped to 1
     result = list_customers(instance, limit=0)
-    assert result["status"] == 200
-    assert len(result["body"]["data"]) == 1
+    assert len(result["data"]) == 1
     # limit=101 is clamped to 100
     result = list_customers(instance, limit=101)
-    assert result["status"] == 200
-    assert len(result["body"]["data"]) == 3  # only 3 exist, all returned
+    assert len(result["data"]) == 3  # only 3 exist, all returned
     # Explicit valid bounds
     for good in (1, 100):
         result = list_customers(instance, limit=good)
-        assert result["status"] == 200
+        assert isinstance(result["data"], list)
 
 
 def test_walk_backward_covers_every_row_exactly_once(instance: seahaven.Instance) -> None:
@@ -283,13 +279,13 @@ def test_walk_backward_covers_every_row_exactly_once(instance: seahaven.Instance
     # First, get the last page's last item to walk backward from
     seen: list[str] = []
     # Start from the very oldest by getting the last item through forward walk
-    all_items = list_customers(instance, limit=100)["body"]["data"]
+    all_items = list_customers(instance, limit=100)["data"]
     oldest = all_items[-1]["id"]
 
     # Walk backward from oldest, collecting all items above it
     cursor = oldest
     for _ in range(10):
-        page = list_customers(instance, ending_before=cursor, limit=3)["body"]
+        page = list_customers(instance, ending_before=cursor, limit=3)
         if not page["data"]:
             break
         seen.extend(item["id"] for item in page["data"])
@@ -304,49 +300,47 @@ def test_both_cursors_is_parameters_exclusive(instance: seahaven.Instance) -> No
     """Sending both `starting_after` and `ending_before` is a 400."""
     a = create(instance, "a")
     b = create(instance, "b")
-    result = list_customers(instance, starting_after=a, ending_before=b)
-    assert result["status"] == 400
-    assert "starting_after" in result["body"]["error"]["message"]
-    assert "ending_before" in result["body"]["error"]["message"]
+    with pytest.raises(StripeToolError) as exc_info:
+        list_customers(instance, starting_after=a, ending_before=b)
+    assert "starting_after" in exc_info.value.message
+    assert "ending_before" in exc_info.value.message
 
 
 def test_cursor_resolution_ignores_list_filters(instance: seahaven.Instance) -> None:
     """A cursor on a customer whose email does not match the filter still
     resolves: a cursor is a coordinate, not a membership test (§3.2.3)."""
     a = create(instance, "alice")
-    instance.call(
-        "stripe_api_write",
-        method="POST",
-        path=f"/v1/customers/{a}",
-        params={"email": "alice@example.test"},
+    api_write(
+        instance,
+        "POST",
+        f"/v1/customers/{a}",
+        {"email": "alice@example.test"},
     )
     b = create(instance, "bob")
-    instance.call(
-        "stripe_api_write",
-        method="POST",
-        path=f"/v1/customers/{b}",
-        params={"email": "bob@example.test"},
+    api_write(
+        instance,
+        "POST",
+        f"/v1/customers/{b}",
+        {"email": "bob@example.test"},
     )
     # Cursor on bob, filter for alice: should resolve bob as coordinate
     # and return page of alice (if she is older than bob).
-    result = instance.call(
-        "stripe_api_read",
-        path="/v1/customers",
-        params={"starting_after": b, "email": "alice@example.test"},
+    result = api_read(
+        instance,
+        "/v1/customers",
+        {"starting_after": b, "email": "alice@example.test"},
     )
-    assert result["status"] == 200
     # Alice should appear since she was created before bob
-    found = [item["id"] for item in result["body"]["data"]]
+    found = [item["id"] for item in result["data"]]
     assert a in found
 
 
 def test_url_is_the_concrete_path_including_nested(instance: seahaven.Instance) -> None:
     """The list envelope's `url` is the concrete path, including nested lists."""
     create(instance, "root")
-    page = list_customers(instance)["body"]
+    page = list_customers(instance)
     assert page["url"] == "/v1/customers"
     # A nested list's url carries the parent id
     cus = page["data"][0]["id"]
-    result = instance.call("stripe_api_read", path=f"/v1/customers/{cus}/balance_transactions")
-    assert result["status"] == 200
-    assert result["body"]["url"] == f"/v1/customers/{cus}/balance_transactions"
+    result = api_read(instance, f"/v1/customers/{cus}/balance_transactions")
+    assert result["url"] == f"/v1/customers/{cus}/balance_transactions"

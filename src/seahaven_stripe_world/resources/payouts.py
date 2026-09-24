@@ -126,14 +126,12 @@ FIELDS = FieldMap(
     json_columns=frozenset({"metadata"}),
     booleans=frozenset({"automatic"}),
     constants={
-        "livemode": False,
         # Connect-shaped and out of scope (scope-boundary-edges.md): present
         # as the nulls the spec's own nullable flags allow.
         "application_fee": None,
         "application_fee_amount": None,
         "payout_method": None,
-        # `trace_id` is neither required nor nullable — omitted rather than
-        # nulled, and no bank ever supplies one here.
+        "trace_id": None,
     },
     always_present=always_present,
     omit_when_none=omit_when_none,

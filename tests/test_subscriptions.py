@@ -5,22 +5,23 @@ by the Phase 12 probes and cassette 12 at `2026-08-26.dahlia`."""
 import pytest
 import seahaven
 
-from conftest import BLANK_NOW
+from conftest import BLANK_NOW, api_read, api_write
+from seahaven_stripe_world.errors import StripeToolError
 
 pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
 
 
 def call(instance: seahaven.Instance, method: str, path: str, params: dict | None = None):
     if method == "GET":
-        return instance.call("stripe_api_read", path=path, params=params)
-    return instance.call("stripe_api_write", method=method, path=path, params=params)
+        return api_read(instance, path, params)
+    return api_write(instance, method, path, params)
 
 
 def setup_catalog(instance: seahaven.Instance) -> tuple[str, str, str]:
-    cus = call(instance, "POST", "/v1/customers", {"email": "s@example.test"})["body"]["id"]
+    cus = call(instance, "POST", "/v1/customers", {"email": "s@example.test"})["id"]
     pm = call(
         instance, "POST", "/v1/payment_methods", {"type": "card", "card": {"token": "tok_visa"}}
-    )["body"]["id"]
+    )["id"]
     call(instance, "POST", f"/v1/payment_methods/{pm}/attach", {"customer": cus})
     call(
         instance,
@@ -28,7 +29,7 @@ def setup_catalog(instance: seahaven.Instance) -> tuple[str, str, str]:
         f"/v1/customers/{cus}",
         {"invoice_settings": {"default_payment_method": pm}},
     )
-    prod = call(instance, "POST", "/v1/products", {"name": "sub suite"})["body"]["id"]
+    prod = call(instance, "POST", "/v1/products", {"name": "sub suite"})["id"]
     price = call(
         instance,
         "POST",
@@ -39,12 +40,8 @@ def setup_catalog(instance: seahaven.Instance) -> tuple[str, str, str]:
             "currency": "cad",
             "recurring": {"interval": "month"},
         },
-    )["body"]["id"]
+    )["id"]
     return cus, pm, price
-
-
-def error_of(result: dict) -> dict:
-    return result["body"]["error"]
 
 
 # --- the created body's constants -------------------------------------------------------
@@ -54,9 +51,9 @@ def test_the_created_body_constants(instance: seahaven.Instance) -> None:
     cus, _, price = setup_catalog(instance)
     body = call(
         instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": price}]}
-    )["body"]
+    )
     assert body["object"] == "subscription"
-    assert body["livemode"] is False
+    assert body["livemode"] is True
     assert body["invoice_settings"] == {
         "account_tax_ids": None,
         "custom_fields": None,
@@ -111,7 +108,7 @@ def test_the_items_envelope(instance: seahaven.Instance) -> None:
     cus, _, price = setup_catalog(instance)
     body = call(
         instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": price}]}
-    )["body"]
+    )
     envelope = body["items"]
     assert envelope["object"] == "list"
     assert envelope["has_more"] is False
@@ -133,15 +130,11 @@ def test_metadata_rides_both_surfaces(instance: seahaven.Instance) -> None:
         "POST",
         "/v1/subscriptions",
         {"customer": cus, "items": [{"price": price}], "metadata": {"a": "1"}},
-    )["body"]
+    )
     assert body["metadata"] == {"a": "1"}
-    body = call(instance, "POST", f"/v1/subscriptions/{body['id']}", {"metadata": {"b": "2"}})[
-        "body"
-    ]
+    body = call(instance, "POST", f"/v1/subscriptions/{body['id']}", {"metadata": {"b": "2"}})
     assert body["metadata"] == {"a": "1", "b": "2"}
-    body = call(instance, "POST", f"/v1/subscriptions/{body['id']}", {"metadata": {"a": None}})[
-        "body"
-    ]
+    body = call(instance, "POST", f"/v1/subscriptions/{body['id']}", {"metadata": {"a": None}})
     assert body["metadata"] == {"b": "2"}
 
 
@@ -152,19 +145,20 @@ def test_lists_and_filters(instance: seahaven.Instance) -> None:
     cus, _, price = setup_catalog(instance)
     body = call(
         instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": price}]}
-    )["body"]
-    listed = call(instance, "GET", "/v1/subscriptions", {"customer": cus})["body"]
+    )
+    listed = call(instance, "GET", "/v1/subscriptions", {"customer": cus})
     assert [item["id"] for item in listed["data"]] == [body["id"]]
     assert listed["url"] == "/v1/subscriptions"
-    listed = call(instance, "GET", "/v1/subscriptions", {"status": "active"})["body"]
+    listed = call(instance, "GET", "/v1/subscriptions", {"status": "active"})
     assert body["id"] in [item["id"] for item in listed["data"]]
-    listed = call(instance, "GET", "/v1/subscriptions", {"status": "all"})["body"]
+    listed = call(instance, "GET", "/v1/subscriptions", {"status": "all"})
     assert body["id"] in [item["id"] for item in listed["data"]]
-    listed = call(instance, "GET", "/v1/subscriptions", {"price": price})["body"]
+    listed = call(instance, "GET", "/v1/subscriptions", {"price": price})
     assert body["id"] in [item["id"] for item in listed["data"]]
-    result = call(instance, "GET", "/v1/subscriptions", {"status": "bogus"})
-    error = error_of(result)
-    assert result["status"] == 400
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "GET", "/v1/subscriptions", {"status": "bogus"})
+    assert exc_info.value.status == 400
+    error = exc_info.value.stripe_body["error"]
     assert "code" not in error
     assert error["message"] == (
         "Invalid status: must be one of active, past_due, unpaid, canceled, incomplete, "
@@ -176,11 +170,11 @@ def test_lists_are_newest_first(instance: seahaven.Instance) -> None:
     cus, _, price = setup_catalog(instance)
     first = call(
         instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": price}]}
-    )["body"]
+    )
     second = call(
         instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": price}]}
-    )["body"]
-    listed = call(instance, "GET", "/v1/subscriptions", {"customer": cus})["body"]
+    )
+    listed = call(instance, "GET", "/v1/subscriptions", {"customer": cus})
     assert [item["id"] for item in listed["data"]] == [second["id"], first["id"]]
 
 
@@ -190,120 +184,139 @@ def test_lists_are_newest_first(instance: seahaven.Instance) -> None:
 def test_the_recorded_refusals(instance: seahaven.Instance) -> None:
     cus, _, price = setup_catalog(instance)
     # pending_if_incomplete is update-only
-    result = call(
-        instance,
-        "POST",
-        "/v1/subscriptions",
-        {
-            "customer": cus,
-            "items": [{"price": price}],
-            "payment_behavior": "pending_if_incomplete",
-        },
-    )
-    error = error_of(result)
-    assert result["status"] == 400
+    with pytest.raises(StripeToolError) as exc_info:
+        call(
+            instance,
+            "POST",
+            "/v1/subscriptions",
+            {
+                "customer": cus,
+                "items": [{"price": price}],
+                "payment_behavior": "pending_if_incomplete",
+            },
+        )
+    error = exc_info.value.stripe_body["error"]
+    assert exc_info.value.status == 400
     assert error["message"] == (
         "Setting `payment_behavior` to `pending_if_incomplete` has no effect when creating "
         "a subscription."
     )
     assert error["param"] == "payment_behavior"
     # a bad literal
-    result = call(
-        instance,
-        "POST",
-        "/v1/subscriptions",
-        {"customer": cus, "items": [{"price": price}], "payment_behavior": "bogus"},
-    )
-    assert "code" not in error_of(result)
-    assert error_of(result)["param"] == "payment_behavior"
+    with pytest.raises(StripeToolError) as exc_info:
+        call(
+            instance,
+            "POST",
+            "/v1/subscriptions",
+            {"customer": cus, "items": [{"price": price}], "payment_behavior": "bogus"},
+        )
+    error = exc_info.value.stripe_body["error"]
+    assert "code" not in error
+    assert error["param"] == "payment_behavior"
     # duplicate price
-    result = call(
-        instance,
-        "POST",
-        "/v1/subscriptions",
-        {"customer": cus, "items": [{"price": price}, {"price": price}]},
-    )
-    error = error_of(result)
+    with pytest.raises(StripeToolError) as exc_info:
+        call(
+            instance,
+            "POST",
+            "/v1/subscriptions",
+            {"customer": cus, "items": [{"price": price}, {"price": price}]},
+        )
+    error = exc_info.value.stripe_body["error"]
     assert error["param"] == "plan"
     assert error["message"] == (
         "Cannot create a Subscription with multiple Subscription Items with "
         f"the same Price: {price}"
     )
     # missing items
-    result = call(instance, "POST", "/v1/subscriptions", {"customer": cus})
-    error = error_of(result)
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "POST", "/v1/subscriptions", {"customer": cus})
+    error = exc_info.value.stripe_body["error"]
     assert error["code"] == "parameter_missing"
     assert error["param"] == "items"
     # unknown price
-    result = call(
-        instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": "price_nope"}]}
-    )
-    error = error_of(result)
+    with pytest.raises(StripeToolError) as exc_info:
+        call(
+            instance,
+            "POST",
+            "/v1/subscriptions",
+            {"customer": cus, "items": [{"price": "price_nope"}]},
+        )
+    error = exc_info.value.stripe_body["error"]
     assert error["code"] == "resource_missing"
     assert error["param"] == "items[0][price]"
     assert error["message"] == "No such price: 'price_nope'"
     # unknown customer: the 404 a path id earns
-    result = call(
-        instance, "POST", "/v1/subscriptions", {"customer": "cus_nope", "items": [{"price": price}]}
-    )
-    assert result["status"] == 404
-    assert error_of(result)["param"] == "customer"
+    with pytest.raises(StripeToolError) as exc_info:
+        call(
+            instance,
+            "POST",
+            "/v1/subscriptions",
+            {"customer": "cus_nope", "items": [{"price": price}]},
+        )
+    assert exc_info.value.status == 404
+    assert exc_info.value.stripe_body["error"]["param"] == "customer"
     # days_until_due guards
-    result = call(
-        instance,
-        "POST",
-        "/v1/subscriptions",
-        {"customer": cus, "items": [{"price": price}], "days_until_due": 5},
-    )
-    assert error_of(result)["message"] == (
+    with pytest.raises(StripeToolError) as exc_info:
+        call(
+            instance,
+            "POST",
+            "/v1/subscriptions",
+            {"customer": cus, "items": [{"price": price}], "days_until_due": 5},
+        )
+    assert exc_info.value.stripe_body["error"]["message"] == (
         "You can only specify 'days_until_due' if invoice collection method is 'send_invoice'."
     )
-    result = call(
-        instance,
-        "POST",
-        "/v1/subscriptions",
-        {"customer": cus, "items": [{"price": price}], "collection_method": "send_invoice"},
-    )
-    assert error_of(result)["message"] == (
+    with pytest.raises(StripeToolError) as exc_info:
+        call(
+            instance,
+            "POST",
+            "/v1/subscriptions",
+            {"customer": cus, "items": [{"price": price}], "collection_method": "send_invoice"},
+        )
+    assert exc_info.value.stripe_body["error"]["message"] == (
         "If invoice collection method is 'send_invoice', you must specify 'days_until_due'."
     )
     # trial conflicts
-    result = call(
-        instance,
-        "POST",
-        "/v1/subscriptions",
-        {
-            "customer": cus,
-            "items": [{"price": price}],
-            "trial_end": 1798761600,
-            "trial_from_plan": True,
-        },
-    )
-    assert error_of(result)["message"] == (
+    with pytest.raises(StripeToolError) as exc_info:
+        call(
+            instance,
+            "POST",
+            "/v1/subscriptions",
+            {
+                "customer": cus,
+                "items": [{"price": price}],
+                "trial_end": 1798761600,
+                "trial_from_plan": True,
+            },
+        )
+    assert exc_info.value.stripe_body["error"]["message"] == (
         "You cannot set `trial_end` or `trial_period_days` when `trial_from_plan=true`."
     )
-    assert "param" not in error_of(result)
-    result = call(
-        instance,
-        "POST",
-        "/v1/subscriptions",
-        {"customer": cus, "items": [{"price": price}], "trial_end": 1000},
-    )
-    assert error_of(result)["param"] == "trial_end"
-    assert error_of(result)["message"] == (
+    assert "param" not in exc_info.value.stripe_body["error"]
+    with pytest.raises(StripeToolError) as exc_info:
+        call(
+            instance,
+            "POST",
+            "/v1/subscriptions",
+            {"customer": cus, "items": [{"price": price}], "trial_end": 1000},
+        )
+    assert exc_info.value.stripe_body["error"]["param"] == "trial_end"
+    assert exc_info.value.stripe_body["error"]["message"] == (
         "The parameter `trial_end` expects a unix timestamp representing a date and time in "
         "the future. You specified the value `1000` which is in the past."
     )
     # unknown parameter
-    result = call(instance, "POST", "/v1/subscriptions", {"customer": cus, "nope": "x"})
-    assert error_of(result)["code"] == "parameter_unknown"
+    with pytest.raises(StripeToolError) as exc_info:
+        call(instance, "POST", "/v1/subscriptions", {"customer": cus, "nope": "x"})
+    assert exc_info.value.stripe_body["error"]["code"] == "parameter_unknown"
 
 
 def test_the_missing_id_404s(instance: seahaven.Instance) -> None:
     for method in ("GET", "POST", "DELETE"):
-        result = call(instance, method, "/v1/subscriptions/sub_nope")
-        assert result["status"] == 404, method
-        error = error_of(result)
+        with pytest.raises(StripeToolError) as exc_info:
+            call(instance, method, "/v1/subscriptions/sub_nope")
+        error = exc_info.value.stripe_body["error"]
+        assert exc_info.value.status == 404, method
         assert error["code"] == "resource_missing"
         assert error["param"] == "id"
         assert error["message"] == "No such subscription: 'sub_nope'"
@@ -311,7 +324,7 @@ def test_the_missing_id_404s(instance: seahaven.Instance) -> None:
 
 def test_trial_from_plan_uses_the_price_trial(instance: seahaven.Instance) -> None:
     cus, _unused, _price = setup_catalog(instance)
-    prod = call(instance, "POST", "/v1/products", {"name": "trialled"})["body"]["id"]
+    prod = call(instance, "POST", "/v1/products", {"name": "trialled"})["id"]
     trial_price = call(
         instance,
         "POST",
@@ -322,33 +335,31 @@ def test_trial_from_plan_uses_the_price_trial(instance: seahaven.Instance) -> No
             "currency": "cad",
             "recurring": {"interval": "month", "trial_period_days": 7},
         },
-    )["body"]["id"]
+    )["id"]
     # a trial price alone does not trial (probed); the flag does
     body = call(
         instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": trial_price}]}
-    )["body"]
+    )
     assert body["status"] == "active"
     body = call(
         instance,
         "POST",
         "/v1/subscriptions",
         {"customer": cus, "items": [{"price": trial_price}], "trial_from_plan": True},
-    )["body"]
+    )
     assert body["status"] == "trialing"
     assert body["trial_end"] - body["trial_start"] == 7 * 86_400
 
 
 def test_coupon_and_tax_on_creation(instance: seahaven.Instance) -> None:
     cus, _, price = setup_catalog(instance)
-    coupon = call(instance, "POST", "/v1/coupons", {"percent_off": 10, "duration": "once"})["body"][
-        "id"
-    ]
+    coupon = call(instance, "POST", "/v1/coupons", {"percent_off": 10, "duration": "once"})["id"]
     txr = call(
         instance,
         "POST",
         "/v1/tax_rates",
         {"display_name": "GST", "percentage": 5, "jurisdiction": "CA", "inclusive": False},
-    )["body"]["id"]
+    )["id"]
     body = call(
         instance,
         "POST",
@@ -359,7 +370,7 @@ def test_coupon_and_tax_on_creation(instance: seahaven.Instance) -> None:
             "discounts": [{"coupon": coupon}],
             "default_tax_rates": [txr],
         },
-    )["body"]
+    )
     # the recorded arithmetic: 2000 - 200 + 90 = 1890
     invoice = instance.inspect().one("SELECT * FROM invoices WHERE id = ?", body["latest_invoice"])
     assert invoice is not None
@@ -371,7 +382,7 @@ def test_coupon_and_tax_on_creation(instance: seahaven.Instance) -> None:
 
 def test_update_flows_the_items_array(instance: seahaven.Instance) -> None:
     cus, _, price = setup_catalog(instance)
-    prod = call(instance, "POST", "/v1/products", {"name": "second"})["body"]["id"]
+    prod = call(instance, "POST", "/v1/products", {"name": "second"})["id"]
     price2 = call(
         instance,
         "POST",
@@ -382,17 +393,17 @@ def test_update_flows_the_items_array(instance: seahaven.Instance) -> None:
             "currency": "cad",
             "recurring": {"interval": "month"},
         },
-    )["body"]["id"]
+    )["id"]
     sub = call(
         instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": price}]}
-    )["body"]
+    )
     # quantity through the sub's own items array
     body = call(
         instance,
         "POST",
         f"/v1/subscriptions/{sub['id']}",
         {"items": [{"id": sub["items"]["data"][0]["id"], "quantity": 5}]},
-    )["body"]
+    )
     assert body["items"]["data"][0]["quantity"] == 5
     # a new item without an id spans [now, the subscription's period end)
     body = call(
@@ -400,7 +411,7 @@ def test_update_flows_the_items_array(instance: seahaven.Instance) -> None:
         "POST",
         f"/v1/subscriptions/{sub['id']}",
         {"items": [{"price": price2}]},
-    )["body"]
+    )
     assert len(body["items"]["data"]) == 2
     new_item = body["items"]["data"][1]
     assert new_item["current_period_end"] == body["items"]["data"][0]["current_period_end"]
@@ -430,15 +441,13 @@ def test_default_payment_method_clears_with_the_empty_string(instance: seahaven.
         "POST",
         "/v1/subscriptions",
         {"customer": cus, "items": [{"price": price}], "default_payment_method": pm},
-    )["body"]
+    )
     assert body["default_payment_method"] == pm
-    body = call(
-        instance, "POST", f"/v1/subscriptions/{body['id']}", {"default_payment_method": ""}
-    )["body"]
+    body = call(instance, "POST", f"/v1/subscriptions/{body['id']}", {"default_payment_method": ""})
     assert body["default_payment_method"] is None
     body = call(
         instance, "POST", f"/v1/subscriptions/{body['id']}", {"default_payment_method": None}
-    )["body"]
+    )
     assert body["default_payment_method"] is None
 
 
@@ -454,7 +463,7 @@ def test_create_stores_payment_settings_and_thresholds(instance: seahaven.Instan
             "payment_settings": {"save_default_payment_method": "on_subscription"},
             "billing_thresholds": {"amount_gte": 5000},
         },
-    )["body"]
+    )
     assert body["payment_settings"]["save_default_payment_method"] == "on_subscription"
     assert body["billing_thresholds"] == {"amount_gte": 5000}
 
@@ -465,7 +474,7 @@ def test_cancel_at_period_end_merges_a_supplied_cancellation_details(
     cus, _, price = setup_catalog(instance)
     sub = call(
         instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": price}]}
-    )["body"]
+    )
     body = call(
         instance,
         "POST",
@@ -474,33 +483,71 @@ def test_cancel_at_period_end_merges_a_supplied_cancellation_details(
             "cancel_at_period_end": True,
             "cancellation_details": {"comment": "too expensive"},
         },
-    )["body"]
+    )
     details = body["cancellation_details"]
     assert details["comment"] == "too expensive"
     assert details["reason"] == "cancellation_requested"
 
 
-def test_the_idempotent_create_replays(instance: seahaven.Instance) -> None:
-    """The keyed POST: the middleware's four outcomes, on this slice."""
-    cus, _, price = setup_catalog(instance)
-    params = {"customer": cus, "items": [{"price": price}]}
-    first = instance.call(
-        "stripe_api_write",
-        method="POST",
-        path="/v1/subscriptions",
-        params=params,
-        idempotency_key="sub-once",
-    )
-    second = instance.call(
-        "stripe_api_write",
-        method="POST",
-        path="/v1/subscriptions",
-        params=params,
-        idempotency_key="sub-once",
-    )
-    assert second["body"]["id"] == first["body"]["id"]
-    count = instance.inspect().one("SELECT count(*) AS n FROM subscriptions")
-    assert count == {"n": 1}
+def test_the_idempotent_create_replays(probe) -> None:
+    """The keyed POST through ``call_stripe`` (the only face that still
+    carries ``idempotency_key`` after Phase 5)."""
+    from conftest import dispatch_tool
+
+    world_p = probe(dispatch_tool())
+    with world_p.instance(None, now=BLANK_NOW) as inst:
+        cs = inst.call("call_stripe", method="POST", path="/v1/customers", params={})
+        cus = cs["body"]["id"]
+        pm = inst.call(
+            "call_stripe",
+            method="POST",
+            path="/v1/payment_methods",
+            params={"type": "card", "card": {"token": "tok_visa"}},
+        )["body"]["id"]
+        inst.call(
+            "call_stripe",
+            method="POST",
+            path=f"/v1/payment_methods/{pm}/attach",
+            params={"customer": cus},
+        )
+        inst.call(
+            "call_stripe",
+            method="POST",
+            path=f"/v1/customers/{cus}",
+            params={"invoice_settings": {"default_payment_method": pm}},
+        )
+        prod = inst.call("call_stripe", method="POST", path="/v1/products", params={"name": "Sub"})[
+            "body"
+        ]["id"]
+        price = inst.call(
+            "call_stripe",
+            method="POST",
+            path="/v1/prices",
+            params={
+                "product": prod,
+                "unit_amount": 2000,
+                "currency": "usd",
+                "recurring": {"interval": "month"},
+            },
+        )["body"]["id"]
+        params = {"customer": cus, "items": [{"price": price}]}
+        first = inst.call(
+            "call_stripe",
+            method="POST",
+            path="/v1/subscriptions",
+            params=params,
+            idempotency_key="sub-once",
+        )
+        second = inst.call(
+            "call_stripe",
+            method="POST",
+            path="/v1/subscriptions",
+            params=params,
+            idempotency_key="sub-once",
+        )
+        assert second["body"]["id"] == first["body"]["id"]
+        count = inst.inspect().one("SELECT count(*) AS n FROM subscriptions")
+        assert count == {"n": 1}
 
 
 # --- proration (Phase 14, cassette 01) ---------------------------------------------------
@@ -512,7 +559,7 @@ def proration_catalog(
     """A customer with a paying default card and monthly 10.00 / 18.00 /
     20.00 prices — cassette 01's own setup shape."""
     cus, _, _ = setup_catalog(instance)
-    prod = call(instance, "POST", "/v1/products", {"name": name})["body"]["id"]
+    prod = call(instance, "POST", "/v1/products", {"name": name})["id"]
     prices = []
     for unit in (1000, 1800, 2000):
         prices.append(
@@ -526,7 +573,7 @@ def proration_catalog(
                     "currency": "cad",
                     "recurring": {"interval": "month"},
                 },
-            )["body"]["id"]
+            )["id"]
         )
     return (cus, *prices)
 
@@ -534,7 +581,7 @@ def proration_catalog(
 def _sub(instance: seahaven.Instance, cus: str, price: str) -> dict:
     return call(
         instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": price}]}
-    )["body"]
+    )
 
 
 def _item_id(body: dict) -> str:
@@ -565,9 +612,7 @@ def test_default_update_writes_pending_proration_items(instance: seahaven.Instan
             "proration_date": _proration_date(sub, 400),
         },
     )
-    pending = call(instance, "GET", "/v1/invoiceitems", {"customer": cus, "pending": True})["body"][
-        "data"
-    ]
+    pending = call(instance, "GET", "/v1/invoiceitems", {"customer": cus, "pending": True})["data"]
     # Newest-first: the credit leads (the debit was written first).
     assert [(item["amount"], item["quantity"]) for item in pending] == [(-3, 1), (4, 1)]
     credit, debit = pending[0], pending[1]
@@ -588,9 +633,7 @@ def test_default_update_writes_pending_proration_items(instance: seahaven.Instan
     )
     # And no invoice was minted by the default behavior.
     assert (
-        call(instance, "GET", "/v1/subscriptions/{id}".format(id=sub["id"]))["body"][
-            "latest_invoice"
-        ]
+        call(instance, "GET", "/v1/subscriptions/{id}".format(id=sub["id"]))["latest_invoice"]
         == sub["latest_invoice"]
     )
 
@@ -610,8 +653,8 @@ def test_always_invoice_pays_the_update_invoice(instance: seahaven.Instance) -> 
             "proration_behavior": "always_invoice",
             "proration_date": _proration_date(sub, 3),
         },
-    )["body"]
-    invoice = call(instance, "GET", f"/v1/invoices/{updated['latest_invoice']}")["body"]
+    )
+    invoice = call(instance, "GET", f"/v1/invoices/{updated['latest_invoice']}")
     assert invoice["billing_reason"] == "subscription_update"
     assert invoice["status"] == "paid"
     assert invoice["attempted"] is True
@@ -636,15 +679,15 @@ def test_a_sub_minimum_net_rolls_to_the_balance(instance: seahaven.Instance) -> 
             "proration_behavior": "always_invoice",
             "proration_date": _proration_date(sub, 400),  # -3 + 4 = +1
         },
-    )["body"]
-    invoice = call(instance, "GET", f"/v1/invoices/{updated['latest_invoice']}")["body"]
+    )
+    invoice = call(instance, "GET", f"/v1/invoices/{updated['latest_invoice']}")
     assert invoice["total"] == 1
     assert invoice["status"] == "paid"
     assert invoice["attempt_count"] == 0
     assert invoice["attempted"] is True
     assert invoice["amount_due"] == 0
     assert invoice["ending_balance"] == 1
-    customer = call(instance, "GET", f"/v1/customers/{cus}")["body"]
+    customer = call(instance, "GET", f"/v1/customers/{cus}")
     assert customer["balance"] == 1
     # The roll's balance row (probe_proration_settlement pins the wire):
     with instance.bulk() as ctx:
@@ -658,7 +701,7 @@ def test_a_sub_minimum_net_rolls_to_the_balance(instance: seahaven.Instance) -> 
     ]
     # The next create draws the owed cent onto its invoice.
     next_sub = _sub(instance, cus, p10)
-    next_invoice = call(instance, "GET", f"/v1/invoices/{next_sub['latest_invoice']}")["body"]
+    next_invoice = call(instance, "GET", f"/v1/invoices/{next_sub['latest_invoice']}")
     assert next_invoice["starting_balance"] == 1
     assert next_invoice["amount_due"] == 1001
 
@@ -679,8 +722,8 @@ def test_a_negative_net_credits_the_customer_balance(instance: seahaven.Instance
             "proration_behavior": "always_invoice",
             "proration_date": _proration_date(sub, 3),
         },
-    )["body"]
-    invoice = call(instance, "GET", f"/v1/invoices/{updated['latest_invoice']}")["body"]
+    )
+    invoice = call(instance, "GET", f"/v1/invoices/{updated['latest_invoice']}")
     assert invoice["total"] == -334
     assert invoice["amount_due"] == 0
     assert invoice["status"] == "paid"
@@ -706,9 +749,9 @@ def test_proration_behavior_none_writes_nothing(instance: seahaven.Instance) -> 
             "items": [{"id": _item_id(sub), "price": p18}],
             "proration_behavior": "none",
         },
-    )["body"]
+    )
     after = call(instance, "GET", "/v1/invoiceitems", {"customer": cus, "pending": True})
-    assert after["body"]["data"] == before["body"]["data"] == []
+    assert after["data"] == before["data"] == []
     assert updated["items"]["data"][0]["price"]["id"] == p18
 
 
@@ -726,9 +769,7 @@ def test_quantity_only_change_reprorates_the_whole_item(instance: seahaven.Insta
             "proration_date": _proration_date(sub, 400),
         },
     )
-    pending = call(instance, "GET", "/v1/invoiceitems", {"customer": cus, "pending": True})["body"][
-        "data"
-    ]
+    pending = call(instance, "GET", "/v1/invoiceitems", {"customer": cus, "pending": True})["data"]
     assert [(item["amount"], item["quantity"]) for item in pending] == [(-3, 1), (7, 3)]
     assert pending[1]["description"].startswith("Remaining time on 3 \u00d7")
 
@@ -746,11 +787,9 @@ def test_cancel_with_prorate_mints_the_pending_credit(instance: seahaven.Instanc
         f"/v1/subscriptions/{sub['id']}",
         {"items": [{"id": _item_id(sub), "price": p18}], "proration_behavior": "none"},
     )
-    canceled = call(instance, "DELETE", f"/v1/subscriptions/{sub['id']}", {"prorate": True})["body"]
+    canceled = call(instance, "DELETE", f"/v1/subscriptions/{sub['id']}", {"prorate": True})
     assert canceled["status"] == "canceled"
-    pending = call(instance, "GET", "/v1/invoiceitems", {"customer": cus, "pending": True})["body"][
-        "data"
-    ]
+    pending = call(instance, "GET", "/v1/invoiceitems", {"customer": cus, "pending": True})["data"]
     assert len(pending) == 1
     credit = pending[0]
     assert credit["amount"] == -1000  # the BILLED price, not the switched-to one
@@ -774,14 +813,14 @@ def test_cancel_with_invoice_now_mints_the_uncollectible_final_invoice(
         "DELETE",
         f"/v1/subscriptions/{sub['id']}",
         {"prorate": True, "invoice_now": True},
-    )["body"]
-    invoice = call(instance, "GET", f"/v1/invoices/{canceled['latest_invoice']}")["body"]
+    )
+    invoice = call(instance, "GET", f"/v1/invoices/{canceled['latest_invoice']}")
     assert invoice["billing_reason"] == "subscription_cycle"
     assert invoice["status"] == "uncollectible"
     assert invoice["number"] is None
     assert invoice["total"] == -1000
     assert [line["amount"] for line in invoice["lines"]["data"]] == [-1000]
-    customer = call(instance, "GET", f"/v1/customers/{cus}")["body"]
+    customer = call(instance, "GET", f"/v1/customers/{cus}")
     assert customer["balance"] == 0
 
 
@@ -811,7 +850,7 @@ def test_the_anchor_reset_truncates_rolls_and_re_anchors(instance: seahaven.Inst
         "POST",
         f"/v1/subscriptions/{sub['id']}",
         {"billing_cycle_anchor": "now"},
-    )["body"]
+    )
     assert body["status"] == "active"
     start, end = _period(body)
     # The period RESTARTED at the reset instant: [now, now + interval)
@@ -819,9 +858,7 @@ def test_the_anchor_reset_truncates_rolls_and_re_anchors(instance: seahaven.Inst
     assert end == 1_790_863_200  # one month onward (Oct 1 14:00Z)
     assert body["billing_cycle_anchor"] == start  # the column moved with it
     # An unchanged configuration truncates to nothing: no proration items.
-    pending = call(instance, "GET", "/v1/invoiceitems", {"customer": cus, "pending": True})["body"][
-        "data"
-    ]
+    pending = call(instance, "GET", "/v1/invoiceitems", {"customer": cus, "pending": True})["data"]
     assert pending == []
     # `unchanged` is the recorded no-op sibling.
     again = call(
@@ -829,7 +866,7 @@ def test_the_anchor_reset_truncates_rolls_and_re_anchors(instance: seahaven.Inst
         "POST",
         f"/v1/subscriptions/{sub['id']}",
         {"billing_cycle_anchor": "unchanged"},
-    )["body"]
+    )
     assert _period(again) == (start, end)
 
 
@@ -849,6 +886,6 @@ def test_cancel_with_invoice_now_and_nothing_to_bill_mints_no_invoice(
         "DELETE",
         f"/v1/subscriptions/{sub['id']}",
         {"invoice_now": True},
-    )["body"]
+    )
     assert canceled["status"] == "canceled"
     assert instance.inspect().rows("SELECT id FROM invoices") == invoices_before

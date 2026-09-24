@@ -29,6 +29,7 @@ from seahaven_stripe_world.billing import invoicing, proration
 from seahaven_stripe_world.billing._money import round_half_up
 from seahaven_stripe_world.billing.invoicing import DiscountSpec, TaxRateSpec
 from seahaven_stripe_world.resources import _lookup, events, payment_intents
+from seahaven_stripe_world.serialize.fields import instance_livemode
 from seahaven_stripe_world.stripe_errors import StripeApiError, invalid_request, resource_missing
 
 __all__ = [
@@ -277,7 +278,7 @@ def _resolve_discounts(
             # Code from the billing engine's error table; the exact message
             # spelling is unrecorded (Phase 12 did not probe it).
             raise invalid_request(f"Coupon {coupon['id']} is expired.", code="coupon_expired")
-        discount_id = _ids.stripe_id(ctx, "di_")
+        discount_id = _ids.stripe_id(ctx, "di_", timestamp=now)
         percent = Fraction(coupon["percent_off"]) if coupon["percent_off"] else None
         specs.append(
             DiscountSpec(
@@ -405,7 +406,7 @@ def create_subscription(ctx: seahaven.Ctx, params: dict[str, Any]) -> dict[str, 
     tax_specs = _tax_specs(ctx, params.get("default_tax_rates", []))
 
     # The row, with a provisional status the invoice outcome settles.
-    sub_id = _ids.stripe_id(ctx, "sub_")
+    sub_id = _ids.stripe_id(ctx, "sub_", timestamp=now)
     cols: dict[str, Any] = {
         "id": sub_id,
         "x_seq": _seq.next_seq(ctx, "subscriptions"),
@@ -457,7 +458,7 @@ def create_subscription(ctx: seahaven.Ctx, params: dict[str, Any]) -> dict[str, 
             ctx,
             "subscription_items",
             {
-                "id": _ids.stripe_id(ctx, "si_"),
+                "id": _ids.stripe_id(ctx, "si_", timestamp=now),
                 "x_seq": _seq.next_seq(ctx, "subscription_items"),
                 "created": now,
                 "current_period_start": period_start,
@@ -854,6 +855,7 @@ def _cycle_invoice(
         currency=sub_row["currency"],
         invoice_discounts=applied_discounts,
         tax_rates=applied_tax,
+        livemode=instance_livemode(ctx),
     )
     if zero_total_discounts is not None:
         totals.total_discount_amounts.extend(zero_total_discounts)
@@ -987,7 +989,10 @@ def _conversion_invoice(
             )
         )
     totals = invoicing.compute_totals(
-        lines, currency=row["currency"], tax_rates=_persisted_tax_specs(ctx, row)
+        lines,
+        currency=row["currency"],
+        tax_rates=_persisted_tax_specs(ctx, row),
+        livemode=instance_livemode(ctx),
     )
     # The netted coupon shows as amount-0 entries (probed, round 5): the
     # credit's amount already carries it, so the per-line and invoice-level
@@ -1524,7 +1529,7 @@ def _apply_items_update(
             ctx,
             "subscription_items",
             {
-                "id": _ids.stripe_id(ctx, "si_"),
+                "id": _ids.stripe_id(ctx, "si_", timestamp=now),
                 "x_seq": _seq.next_seq(ctx, "subscription_items"),
                 "created": now,
                 "current_period_start": now,
@@ -1999,6 +2004,7 @@ def resume_subscription(
         currency=row["currency"],
         invoice_discounts=_persisted_discount_specs(ctx, row),
         tax_rates=_persisted_tax_specs(ctx, row),
+        livemode=instance_livemode(ctx),
     )
     if not rolled:
         # An itemless subscription (spec-blessed) resumes with nothing to
@@ -2037,14 +2043,15 @@ def _mint_resume_setup_intent(ctx: seahaven.Ctx, row: Mapping[str, Any]) -> str:
     awaiting a method (its `payment_method_types` are this world's
     `["card"]` — the recording's `["card", "klarna", "link"]` is the
     account's dashboard configuration, allow-listed)."""
-    seti_id = _ids.stripe_id(ctx, "seti_")
+    seti_created = ctx.clock.iso()
+    seti_id = _ids.stripe_id(ctx, "seti_", timestamp=seti_created)
     _insert_row(
         ctx,
         "setup_intents",
         {
             "id": seti_id,
             "x_seq": _seq.next_seq(ctx, "setup_intents"),
-            "created": ctx.clock.iso(),
+            "created": seti_created,
             "client_secret": payment_intents._mint_client_secret(ctx, seti_id),
             "customer": row["customer"],
             "status": "requires_payment_method",

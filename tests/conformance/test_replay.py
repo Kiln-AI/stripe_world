@@ -1,10 +1,13 @@
-"""The replayer against real instances: every violation at once, allow-listed
-differences passing, refs bound to this run, and drifted scripts failing as
-themselves.
+"""The replayer against probe-world instances: every violation at once,
+allow-listed differences passing, refs bound to this run, and drifted
+scripts failing as themselves.
 
 The synthetic cassettes here are built from a *real* replayed body with
-specific fields perturbed, so a violation always means the perturbation —
-never the ordinary shape gap between a five-key sketch and a real object."""
+specific fields perturbed, so a violation always means the perturbation --
+never the ordinary shape gap between a five-key sketch and a real object.
+
+The ``instance`` fixture comes from a probe world with ``call_stripe``
+registered so the replay exercises the shipped middleware chain."""
 
 import json
 
@@ -14,9 +17,15 @@ from tools_dev.scenarios._dsl import Recorder
 
 from conformance.cassette import Cassette, Ref, Step
 from conformance.replay import ConformanceFailure, check, diff, replay
-from conftest import BLANK_NOW
+from conftest import BLANK_NOW, dispatch_tool
 
-pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
+
+@pytest.fixture
+def instance(probe):
+    """A probe-world instance with ``call_stripe`` registered."""
+    w = probe(dispatch_tool())
+    with w.instance(None, now=BLANK_NOW) as inst:
+        yield inst
 
 
 def a_cassette(recorded_body: dict, scenario: str = "synthetic") -> Cassette:
@@ -43,9 +52,12 @@ def a_cassette(recorded_body: dict, scenario: str = "synthetic") -> Cassette:
 
 
 def a_real_body(instance: seahaven.Instance) -> dict:
-    return instance.call(
-        "stripe_api_write", method="POST", path="/v1/customers", params={"description": "probe"}
-    )["body"]
+    """Create a customer through the probe world's ``call_stripe`` tool
+    and return the bare body (extracted from the raw-HTTP envelope)."""
+    result = instance.call(
+        "call_stripe", method="POST", path="/v1/customers", params={"description": "probe"}
+    )
+    return result["body"]
 
 
 def test_replayer_reports_every_undeclared_difference_at_once(instance: seahaven.Instance) -> None:

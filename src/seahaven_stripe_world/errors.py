@@ -21,7 +21,33 @@ from typing import Any
 
 import seahaven
 
-__all__ = ["Internal", "InvalidInput", "InvalidMethod", "InvalidSearchQuery", "UnknownOperation"]
+__all__ = [
+    "CatalogueRefusal",
+    "Internal",
+    "InvalidInput",
+    "SessionValidation",
+    "StripeToolError",
+    "UnknownOperation",
+]
+
+
+class StripeToolError(seahaven.ToolError):
+    """A Stripe API error rendered for the MCP-shaped tool surface.
+
+    The envelope middleware raises this when a non-2xx ``ApiResponse`` or a
+    caught ``StripeApiError`` needs to reach the agent as a tool error carrying
+    a plain string.  The message format -- ``Stripe API error: {message}`` --
+    matches the real MCP server's error rendering (functional spec section 4.5).
+
+    ``status`` and ``stripe_body`` are exposed so tests can verify business
+    logic (which error code was produced) without re-parsing the rendered
+    string; neither is visible to the agent.
+    """
+
+    def __init__(self, message: str, *, status: int, stripe_body: dict) -> None:
+        super().__init__("STRIPE_API_ERROR", message, {"status": status})
+        self.status = status
+        self.stripe_body = stripe_body
 
 
 class InvalidInput(seahaven.ToolError):
@@ -66,46 +92,59 @@ class Internal(seahaven.ToolError):
         super().__init__("INTERNAL", message)
 
 
-# --- The discovery tools' two error conditions (`components/discovery.md` §2):
-# an agent that mis-calls the catalogue has made an authoring mistake, not a
-# Stripe request, so these are Seahaven errors rather than a Stripe envelope.
+class SessionValidation(seahaven.ToolError):
+    """The stripe_context or livemode check failed before dispatch.
 
-
-class InvalidSearchQuery(seahaven.ToolError):
-    """A search query with no tokens after normalization."""
-
-    def __init__(self, query: str) -> None:
-        super().__init__(
-            "INVALID_SEARCH_QUERY",
-            f"a search query needs at least one keyword: {query!r}",
-            {"query": query},
-        )
-
-
-class InvalidMethod(seahaven.ToolError):
-    """A method outside the three verbs the routed surface serves.
-
-    Defensive only: the registered tool's `Literal` annotation makes a bad
-    verb an `ArgumentError` — restated as `INVALID_INPUT` — before the tool
-    body runs, so this shape is unreachable through the tool and exists for
-    the direct-call path alone.
+    This is the session-validation error channel (functional spec section 4.5.1,
+    channel 1). The message text is verbatim from the real Stripe MCP server.
+    Fires before any operation is dispatched — nothing has been written.
     """
 
-    def __init__(self, method: str) -> None:
-        super().__init__(
-            "INVALID_METHOD",
-            f"method must be GET, POST or DELETE: {method!r}",
-            {"method": method},
-        )
+    def __init__(self, message: str) -> None:
+        super().__init__("SESSION_VALIDATION", message)
 
 
 class UnknownOperation(seahaven.ToolError):
-    """A `(method, path)` that is not a routed operation — including a real
-    Stripe path this world cut."""
+    """An operation ID not in the routed set — the operation-gate channel.
 
-    def __init__(self, method: str, path: str) -> None:
+    The message matches the real Stripe MCP server's response for an
+    operation that is not in its catalogue (functional spec section 4.5.1,
+    channel 2 / bucket A).
+    """
+
+    def __init__(self, op_id: str) -> None:
         super().__init__(
             "UNKNOWN_OPERATION",
-            f"no routed operation for {method} {path}",
-            {"method": method, "path": path},
+            f"Operation '{op_id}' is not available. "
+            "Use stripe_api_search to find available operations.",
+            {"operation_id": op_id},
+        )
+
+
+class CatalogueRefusal(seahaven.ToolError):
+    """An operation the real MCP catalogues but this world does not route.
+
+    Bucket B (architecture section 4.4): the operation exists at Stripe
+    but the key/account cannot use it.  The envelope middleware renders
+    this as a ``StripeToolError`` carrying the B1 (product-activation) or
+    B2 (permission) message.
+
+    This is a distinct error so the middleware can tell B-refusals apart
+    from A-refusals (``UnknownOperation``) and from genuine Stripe errors.
+    """
+
+    def __init__(
+        self,
+        op_id: str,
+        *,
+        product: tuple[str, str] | None,
+        permissions: Sequence[str],
+    ) -> None:
+        self.op_id = op_id
+        self.product = product
+        self.op_permissions = list(permissions)
+        super().__init__(
+            "CATALOGUE_REFUSAL",
+            f"Operation '{op_id}' is not available for this account.",
+            {"operation_id": op_id},
         )

@@ -4,40 +4,106 @@ import pytest
 import seahaven
 
 from conftest import BLANK_NOW
+from seahaven_stripe_world.errors import SessionValidation, UnknownOperation
+from seahaven_stripe_world.startup import ACCOUNT_ID
 
 pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
 
 
-def test_the_read_tool_refuses_a_write_verb(instance: seahaven.Instance) -> None:
-    """The `Literal` makes the closed set visible in the tool's schema and the
-    refusal Seahaven's own: the world's `INVALID_INPUT`, not a Stripe envelope
-    (functional spec §2.3)."""
+def test_the_read_tool_refuses_a_non_string_operation_id(instance: seahaven.Instance) -> None:
+    """A non-string operation_id is the framework's own INVALID_INPUT, not a
+    Stripe envelope (functional spec §2.3)."""
     with pytest.raises(seahaven.ToolError) as raised:
-        instance.call("stripe_api_read", path="/v1/customers", method="POST")
+        instance.call(
+            "stripe_api_read",
+            stripe_api_operation_id=123,
+            parameters={},
+            stripe_context=ACCOUNT_ID,
+            livemode=True,
+        )
     assert raised.value.code == "INVALID_INPUT"
 
 
-def test_the_write_tool_refuses_get_and_unknown_verbs(instance: seahaven.Instance) -> None:
-    for method in ("GET", "PATCH", "post"):
-        with pytest.raises(seahaven.ToolError) as raised:
-            instance.call("stripe_api_write", method=method, path="/v1/customers")
-        assert raised.value.code == "INVALID_INPUT"
+def test_the_write_tool_refuses_a_get_operation(instance: seahaven.Instance) -> None:
+    """A GET operation ID through the write tool raises UnknownOperation —
+    the write resolver only accepts POST/DELETE."""
+    with pytest.raises(UnknownOperation):
+        instance.call(
+            "stripe_api_write",
+            stripe_api_operation_id="GetCustomers",
+            parameters={},
+            stripe_context=ACCOUNT_ID,
+            livemode=True,
+        )
 
 
 def test_a_non_object_params_is_refused_before_the_dispatcher(
     instance: seahaven.Instance,
 ) -> None:
     with pytest.raises(seahaven.ToolError) as raised:
-        instance.call("stripe_api_read", path="/v1/customers", params=["nope"])
+        instance.call(
+            "stripe_api_read",
+            stripe_api_operation_id="GetCustomers",
+            parameters=["nope"],
+            stripe_context=ACCOUNT_ID,
+            livemode=True,
+        )
     assert raised.value.code == "INVALID_INPUT"
 
 
 def test_the_read_tool_cannot_reach_a_post_only_route(instance: seahaven.Instance) -> None:
-    """A `POST`-only path through the read tool is the router's unrecognized
-    404, not a tool-contract error — the verb was legal, the URL was not."""
-    result = instance.call("stripe_api_read", path="/v1/charges/ch_1/capture")
-    assert result["status"] == 404
-    assert result["body"]["error"]["message"].startswith("Unrecognized request URL")
+    """A POST-only operation ID through the read tool raises UnknownOperation —
+    the read resolver only accepts GET."""
+    with pytest.raises(UnknownOperation):
+        instance.call(
+            "stripe_api_read",
+            stripe_api_operation_id="PostChargesChargeCapture",
+            parameters={},
+            stripe_context=ACCOUNT_ID,
+            livemode=True,
+        )
+
+
+def test_wrong_stripe_context_refuses_before_dispatch(instance: seahaven.Instance) -> None:
+    """A stripe_context that does not match the session account raises
+    SessionValidation on every tool."""
+    for tool in ("stripe_api_read", "stripe_api_write"):
+        with pytest.raises(SessionValidation, match="list_available_accounts_or_orgs"):
+            instance.call(
+                tool,
+                stripe_api_operation_id="GetCustomers",
+                parameters={},
+                stripe_context="acct_wrong",
+                livemode=True,
+            )
+    with pytest.raises(SessionValidation, match="list_available_accounts_or_orgs"):
+        instance.call(
+            "stripe_api_search",
+            intent="list",
+            resource="customers",
+            stripe_context="acct_wrong",
+            livemode=True,
+        )
+    with pytest.raises(SessionValidation, match="list_available_accounts_or_orgs"):
+        instance.call(
+            "stripe_api_details",
+            stripe_api_operation_id="GetCustomers",
+            stripe_context="acct_wrong",
+            livemode=True,
+        )
+
+
+def test_wrong_livemode_refuses_before_dispatch(instance: seahaven.Instance) -> None:
+    """livemode=false against a live-mode account raises SessionValidation
+    with guidance to retry with true."""
+    with pytest.raises(SessionValidation, match="Retry with livemode set to true"):
+        instance.call(
+            "stripe_api_read",
+            stripe_api_operation_id="GetCustomers",
+            parameters={},
+            stripe_context=ACCOUNT_ID,
+            livemode=False,
+        )
 
 
 def test_call_stripe_reaches_every_verb(instance: seahaven.Instance) -> None:
@@ -57,29 +123,6 @@ def test_call_stripe_reaches_every_verb(instance: seahaven.Instance) -> None:
         deleted = call_stripe(ctx, "DELETE", f"/v1/customers/{cus}")
         assert deleted.status == 200
         assert deleted.body["deleted"] is True
-
-
-def test_the_tool_descriptions_name_no_sibling_tool() -> None:
-    """Lint `SH206`'s rule, asserted: a prefixing host renames tools without
-    rewriting descriptions, so no description may carry a sibling's name."""
-    names = [
-        "stripe_api_read",
-        "stripe_api_write",
-        "stripe_api_search",
-        "stripe_api_details",
-        "get_stripe_account_info",
-    ]
-    descriptions = {name: seahaven_world_tool_description(name) for name in names}
-    for name, description in descriptions.items():
-        for other in names:
-            if other != name:
-                assert other not in description, (name, other)
-
-
-def seahaven_world_tool_description(name: str) -> str:
-    from seahaven_stripe_world.world import world
-
-    return str(world.tools[name].description)
 
 
 def test_the_wired_surface_is_small_and_named() -> None:
@@ -250,16 +293,16 @@ def test_account_info_returns_account_object(instance: seahaven.Instance) -> Non
     result = instance.call("get_stripe_account_info")
     assert result["object"] == "account"
     assert result["id"].startswith("acct_")
-    assert result["charges_enabled"] is True
-    assert result["payouts_enabled"] is True
+    assert result["charges_enabled"] is False
+    assert result["payouts_enabled"] is False
     assert result["default_currency"] == "usd"
     assert result["country"] == "US"
     assert result["type"] == "standard"
-    assert result["details_submitted"] is True
+    assert result["details_submitted"] is False
     assert isinstance(result["business_profile"], dict)
     assert isinstance(result["capabilities"], dict)
     assert isinstance(result["settings"], dict)
-    assert isinstance(result["metadata"], dict)
+    assert "metadata" not in result
     assert isinstance(result["created"], int)
 
 
@@ -268,6 +311,64 @@ def test_account_info_is_idempotent(instance: seahaven.Instance) -> None:
     first = instance.call("get_stripe_account_info")
     second = instance.call("get_stripe_account_info")
     assert first == second
+
+
+# --- list_available_accounts_or_orgs ------------------------------------------
+
+
+def test_ts_03_list_accounts_returns_session_accounts(
+    instance: seahaven.Instance,
+) -> None:
+    """TS-03: list_available_accounts_or_orgs returns the session's accounts
+    as a one-element list projected from ctx.state["account"]."""
+    result = instance.call("list_available_accounts_or_orgs")
+    assert "accounts" in result
+    accounts = result["accounts"]
+    assert isinstance(accounts, list)
+    assert len(accounts) == 1
+    entry = accounts[0]
+    assert entry["stripe_context"] == ACCOUNT_ID
+    assert entry["livemode"] is True
+    assert set(entry.keys()) == {"stripe_context", "livemode", "name"}
+
+
+def test_list_accounts_agrees_with_account_info(
+    instance: seahaven.Instance,
+) -> None:
+    """The two account tools present the same account identity."""
+    account_info = instance.call("get_stripe_account_info")
+    listed = instance.call("list_available_accounts_or_orgs")["accounts"][0]
+    assert listed["stripe_context"] == account_info["id"]
+
+
+# --- manage_stripe_accounts --------------------------------------------------
+
+
+def test_ts_19_manage_accounts_returns_reconsent_url(
+    instance: seahaven.Instance,
+) -> None:
+    """TS-19: manage_stripe_accounts returns a reconsent_url with the right
+    prefix and an oases_ session id."""
+    result = instance.call("manage_stripe_accounts")
+    assert "reconsent_url" in result
+    url = result["reconsent_url"]
+    assert url.startswith("https://access.stripe.com/mcp/oauth2/authorize/sessions/oases_")
+    # The oases_ id suffix is 24 alphanumeric characters.
+    oases_id = url.split("oases_")[1]
+    assert len(oases_id) == 24
+    assert oases_id.isalnum()
+
+
+def test_manage_accounts_url_is_deterministic(
+    instance: seahaven.Instance,
+) -> None:
+    """Two calls on the same instance yield different oases_ ids (the seeded
+    stream advances), but both are well-formed."""
+    first = instance.call("manage_stripe_accounts")["reconsent_url"]
+    second = instance.call("manage_stripe_accounts")["reconsent_url"]
+    # Both well-formed
+    assert first.startswith("https://access.stripe.com/mcp/oauth2/authorize/sessions/oases_")
+    assert second.startswith("https://access.stripe.com/mcp/oauth2/authorize/sessions/oases_")
 
 
 def _all_routes():

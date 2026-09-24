@@ -55,6 +55,7 @@ class Router:
     def __init__(self, table: Sequence[Route]) -> None:
         self._root = _Node()
         self._by_key: dict[tuple[str, str], Route] = {}
+        self._by_op_id: dict[str, Route] = {}
         op_ids = {route.op_id for route in table}
         seen: set[tuple[str, str]] = set()
         for route in table:
@@ -79,6 +80,7 @@ class Router:
                 raise seahaven.WorldBug(f"duplicate route {route.method} {route.pattern}")
             node.routes[route.method] = route
             self._by_key[key] = route
+            self._by_op_id[route.op_id] = route
 
     # --- construction ----------------------------------------------------------
 
@@ -195,6 +197,10 @@ class Router:
             return direct
         hit, _ = self._safe_walk(method, path)
         return hit
+
+    def resolve_op_id(self, op_id: str) -> Route | None:
+        """Look up a route by its operation ID."""
+        return self._by_op_id.get(op_id)
 
     def _walk(self, method: str, path: str) -> tuple[Route, list[str]]:
         # A method mismatch is the same 404 as no match at all: recorded at

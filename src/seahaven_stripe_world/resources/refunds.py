@@ -334,7 +334,7 @@ def create_refund(
             f"amount on charge ({_money(charge['currency'], remaining)})",
             param="amount",
         )
-    id_ = _ids.stripe_id(ctx, "re_")
+    id_ = _ids.stripe_id(ctx, "re_", timestamp=ctx.clock.iso(), version_digit="3")
     # The recorded acquirer-reference shape rides card charges; the rails
     # this world stubs have no recorded destination detail, and the field is
     # neither required nor nullable — so it is simply absent for them.

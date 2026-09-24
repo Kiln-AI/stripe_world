@@ -6,8 +6,9 @@ so a rename that lives only in a Python dict is a rename that cannot drift
 
 - a column is named exactly after its Stripe field; only the declared
   flattenings differ, and none of them exist in this phase's resources;
-- `object` comes from the map and `livemode` from `constants` — neither is
-  stored;
+- `object` comes from the map; `livemode` is injected centrally by `to_api`
+  from `ctx.state["account"]["livemode"]` for every object not in the
+  four-object exclusion set (architecture §6.2) — neither is stored;
 - columns in `timestamps` are canonical TEXT converted to Unix seconds by
   `_time.to_unix`, the only such conversion in the package;
 - columns in `json_columns` are inflated by `_json.loads`;
@@ -33,7 +34,27 @@ import seahaven
 from seahaven_stripe_world import _json, _time
 from seahaven_stripe_world.spec import spec_document
 
-__all__ = ["OMIT", "FieldMap", "deleted_stub", "to_api"]
+__all__ = ["NO_LIVEMODE_OBJECTS", "OMIT", "FieldMap", "deleted_stub", "instance_livemode", "to_api"]
+
+#: The four object types that carry no `livemode` field at the current API
+#: version (functional spec §4.7, architecture §6.2). Every other object
+#: receives `livemode` from `ctx.state["account"]["livemode"]` in `to_api`.
+NO_LIVEMODE_OBJECTS: frozenset[str] = frozenset(
+    {"balance_transaction", "refund", "subscription_item", "discount"}
+)
+
+
+def instance_livemode(ctx: seahaven.Ctx) -> bool:
+    """The instance's `livemode` from `ctx.state["account"]`.
+
+    For use in hand-built serializers that construct objects outside of
+    `to_api` (events, credit note line items, invoice line items, the
+    balance object). Falls back to `False` when no account state is present
+    (e.g. in tests that have not registered the startup hook).
+    """
+    account = ctx.state.get("account")
+    return account.get("livemode", False) if isinstance(account, dict) else False
+
 
 #: The sentinel for a `constants` entry whose API field is omitted entirely —
 #: `customer.sources` and friends, which exist only as expand-only inline lists
@@ -57,7 +78,12 @@ def presence_sets(object_name: str) -> tuple[frozenset[str], frozenset[str]]:
     schema = spec_schemas()[object_name]
     properties = schema.get("properties", {})
     required = set(schema.get("required", ()))
-    always = required | {name for name, prop in properties.items() if prop.get("nullable")}
+    always = required | {
+        name
+        for name, prop in properties.items()
+        # Explicitly nullable, or typed as null (its only value *is* null).
+        if prop.get("nullable") or prop.get("type") == "null"
+    }
     return frozenset(always), frozenset(properties) - always
 
 
@@ -94,8 +120,16 @@ def to_api(ctx: seahaven.Ctx, fmap: FieldMap, row: Mapping[str, Any]) -> dict[st
     resolver's business. Raises `KeyError`-shaped `WorldBug` material if a
     mapped column is absent from the row — a SELECT list that disagrees with
     the map is an authoring bug, and a loud one.
+
+    `livemode` is injected centrally here from `ctx.state["account"]["livemode"]`
+    for every object not in the four-object exclusion set, so individual
+    resource modules need not (and must not) set it in their `constants`.
     """
     out: dict[str, Any] = {"object": fmap.object}
+    # Inject livemode centrally for objects that carry it (architecture §6.2).
+    if fmap.object not in NO_LIVEMODE_OBJECTS:
+        account = ctx.state.get("account")
+        out["livemode"] = account.get("livemode", False) if isinstance(account, dict) else False
     for column, api_name in fmap.columns.items():
         if column not in row:
             msg = f"{fmap.object}: column {column!r} absent from the row"

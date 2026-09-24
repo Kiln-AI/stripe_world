@@ -27,6 +27,7 @@ import seahaven
 from seahaven_stripe_world import _ids, _json, _seq, _time
 from seahaven_stripe_world.billing._money import apportion, round_half_up
 from seahaven_stripe_world.resources import _lookup, charges, events, payment_intents
+from seahaven_stripe_world.serialize.fields import instance_livemode
 from seahaven_stripe_world.stripe_errors import declined as declined_body
 
 __all__ = [
@@ -295,6 +296,7 @@ def compute_totals(
     invoice_discounts: Sequence[DiscountSpec] = (),
     tax_rates: Sequence[TaxRateSpec] = (),
     invoice_id: str = "",
+    livemode: bool = True,
 ) -> Totals:
     """The recorded arithmetic, pure: per-line amounts, invoice-scope
     discounts apportioned floor-then-remainder (`_money`'s rule, documented
@@ -459,7 +461,7 @@ def compute_totals(
             {
                 "id": _line_placeholder_id(index),
                 "object": "line_item",
-                "livemode": False,
+                "livemode": livemode,
                 "amount": amounts[index],
                 "currency": currency,
                 "description": line.description,
@@ -598,8 +600,11 @@ def create_invoice(
     manual-create field set into the INSERT for the same reason."""
     now = ctx.clock.iso()
     customer = _lookup.require_row(ctx, "customers", "customer", customer_id, param="customer")
-    id_ = _ids.stripe_id(ctx, "in_")
-    lines = [{**line, "id": _ids.stripe_id(ctx, "il_"), "invoice": id_} for line in totals.lines]
+    id_ = _ids.stripe_id(ctx, "in_", timestamp=now)
+    lines = [
+        {**line, "id": _ids.stripe_id(ctx, "il_", timestamp=now), "invoice": id_}
+        for line in totals.lines
+    ]
     due_date = (
         _time.from_unix(_time.to_unix(now) + days_until_due * 86_400)
         if days_until_due is not None
@@ -874,6 +879,7 @@ def rebuild_invoice_lines(ctx: seahaven.Ctx, invoice_id: str) -> dict[str, Any]:
         invoice_discounts=_invoice_discount_specs(ctx, row),
         tax_rates=_invoice_tax_specs(ctx, row),
         invoice_id=invoice_id,
+        livemode=instance_livemode(ctx),
     )
     previous_ids: dict[tuple[str, ...], str] = {}
     for line in _load_list(row["lines"]):
@@ -902,7 +908,7 @@ def rebuild_invoice_lines(ctx: seahaven.Ctx, invoice_id: str) -> dict[str, Any]:
             )
         line = {
             **line,
-            "id": previous_ids.get(key) or _ids.stripe_id(ctx, "il_"),
+            "id": previous_ids.get(key) or _ids.stripe_id(ctx, "il_", timestamp=ctx.clock.iso()),
         }
         lines.append(line)
     # A draft's amount fields mirror the new total (recorded: the swept
@@ -1098,14 +1104,15 @@ def _write_settlement_cbt(
     of -1 — correcting §3.5's `adjustment` guess for both. A sub-minimum
     roll is `invoice_too_small` (the enum's own name for it, recorded on
     the +1 and +4 rolls)."""
-    cbt_id = _ids.stripe_id(ctx, "cbtxn_")
+    cbt_created = ctx.clock.iso()
+    cbt_id = _ids.stripe_id(ctx, "cbtxn_", timestamp=cbt_created)
     ctx.db.execute(
         "INSERT INTO customer_balance_transactions"
         " (id, x_seq, created, amount, currency, customer, ending_balance,"
         " invoice, type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         cbt_id,
         _seq.next_seq(ctx, "customer_balance_transactions"),
-        ctx.clock.iso(),
+        cbt_created,
         amount,
         invoice["currency"],
         customer_id,

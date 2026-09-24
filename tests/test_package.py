@@ -42,15 +42,18 @@ def test_the_chain_is_error_handler_then_stripe_envelope_then_idempotency() -> N
 
 
 def test_the_stripe_tools_are_registered() -> None:
-    """The world's surface: the four dispatcher-backed Stripe MCP tools plus
-    `get_stripe_account_info` (functional spec §2.6). The controller tool is
-    the framework's, contributed to every world and not part of this world's
-    surface; `call_stripe` is deliberately unregistered (functional spec §2.5)."""
+    """The world's surface: the four dispatcher-backed Stripe MCP tools,
+    the analytics tool, the three account tools, and `controller_run_sql`
+    (the framework's own).
+    `call_stripe` is deliberately unregistered (functional spec section 2.5)."""
     assert set(seahaven_stripe_world.world.tools) == {
         "stripe_api_read",
         "stripe_api_write",
         "stripe_api_search",
         "stripe_api_details",
+        "stripe_analytics",
         "get_stripe_account_info",
+        "list_available_accounts_or_orgs",
+        "manage_stripe_accounts",
         "controller_run_sql",
     }

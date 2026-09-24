@@ -1,258 +1,192 @@
-"""The discovery layer's runtime module: the routed-operation catalogue.
+"""The discovery layer: search and details over the full MCP catalogue.
 
-Loads `spec3.min.json` once, at import, and answers the two discovery tools:
-keyword search over `path` / `operationId` / `summary` / `description`, and
-parameter documentation for one operation. Framework-agnostic on purpose — no
-`seahaven` import, no `ctx` — so it is unit-testable as plain Python, with
-`tools/api.py` owning the translation of its `ValueError` and `None` into this
-world's Seahaven error shapes (`components/discovery.md` §2).
+Loads ``discovery_index.json`` once at import — a precomputed index of all
+catalogued operations (architecture §5.1).  The runtime answers two questions:
 
-The index is the route table's shadow, not a second list: its key set is
-`routes.ALL`'s, and the drift test asserts both directions. An operation that
-is not routed is not searchable and has no details — including real Stripe
-paths this world deliberately cut.
+- **search**: ``intent`` + ``resource`` terms, scored and ranked.
+- **details**: the twelve-key document for one operation by its operation ID.
+
+The index covers every operation the real Stripe MCP catalogues (123 at last
+enumeration), not just the routed subset.  This is what closes the "discovery
+covers entire Stripe API" tell cluster (AR-05 / DT-06..DT-12 / DT-19 / DT-25).
+
+Framework-agnostic on purpose — no ``seahaven`` import, no ``ctx`` — so it
+is unit-testable as plain Python.  ``tools/api.py`` owns the translation of
+a ``None`` into this world's Seahaven error shapes.
 """
 
 import re
 from dataclasses import dataclass
 from typing import Any, Final
 
-from seahaven_stripe_world.spec import spec_document
+from seahaven_stripe_world.spec import discovery_index_document, pinned_version
 
-__all__ = ["BY_KEY", "INDEX", "Operation", "details", "search"]
+__all__ = ["BY_OP_ID", "INDEX", "Operation", "details", "search"]
 
-#: Fixed, not agent-configurable: the tool's signature is `query` alone
-#: (`components/discovery.md` §7), and ten results keep a worst-case response
-#: under a kilobyte.
-LIMIT: Final = 10
+DEFAULT_LIMIT: Final = 5
 
-EXACT_WEIGHT: Final[dict[str, int]] = {"path": 6, "operation_id": 5, "summary": 4, "description": 2}
-SUBSTR_WEIGHT: Final[dict[str, int]] = {
-    "path": 3,
-    "operation_id": 2,
-    "summary": 2,
-    "description": 1,
-}
+# Scoring weights (architecture §5.2)
+_RESOURCE_TAG_WEIGHT: Final = 3
+_RESOURCE_KEYWORD_WEIGHT: Final = 3
+_RESOURCE_PATH_WEIGHT: Final = 2
+_INTENT_VERB_WEIGHT: Final = 2
+_INTENT_SUMMARY_WEIGHT: Final = 1
 
-_VERBS: Final = ("GET", "POST", "DELETE")
 _TOKEN_SPLIT = re.compile(r"[^a-z0-9]+")
-_SENTENCE_END = re.compile(r"(?<=[.!?]) (?=[A-Z0-9])")
-_REF = re.compile(r"#/components/schemas/([A-Za-z0-9_.\-]+)")
+
+# Intent-to-verb mapping (architecture §5.2)
+_INTENT_VERB_MAP: Final[dict[str, set[str]]] = {
+    "create": {"POST"},
+    "add": {"POST"},
+    "list": {"GET"},
+    "retrieve": {"GET"},
+    "get": {"GET"},
+    "read": {"GET"},
+    "update": {"POST"},
+    "modify": {"POST"},
+    "delete": {"DELETE"},
+    "remove": {"DELETE"},
+    "cancel": {"POST"},
+    "void": {"POST"},
+    "refund": {"POST"},
+    "finalize": {"POST"},
+    "capture": {"POST"},
+    "confirm": {"POST"},
+    "search": {"GET"},
+}
 
 
 @dataclass(frozen=True, slots=True)
 class Operation:
-    """One routed operation with its search text precomputed at load."""
+    """One catalogued operation with precomputed search tokens."""
 
+    op_id: str
     method: str
     path: str
-    operation_id: str
     summary: str
-    description: str
-    parameters: tuple[dict[str, Any], ...]
-    tokens: dict[str, frozenset[str]]
-    lower: dict[str, str]
-
-    def result(self) -> dict[str, str]:
-        return {"method": self.method, "path": self.path, "summary": self.summary}
-
-
-def _first_sentence(text: str) -> str:
-    """Stripe's prose, cut to its first sentence. Loose by design: the drift
-    test pins "no more than one `.`-terminated sentence", not exact spans."""
-    if not text:
-        return ""
-    split = _SENTENCE_END.split(text, maxsplit=1)
-    return split[0]
+    tags: tuple[str, ...]
+    keywords: tuple[str, ...]
+    has_path_param: bool
+    # The full details document for direct return from details()
+    document: dict[str, Any]
+    # Precomputed lower-cased token sets for search
+    tag_tokens: frozenset[str]
+    keyword_tokens: frozenset[str]
+    path_tokens: frozenset[str]
+    summary_lower: str
 
 
-def _type_of(schema: dict[str, Any]) -> str:
-    """A compact type string: `array<object>`, `string | integer` — `anyOf`
-    collapses into a `|`-joined list rather than nesting."""
-    if "$ref" in schema:
-        match = _REF.fullmatch(schema["$ref"])
-        return match.group(1) if match else "object"
-    for union_key in ("anyOf", "oneOf"):
-        members = schema.get(union_key)
-        if isinstance(members, list) and members:
-            return " | ".join(_type_of(member) for member in members)
-    kind = schema.get("type", "object")
-    if kind == "array":
-        items = schema.get("items", {})
-        return f"array<{_type_of(items)}>"
-    return str(kind)
+def _build_operation(doc: dict[str, Any]) -> Operation:
+    tags = tuple(doc.get("tags", []))
+    keywords = tuple(doc.get("keywords", []))
+    path = doc["path"]
 
+    # Precompute search tokens
+    tag_tokens: set[str] = set()
+    for tag in tags:
+        for part in _TOKEN_SPLIT.split(tag.lower()):
+            if part:
+                tag_tokens.add(part)
 
-def _param_doc(
-    name: str, schema: dict[str, Any], required: bool, description: str
-) -> dict[str, Any]:
-    doc: dict[str, Any] = {
-        "name": name,
-        "type": _type_of(schema),
-        "required": required,
-        "description": _first_sentence(description),
-    }
-    enum = schema.get("enum")
-    if enum is None:
-        for union_key in ("anyOf", "oneOf"):
-            for member in schema.get(union_key, []):
-                if isinstance(member, dict) and "enum" in member:
-                    enum = member["enum"]
-                    break
-            if enum is not None:
-                break
-    if enum is not None:
-        doc["enum"] = list(enum)
-    return doc
+    keyword_tokens = frozenset(k.lower() for k in keywords if k)
 
+    path_tokens: set[str] = set()
+    for seg in path.split("/"):
+        if seg and not seg.startswith("{"):
+            for part in _TOKEN_SPLIT.split(seg.lower()):
+                if part:
+                    path_tokens.add(part)
 
-def _props_of(schema: dict[str, Any]) -> dict[str, Any]:
-    """The flattened property table a schema addresses, through one-member
-    wrappers: a `{"type": "object", "properties": …}` member of a union."""
-    if "properties" in schema:
-        return schema["properties"]
-    for union_key in ("anyOf", "oneOf"):
-        for member in schema.get(union_key, []):
-            if isinstance(member, dict) and "properties" in member:
-                return member["properties"]
-    return {}
-
-
-def _render_object_fields(schema: dict[str, Any]) -> list[dict[str, Any]]:
-    """Exactly one level of an object parameter's own fields, then stop —
-    `payment_settings` shows its keys; three levels down collapses to
-    `"type": "object"` (`components/discovery.md` §8b)."""
-    return [
-        _param_doc(name, prop, False, prop.get("description", ""))
-        for name, prop in _props_of(schema).items()
-    ]
-
-
-def _build_parameters(operation: dict[str, Any]) -> tuple[dict[str, Any], ...]:
-    """The rendered parameter list: the spec's own path/query parameters plus
-    the request body's (already allowlist-filtered, for a wired route)
-    properties, flattened to depth one."""
-    docs: list[dict[str, Any]] = []
-    for parameter in operation.get("parameters", []):
-        schema = parameter.get("schema", {})
-        docs.append(
-            _param_doc(
-                parameter["name"],
-                schema,
-                bool(parameter.get("required")),
-                parameter.get("description", ""),
-            )
-        )
-    content = (
-        operation.get("requestBody", {}).get("content", {}).get("application/x-www-form-urlencoded")
-    )
-    if content:
-        schema = content.get("schema", {})
-        properties = _props_of(schema)
-        required = set(schema.get("required", []))
-        for name, prop in properties.items():
-            doc = _param_doc(name, prop, name in required, prop.get("description", ""))
-            kind = prop.get("type")
-            if (
-                kind == "object"
-                or "properties" in prop
-                or any(
-                    "properties" in member for member in prop.get("anyOf", prop.get("oneOf", []))
-                )
-            ):
-                doc["fields"] = _render_object_fields(prop)
-            elif kind == "array":
-                items = prop.get("items", {})
-                if items.get("type") == "object" or "properties" in items:
-                    doc["item_fields"] = _render_object_fields(items)
-            docs.append(doc)
-    return tuple(docs)
-
-
-def _build_operation(method: str, path: str, operation: dict[str, Any]) -> Operation:
-    summary = operation.get("summary", "")
-    description = operation.get("description", "")
-    operation_id = operation.get("operationId", "")
-    texts = {
-        "path": path,
-        "operation_id": operation_id,
-        "summary": summary,
-        "description": description,
-    }
     return Operation(
-        method=method,
+        op_id=doc["id"],
+        method=doc["method"],
         path=path,
-        operation_id=operation_id,
-        summary=summary,
-        description=description,
-        parameters=_build_parameters(operation),
-        tokens={
-            field: frozenset(part for part in _TOKEN_SPLIT.split(text.lower()) if part)
-            for field, text in texts.items()
-        },
-        lower={field: text.lower() for field, text in texts.items()},
+        summary=doc.get("summary", ""),
+        tags=tags,
+        keywords=keywords,
+        has_path_param="{" in path,
+        document=doc,
+        tag_tokens=frozenset(tag_tokens),
+        keyword_tokens=keyword_tokens,
+        path_tokens=frozenset(path_tokens),
+        summary_lower=doc.get("summary", "").lower(),
     )
 
 
-def _load_index() -> tuple[tuple[Operation, ...], dict[tuple[str, str], Operation]]:
-    raw = spec_document()
-    operations = tuple(
-        _build_operation(method.upper(), path, item)
-        for path, path_item in raw["paths"].items()
-        for method, item in path_item.items()
-        if method in ("get", "post", "delete")
-    )
-    return operations, {(op.method, op.path): op for op in operations}
+def _load_index() -> tuple[tuple[Operation, ...], dict[str, Operation]]:
+    raw = discovery_index_document()
+    operations = tuple(_build_operation(doc) for doc in sorted(raw.values(), key=lambda d: d["id"]))
+    by_op_id = {op.op_id: op for op in operations}
+    return operations, by_op_id
 
 
-INDEX, BY_KEY = _load_index()
+INDEX, BY_OP_ID = _load_index()
 
 
-def search(query: str) -> list[dict[str, str]]:
-    """Ranked operations for a keyword query.
+def search(intent: str, resource: str, *, limit: int = DEFAULT_LIMIT) -> dict[str, Any]:
+    """Ranked operations for an intent+resource query.
 
-    Exact-token matches outrank substring matches, so `"cancel a subscription"`
-    is not outscored by a path that merely contains the substring. The
-    tie-break `(-score, method, path)` is a total order — `(method, path)` is
-    unique across the routed set — so results never depend on iteration order.
-    Raises `ValueError` for a query with no tokens: that is a malformed call,
-    not a legitimate "match everything".
+    Returns the wrapped envelope matching the real Stripe MCP:
+    ``{"openapi_spec_version": ..., "data": [...]}``.
     """
-    terms = [term for term in _TOKEN_SPLIT.split(query.lower()) if term]
-    if not terms:
-        raise ValueError("empty search query")
+    intent_terms = [t for t in _TOKEN_SPLIT.split(intent.lower()) if t]
+    resource_terms = [t for t in _TOKEN_SPLIT.split(resource.lower()) if t]
+
+    if not intent_terms and not resource_terms:
+        return {"openapi_spec_version": pinned_version(), "data": []}
+
     scored: list[tuple[int, Operation]] = []
-    for operation in INDEX:
+    for op in INDEX:
         score = 0
-        for field in ("path", "operation_id", "summary", "description"):
-            tokens = operation.tokens[field]
-            text = operation.lower[field]
-            for term in terms:
-                if term in tokens:
-                    score += EXACT_WEIGHT[field]
-                elif term in text:
-                    score += SUBSTR_WEIGHT[field]
+
+        # Resource scoring (architecture §5.2):
+        # tags and keywords (weight 3), path segments (weight 2)
+        for term in resource_terms:
+            if term in op.tag_tokens:
+                score += _RESOURCE_TAG_WEIGHT
+            if term in op.keyword_tokens:
+                score += _RESOURCE_KEYWORD_WEIGHT
+            if term in op.path_tokens:
+                score += _RESOURCE_PATH_WEIGHT
+
+        # Intent scoring:
+        # verb class match (weight 2), summary match (weight 1)
+        for term in intent_terms:
+            mapped_verbs = _INTENT_VERB_MAP.get(term)
+            if mapped_verbs and op.method in mapped_verbs:
+                score += _INTENT_VERB_WEIGHT
+            if term in op.summary_lower:
+                score += _INTENT_SUMMARY_WEIGHT
+
         if score > 0:
-            scored.append((score, operation))
-    scored.sort(key=lambda pair: (-pair[0], pair[1].method, pair[1].path))
-    return [operation.result() for _, operation in scored[:LIMIT]]
+            scored.append((score, op))
+
+    # Sort by score descending, then by operation id for stability
+    scored.sort(key=lambda pair: (-pair[0], pair[1].op_id))
+
+    data = []
+    for _, op in scored[:limit]:
+        result: dict[str, Any] = {
+            "id": op.op_id,
+            "method": op.method,
+            "path": op.path,
+            "summary": op.summary,
+        }
+        # llm_context is Stripe-authored prose and is only present where
+        # the probe captured it. Since we have no source for it, it is
+        # omitted (declared residue, functional spec §13).
+        data.append(result)
+
+    return {"openapi_spec_version": pinned_version(), "data": data}
 
 
-def details(method: str, path: str) -> dict[str, Any] | None:
-    """The parameter documentation for one routed operation, or `None` for an
-    unrouted `(method, path)` — including a syntactically valid Stripe path
-    this world cut."""
-    upper = method.upper()
-    if upper not in _VERBS:
+def details(operation_id: str) -> dict[str, Any] | None:
+    """The twelve-key details document for one operation, or ``None``.
+
+    Returns the precomputed document directly from the index. Every
+    catalogued operation has a document; absent operations return None.
+    """
+    op = BY_OP_ID.get(operation_id)
+    if op is None:
         return None
-    operation = BY_KEY.get((upper, path))
-    if operation is None:
-        return None
-    return {
-        "method": operation.method,
-        "path": operation.path,
-        "operation_id": operation.operation_id,
-        "summary": operation.summary,
-        "description": _first_sentence(operation.description),
-        "parameters": [dict(parameter) for parameter in operation.parameters],
-    }
+    return dict(op.document)

@@ -1,0 +1,58 @@
+# Discovery Tools: Tells
+
+Every way an agent can distinguish our world's `stripe_api_search` and `stripe_api_details` from the
+real Stripe MCP server's equivalents.
+
+Source: live probing of the real Stripe MCP server, 2026-09-22, against a sandbox account. Our
+implementation references: `src/seahaven_stripe_world/discovery/index.py` and `tools/api.py` as
+written today, plus `specs/projects/stripe_world/components/discovery.md`.
+
+## Search tells
+
+| ID | What the agent does | Real Stripe answers | Our world answers (as specified/written) | Severity | How to close |
+|---|---|---|---|---|---|
+| DT-01 | Inspects the search tool's input schema | Real requires `intent` (string), `resource` (string), `stripe_context`, `livemode`, optional `limit` (1-20, default 5). Two semantic fields, not a free-text query. | Our tool takes a single `query` string. No `intent`/`resource` split, no `limit`, no `stripe_context`/`livemode`. | **blatant** | Rewrite the search tool's signature to accept `intent` + `resource` + `limit`. Map them internally to the keyword search. `stripe_context`/`livemode` can be accepted and ignored. |
+| DT-02 | Reads the search response envelope | `{"openapi_spec_version": "2026-08-26.preview", "data": [...]}` | A bare JSON array `[...]` with no wrapper. | **blatant** | Wrap the returned list in `{"openapi_spec_version": "<version>", "data": [...]}`. |
+| DT-03 | Reads the fields on each search result | Each result has `{id, method, path, summary}` and optionally `llm_context`. `id` is the operation ID (e.g. `"PostCustomers"`). | Each result has `{method, path, summary}` only. No `id`, no `llm_context`. | **blatant** | Add `id` (= `operation_id`) to every result. Add `llm_context` for operations that have it (the `search` endpoints, disambiguating list endpoints). |
+| DT-04 | Compares path parameters in search results | Real uses `{id}` for nearly all single-resource paths (e.g. `/v1/customers/{id}`, `/v1/subscriptions/{id}`, `/v1/invoices/{id}/void`). Uses `{customer_id}` only for parent disambiguation in nested paths like `/v1/customers/{customer_id}/payment_methods/{id}`. | Our paths from `spec3.min.json` use the OpenAPI spec's descriptive names: `{customer}`, `{subscription_exposed_id}`, `{invoice}`, `{intent}`, `{charge}`, `{schedule}`, etc. Some use `{id}` (balance_transactions, products, credit_notes). | **blatant** | Normalize all single-resource path parameters to `{id}` in the pruned spec at generation time. Use `{<resource>_id}` for parent parameters in nested paths, matching the real MCP's convention. |
+| DT-05 | Checks the default result count | Real defaults to 5 results per search (configurable via `limit` to max 20). | Our world returns up to 10 results, fixed, no `limit` parameter. | **probable** | Accept a `limit` parameter (1-20, default 5) and pass it through. |
+| DT-06 | Searches for an out-of-scope resource (e.g. `intent: "create", resource: "issuing card"`) | Returns Issuing operations: `GetIssuingCards`, `GetIssuingCardholders`, etc. with full details. | Returns `[]` (no match, since Issuing operations are not in the 148-route index). | **blatant** | See DT-15 (coverage gap). At minimum, return stub results for out-of-scope operations so the agent sees them; the details tool can then say they exist but are not available. Alternatively, proxy to a broader index. |
+| DT-07 | Searches for Checkout Sessions | Returns `PostCheckoutSessions`, `GetCheckoutSessions`, etc. | Returns `[]`. | **blatant** | Same as DT-06. |
+| DT-08 | Searches for Connect accounts | Returns `GetAccounts`, `EnableConnect`, `GetAccountsAccount`, plus v2 financial account operations. | Returns `[]`. | **blatant** | Same as DT-06. |
+| DT-09 | Searches for Treasury/financial accounts | Returns v2 paths: `GetV2MoneyManagementFinancialAccounts`, `GetV2MoneyManagementFinancialAccountsId`, etc. | Returns `[]`. | **probable** | Same as DT-06 for v1 out-of-scope. v2 paths are a separate gap. |
+| DT-10 | Searches for Tax calculations | Returns `PostTaxCalculations`, `GetTaxCalculationsCalculation`, etc. | Returns `[]`. | **probable** | Same as DT-06. |
+| DT-11 | Searches for Payment Links | Returns `GetPaymentLinks`, `PostPaymentLinks`, etc. | Returns `[]`. | **probable** | Same as DT-06. |
+| DT-12 | Searches for `test_helpers` operations | Returns `PostTestHelpersTestClocks` for "create test helper clock". | Returns `[]`. | **probable** | Same as DT-06. |
+
+## Details tells
+
+| ID | What the agent does | Real Stripe answers | Our world answers (as specified/written) | Severity | How to close |
+|---|---|---|---|---|---|
+| DT-13 | Inspects the details tool's input schema | Real takes `stripe_api_operation_id` (a single string like `"PostCustomers"`), plus `stripe_context` and `livemode`. | Our tool takes `method` (Literal["GET","POST","DELETE"]) + `path` (string). No operation-ID-based lookup. | **blatant** | Accept `stripe_api_operation_id` as the primary key. Map it to `(method, path)` internally using the `operation_id` field already stored on each `Operation`. Keep `method`+`path` as a fallback or remove it. |
+| DT-14 | Reads the details response key set | Real returns: `{id, method, path, summary, description, tags, keywords, parameters: {path, query, body}, required_permissions, openapi_spec_version}` plus optional `llm_context`. 12 keys. | Our tool returns: `{method, path, operation_id, summary, description, parameters: [list]}`. 6 keys. Key name is `operation_id`, not `id`. | **blatant** | Add `id` (rename `operation_id`), `tags`, `keywords`, `required_permissions`, `openapi_spec_version`. Restructure `parameters` from a flat list to `{path: {}, query: {}, body: {}}`. |
+| DT-15 | Reads the parameter organization in details | Real organizes parameters as `{path: {name: {...}}, query: {name: {...}}, body: {name: {...}}}`. Parameter name is the dict key, not a field. Each param has `{type, description, required, enum?, properties?, items?}`. | Our tool returns a flat list: `[{name, type, required, description, enum?, fields?, item_fields?}]`. Name is a field inside each dict, not the dict key. Nested objects use `fields`/`item_fields` keys. | **blatant** | Restructure to match: dict-keyed by param name, organized into path/query/body sections. Replace `fields` with `properties` and `item_fields` with `items.properties`. |
+| DT-16 | Checks description length in details | Real returns full multi-paragraph descriptions with markdown links. E.g. PostSubscriptions has 4+ paragraphs. | Our tool truncates to the first sentence only (by design, per `discovery.md` section 8). | **probable** | Return full descriptions. The size concern from discovery.md section 8 is real but the real server sends full descriptions; truncation is a tell. |
+| DT-17 | Checks parameter nesting depth | Real has arbitrary nesting depth. E.g. `PostSubscriptions` has `payment_settings.payment_method_options.card.mandate_options.amount` (4 levels deep). | Our tool flattens to depth 1 only (by design, per `discovery.md` section 8b). Nested objects beyond depth 1 collapse to `"type": "object"`. | **probable** | Match the real server's nesting depth. The PostCheckoutSessions response was 156K characters, so there may be a practical upper bound, but the real server does not artificially limit depth. |
+| DT-18 | Asks for details on a nonexistent operation | Real returns an MCP error with text: `"Operation 'X' is not available. Use stripe_api_search to find available operations."` | Our tool raises `errors.UnknownOperation`, which becomes a Seahaven `ToolError`. The error text and format differ. | **probable** | Match the real error text verbatim. |
+| DT-19 | Asks for details on an out-of-scope operation (e.g. `GetIssuingCards`) | Real returns full details with all parameters, tags, keywords, permissions. The operation exists in the real server's index. | Our tool returns `errors.UnknownOperation` because Issuing is not in the 148-route index. | **blatant** | Either include out-of-scope operations in the discovery index (even if execution would fail), or return the same error the real server would return for genuinely nonexistent operations. |
+| DT-20 | Checks for `required_permissions` | Real includes `required_permissions` array on every details response. Values like `["customer_write"]`, `["invoice_read"]`, `["issuing_card_read"]`, `["billing_clock_write"]`. Can be empty `[]`. | Our tool does not include `required_permissions`. | **probable** | Add `required_permissions` to the details response. Source from the OpenAPI spec or maintain a mapping. |
+| DT-21 | Checks for `openapi_spec_version` | Real includes `"openapi_spec_version": "2026-08-26.preview"` in every search and details response. | Our tool does not include this field. | **probable** | Add the field to both search and details responses. Pin to the spec version in `research/MANIFEST.md`. |
+
+## Coverage and scope tells
+
+| ID | What the agent does | Real Stripe answers | Our world answers (as specified/written) | Severity | How to close |
+|---|---|---|---|---|---|
+| DT-22 | Searches for events (`intent: "list", resource: "events"`) | Returns v2 Event Destinations but **NOT** `GetEvents` or `GetEventsId`. The v1 events API is not exposed in the real MCP's discovery surface at all. | Our world includes `GET /v1/events` and `GET /v1/events/{event}` as routed operations that would appear in search results. | **probable** | Remove events from the discovery index, or verify whether this is account-specific behavior on the real server. Our world exposes events; the real MCP hides them from search/details. |
+| DT-23 | Asks for details on `PostInvoicesInvoicePay` | Real returns "Operation not available" error. The pay action is not exposed in the real MCP. | Our world may include this as a routed operation (needs verification against the route table). | **probable** | Verify and align. If the real MCP intentionally hides certain operations from discovery, our world should match. |
+| DT-24 | Searches for legacy sub-resources (e.g. `intent: "list", resource: "customers sources"`) | Returns unrelated results (v2 approval requests). `GetCustomersCustomerSources` returns "not available" in details. Legacy source endpoints are absent from the real MCP's discovery surface. | Our world also excludes these by design (per functional spec section 3.2). No tell here. | **subtle** | Already aligned. |
+| DT-25 | Searches broadly to estimate total operation coverage | Real search surfaces v1 and v2 operations across the full Stripe API: Issuing, Connect, Treasury/MoneyManagement, Tax, Checkout, Payment Links, Billing Portal, Webhook Endpoints, Test Helpers, and more. v2 paths include `money_management/*`, `core/*`. Also surfaces `_unstable` paths like `/v1/_unstable/connect/enable`. | Our world surfaces only 148 v1 billing-scope operations. Zero v2 paths. Zero out-of-scope product areas. | **blatant** | This is the aggregate of DT-06 through DT-12. At minimum, include enough of the real API's operation catalogue in the discovery index that an agent doing routine searches doesn't hit a wall. The operations need not be executable; discovery can advertise them while execution returns a permission error. |
+
+## Summary by severity
+
+| Severity | Count | IDs |
+|---|---|---|
+| **blatant** | 11 | DT-01, DT-02, DT-03, DT-04, DT-06, DT-07, DT-08, DT-13, DT-14, DT-15, DT-19, DT-25 |
+| **probable** | 12 | DT-05, DT-09, DT-10, DT-11, DT-12, DT-16, DT-17, DT-18, DT-20, DT-21, DT-22, DT-23 |
+| **subtle** | 1 | DT-24 |
+
+**Total: 24 tells** (some are different facets of the same root cause, especially the coverage gap tells DT-06 through DT-12 which are all instances of DT-25).

@@ -17,6 +17,7 @@ from tools_dev.prune_spec import (
     SPEC_PATH,
     STOPLIST_NAMES,
     STOPLIST_PREFIXES,
+    TOOL_OUTPUT_SCHEMAS,
 )
 from tools_dev.prune_spec import (
     main as prune_main,
@@ -74,9 +75,12 @@ def test_api_version_is_pinned() -> None:
 
 def test_no_stoplisted_schema_survives_anywhere() -> None:
     """The completeness backstop for the hand-transcribed stoplist: no schema
-    key and no $ref target in the artifact may be out of scope."""
+    key and no $ref target in the artifact may be out of scope.
+    TOOL_OUTPUT_SCHEMAS are seeded back in (architecture §7) and are allowed."""
     blob = MIN["components"]["schemas"]
     for name in blob:
+        if name in TOOL_OUTPUT_SCHEMAS:
+            continue
         assert name not in STOPLIST_NAMES, name
         assert not name.startswith(STOPLIST_PREFIXES), name
     for node in walk(MIN):

@@ -6,15 +6,14 @@ so widening the body cannot quietly change them."""
 import pytest
 import seahaven
 
-from conftest import BLANK_NOW
+from conftest import BLANK_NOW, api_write
+from seahaven_stripe_world.errors import StripeToolError
 
 pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
 
 
 def create(instance: seahaven.Instance, **params: object) -> dict:
-    result = instance.call("stripe_api_write", method="POST", path="/v1/customers", params=params)
-    assert result["status"] == 200, result
-    return result["body"]
+    return api_write(instance, "POST", "/v1/customers", params)
 
 
 def test_nested_objects_serialize_canonically(instance: seahaven.Instance) -> None:
@@ -70,31 +69,30 @@ def test_nested_update_merges_per_leaf(instance: seahaven.Instance) -> None:
         "phone": None,
         "carrier": "DHL",
     }
-    no_op = instance.call(
-        "stripe_api_write",
-        method="POST",
-        path=f"/v1/customers/{cus['id']}",
-        params={"shipping": {}},
+    no_op = api_write(
+        instance,
+        "POST",
+        f"/v1/customers/{cus['id']}",
+        {"shipping": {}},
     )
-    assert no_op["status"] == 200
-    assert no_op["body"]["shipping"] == cus["shipping"]
+    assert no_op["shipping"] == cus["shipping"]
 
-    one_leaf = instance.call(
-        "stripe_api_write",
-        method="POST",
-        path=f"/v1/customers/{cus['id']}",
-        params={"shipping": {"tracking_number": "TRACK1"}},
+    one_leaf = api_write(
+        instance,
+        "POST",
+        f"/v1/customers/{cus['id']}",
+        {"shipping": {"tracking_number": "TRACK1"}},
     )
-    assert one_leaf["body"]["shipping"]["carrier"] == "DHL"
-    assert one_leaf["body"]["shipping"]["tracking_number"] == "TRACK1"
+    assert one_leaf["shipping"]["carrier"] == "DHL"
+    assert one_leaf["shipping"]["tracking_number"] == "TRACK1"
 
-    address_leaf = instance.call(
-        "stripe_api_write",
-        method="POST",
-        path=f"/v1/customers/{cus['id']}",
-        params={"address": {"country": "DE"}},
+    address_leaf = api_write(
+        instance,
+        "POST",
+        f"/v1/customers/{cus['id']}",
+        {"address": {"country": "DE"}},
     )
-    assert address_leaf["body"]["address"] == {**null_address, "country": "DE"}
+    assert address_leaf["address"] == {**null_address, "country": "DE"}
 
 
 def test_a_nonzero_balance_stamps_the_account_default_currency(
@@ -109,36 +107,37 @@ def test_a_nonzero_balance_stamps_the_account_default_currency(
     assert stamped["balance"] == 500
     assert stamped["currency"] == "usd"
 
-    updated = instance.call(
-        "stripe_api_write",
-        method="POST",
-        path=f"/v1/customers/{create(instance)['id']}",
-        params={"balance": -250},
+    updated = api_write(
+        instance,
+        "POST",
+        f"/v1/customers/{create(instance)['id']}",
+        {"balance": -250},
     )
-    assert updated["body"]["balance"] == -250
-    assert updated["body"]["currency"] == "usd"
+    assert updated["balance"] == -250
+    assert updated["currency"] == "usd"
 
 
 def test_currency_is_not_a_settable_parameter(instance: seahaven.Instance) -> None:
-    result = instance.call(
-        "stripe_api_write",
-        method="POST",
-        path="/v1/customers",
-        params={"currency": "usd"},
-    )
-    assert result["status"] == 400
-    assert result["body"]["error"]["code"] == "parameter_unknown"
+    with pytest.raises(StripeToolError) as exc_info:
+        api_write(
+            instance,
+            "POST",
+            "/v1/customers",
+            {"currency": "usd"},
+        )
+    assert exc_info.value.status == 400
+    assert exc_info.value.stripe_body["error"]["code"] == "parameter_unknown"
 
 
 def test_invoice_settings_update_keeps_unset_keys(instance: seahaven.Instance) -> None:
     cus = create(instance)
-    updated = instance.call(
-        "stripe_api_write",
-        method="POST",
-        path=f"/v1/customers/{cus['id']}",
-        params={"invoice_settings": {"footer": "Thanks"}},
+    updated = api_write(
+        instance,
+        "POST",
+        f"/v1/customers/{cus['id']}",
+        {"invoice_settings": {"footer": "Thanks"}},
     )
-    assert updated["body"]["invoice_settings"] == {
+    assert updated["invoice_settings"] == {
         "custom_fields": None,
         "default_payment_method": None,
         "footer": "Thanks",
@@ -154,11 +153,15 @@ def test_invoice_prefix_unique(instance: seahaven.Instance) -> None:
     customer keeps its prefix reserved — the tombstone still holds it."""
     holder = create(instance, invoice_prefix="TAKEN1")
 
-    duplicate = instance.call(
-        "stripe_api_write", method="POST", path="/v1/customers", params={"invoice_prefix": "TAKEN1"}
-    )
-    assert duplicate["status"] == 400
-    assert duplicate["body"]["error"] == {
+    with pytest.raises(StripeToolError) as exc_info:
+        api_write(
+            instance,
+            "POST",
+            "/v1/customers",
+            {"invoice_prefix": "TAKEN1"},
+        )
+    assert exc_info.value.status == 400
+    assert exc_info.value.stripe_body["error"] == {
         "type": "invalid_request_error",
         "param": "invoice_prefix",
         "message": f"This invoice number prefix is taken by customer: {holder['id']}. "
@@ -166,28 +169,34 @@ def test_invoice_prefix_unique(instance: seahaven.Instance) -> None:
     }
 
     other = create(instance)
-    onto_existing = instance.call(
-        "stripe_api_write",
-        method="POST",
-        path=f"/v1/customers/{other['id']}",
-        params={"invoice_prefix": "TAKEN1"},
-    )
-    assert onto_existing["status"] == 400
-    assert onto_existing["body"]["error"]["param"] == "invoice_prefix"
+    with pytest.raises(StripeToolError) as exc_info:
+        api_write(
+            instance,
+            "POST",
+            f"/v1/customers/{other['id']}",
+            {"invoice_prefix": "TAKEN1"},
+        )
+    assert exc_info.value.status == 400
+    assert exc_info.value.stripe_body["error"]["param"] == "invoice_prefix"
 
-    own_again = instance.call(
-        "stripe_api_write",
-        method="POST",
-        path=f"/v1/customers/{holder['id']}",
-        params={"invoice_prefix": "TAKEN1"},
+    # Re-sending own prefix is not a conflict.
+    own_again = api_write(
+        instance,
+        "POST",
+        f"/v1/customers/{holder['id']}",
+        {"invoice_prefix": "TAKEN1"},
     )
-    assert own_again["status"] == 200
+    assert own_again["invoice_prefix"] == "TAKEN1"
 
-    instance.call("stripe_api_write", method="DELETE", path=f"/v1/customers/{holder['id']}")
-    after_delete = instance.call(
-        "stripe_api_write", method="POST", path="/v1/customers", params={"invoice_prefix": "TAKEN1"}
-    )
-    assert after_delete["status"] == 400  # the tombstone still holds the prefix
+    api_write(instance, "DELETE", f"/v1/customers/{holder['id']}")
+    with pytest.raises(StripeToolError) as exc_info:
+        api_write(
+            instance,
+            "POST",
+            "/v1/customers",
+            {"invoice_prefix": "TAKEN1"},
+        )
+    assert exc_info.value.status == 400  # the tombstone still holds the prefix
 
 
 def test_a_minted_prefix_collision_re_mints(probe, monkeypatch) -> None:
@@ -228,12 +237,15 @@ def test_invoice_prefix_contract_and_create_time_round_trip(
     assert create(instance, invoice_prefix="ABCDEFGHIJKL")["invoice_prefix"] == "ABCDEFGHIJKL"
 
     for bad in ("a", "abc", "AB_1", "ABCDEFGHIJKLM", "lower"):
-        result = instance.call(
-            "stripe_api_write", method="POST", path="/v1/customers", params={"invoice_prefix": bad}
-        )
-        assert result["status"] == 400, bad
-        error = result["body"]["error"]
-        assert error == {
+        with pytest.raises(StripeToolError) as exc_info:
+            api_write(
+                instance,
+                "POST",
+                "/v1/customers",
+                {"invoice_prefix": bad},
+            )
+        assert exc_info.value.status == 400, bad
+        assert exc_info.value.stripe_body["error"] == {
             "type": "invalid_request_error",
             # The en dash is Stripe's own, probed verbatim.
             "message": "Invoice number prefix must be 1–12 uppercase letters or numbers.",  # noqa: RUF001
@@ -241,31 +253,30 @@ def test_invoice_prefix_contract_and_create_time_round_trip(
 
     # The same contract holds on update.
     cus = created["id"]
-    refused = instance.call(
-        "stripe_api_write",
-        method="POST",
-        path=f"/v1/customers/{cus}",
-        params={"invoice_prefix": "x"},
+    with pytest.raises(StripeToolError):
+        api_write(
+            instance,
+            "POST",
+            f"/v1/customers/{cus}",
+            {"invoice_prefix": "x"},
+        )
+    changed = api_write(
+        instance,
+        "POST",
+        f"/v1/customers/{cus}",
+        {"invoice_prefix": "ZZ9"},
     )
-    assert refused["status"] == 400
-    changed = instance.call(
-        "stripe_api_write",
-        method="POST",
-        path=f"/v1/customers/{cus}",
-        params={"invoice_prefix": "ZZ9"},
-    )
-    assert changed["body"]["invoice_prefix"] == "ZZ9"
+    assert changed["invoice_prefix"] == "ZZ9"
 
 
 def test_scope_cut_parameters_are_refused(instance: seahaven.Instance) -> None:
     """The dahlia body minus the scope-boundary cuts: sending a cut parameter
     is `parameter_unknown`, the closed-set contract (architecture.md §3.3)."""
     for cut in ("cash_balance", "tax", "tax_id_data", "test_clock", "source"):
-        result = instance.call(
-            "stripe_api_write", method="POST", path="/v1/customers", params={cut: {}}
-        )
-        assert result["status"] == 400, cut
-        assert result["body"]["error"]["code"] == "parameter_unknown", cut
+        with pytest.raises(StripeToolError) as exc_info:
+            api_write(instance, "POST", "/v1/customers", {cut: {}})
+        assert exc_info.value.status == 400, cut
+        assert exc_info.value.stripe_body["error"]["code"] == "parameter_unknown", cut
 
 
 def test_customer_deleted_event_is_the_full_pre_delete_object(
@@ -278,11 +289,9 @@ def test_customer_deleted_event_is_the_full_pre_delete_object(
     import json
 
     cus = create(instance, name="Last State", metadata={"k": "v"})
-    instance.call(
-        "stripe_api_write", method="POST", path=f"/v1/customers/{cus['id']}", params={"name": "X"}
-    )
-    deleted = instance.call("stripe_api_write", method="DELETE", path=f"/v1/customers/{cus['id']}")
-    assert deleted["body"] == {"id": cus["id"], "object": "customer", "deleted": True}
+    api_write(instance, "POST", f"/v1/customers/{cus['id']}", {"name": "X"})
+    deleted = api_write(instance, "DELETE", f"/v1/customers/{cus['id']}")
+    assert deleted == {"id": cus["id"], "object": "customer", "deleted": True}
 
     rows = instance.inspect().rows("SELECT type, data FROM events ORDER BY x_seq")
     deleted_rows = [row for row in rows if row["type"] == "customer.deleted"]

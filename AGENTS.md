@@ -29,15 +29,28 @@ Errors are ToolError subclasses in errors.py; the error handler is the only plac
 ## About this world
 
 StripeAPI is a faithful, stateful, forkable replica of Stripe's Billing and Payments core: 155
-routed operations across 24 SQLite tables behind the five-tool Stripe MCP surface
-(`stripe_api_search`, `stripe_api_details`, `stripe_api_read`, `stripe_api_write`,
-`get_stripe_account_info`). Not affiliated with Stripe; Stripe's field names, enum values and id
-prefixes are functional API vocabulary under the source material's MIT licence.
-The design lives in `specs/projects/stripe_world/`; the friction log is `SEAHAVEN_FINDINGS.md`
-and every workaround in the code carries a comment linking to its entry there.
+routed operations across 24 SQLite tables behind Stripe's own eight-tool MCP surface
+(`list_available_accounts_or_orgs`, `stripe_api_search`, `stripe_api_details`, `stripe_api_read`,
+`stripe_api_write`, `get_stripe_account_info`, `manage_stripe_accounts`, `stripe_analytics`).
+Tools are addressed by `operationId` with `stripe_context` and `livemode` context parameters; on
+success a tool returns the bare Stripe object, on failure it raises an MCP tool error. Discovery covers the 123 operations the real Stripe MCP catalogues (72 routed, 51 catalogued but
+unrouted, which answer a product-activation or permission refusal when called); the remaining 471
+operations in spec3.json are absent on the real MCP and answer "not available" when addressed
+directly.
+Three of Stripe's ten MCP tools (`search_stripe_documentation`,
+`stripe_implementation_planner`, `send_stripe_mcp_feedback`) are deliberately not built here --
+a harness composes them from the real Stripe MCP server alongside this world's eight
+(see `specs/projects/no_tells/functional_spec.md` section 4.1.2--4.1.3). This world is not a
+standalone drop-in for the Stripe MCP server.
+Not affiliated with Stripe; Stripe's field names, enum values and id prefixes are functional API
+vocabulary under the source material's MIT licence.
+The design lives in `specs/projects/stripe_world/`; the MCP conformance spec in
+`specs/projects/no_tells/`; the friction log is `SEAHAVEN_FINDINGS.md` and every workaround in
+the code carries a comment linking to its entry there.
 
-- **Pinned Stripe API version** `2026-08-26.dahlia`; `spec3.min.json` (generated in Phase 2) is the
-  authority for every object shape. Nothing is specced from memory.
+- **Pinned Stripe API version** `2026-08-26.dahlia`; `spec3.min.json` (generated) is the
+  authority for every object shape. Nothing is specced from memory. Discovery reports
+  `2026-08-26.preview` -- the live MCP's label for the same version (declared residue).
 - **Ids** are Stripe-shaped (`cus_…`, `pi_…`, `ch_…`), minted only by `_ids.stripe_id` from
   `ctx.ids.random`. Never `ctx.ids.uuid()` and never `uuid4()` — a bare UUID where Stripe expects a
   prefix is the hazard `SEAHAVEN_FINDINGS.md` Entry 2 records.

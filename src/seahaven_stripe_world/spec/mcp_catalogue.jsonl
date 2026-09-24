@@ -1,0 +1,595 @@
+{"kind": "tools", "probed": "2026-09-23", "tools": ["get_stripe_account_info", "search_stripe_documentation", "send_stripe_feedback", "stripe_analytics", "stripe_api_details", "stripe_api_read", "stripe_api_search", "stripe_api_write", "stripe_implementation_planner"]}
+{"op": "DeleteAccountsAccount", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "DeleteAccountsAccountBankAccountsId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "DeleteAccountsAccountExternalAccountsId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "DeleteAccountsAccountPeoplePerson", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "DeleteAccountsAccountPersonsPerson", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "DeleteApplePayDomainsDomain", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "DeleteCouponsCoupon", "permissions": ["coupon_write"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "DeleteCustomersCustomer", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "DeleteCustomersCustomerBankAccountsId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "DeleteCustomersCustomerCardsId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "DeleteCustomersCustomerDiscount", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "DeleteCustomersCustomerSourcesId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "DeleteCustomersCustomerSubscriptionsSubscriptionExposedId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "DeleteCustomersCustomerSubscriptionsSubscriptionExposedIdDiscount", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "DeleteCustomersCustomerTaxIdsId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "DeleteEphemeralKeysKey", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "DeleteInvoiceitemsInvoiceitem", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "DeleteInvoicesInvoice", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "DeletePlansPlan", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "DeleteProductsId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "DeleteProductsProductFeaturesId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "DeleteRadarValueListItemsItem", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "DeleteRadarValueListsValueList", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "DeleteSubscriptionItemsItem", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "DeleteSubscriptionsSubscriptionExposedId", "permissions": ["subscription_write"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "DeleteSubscriptionsSubscriptionExposedIdDiscount", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "DeleteTaxIdsId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "DeleteTerminalConfigurationsConfiguration", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "DeleteTerminalLocationsLocation", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "DeleteTerminalReadersReader", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "DeleteTestHelpersTestClocksTestClock", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "DeleteWebhookEndpointsWebhookEndpoint", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetAccount", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetAccounts", "permissions": ["limited_account_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetAccountsAccount", "permissions": ["limited_account_retrieve"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetAccountsAccountBankAccountsId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetAccountsAccountCapabilities", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetAccountsAccountCapabilitiesCapability", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetAccountsAccountExternalAccounts", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetAccountsAccountExternalAccountsId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetAccountsAccountPeople", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetAccountsAccountPeoplePerson", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetAccountsAccountPersons", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetAccountsAccountPersonsPerson", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetApplePayDomains", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetApplePayDomainsDomain", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetApplicationFees", "permissions": ["application_fee_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetApplicationFeesFeeRefundsId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetApplicationFeesId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetApplicationFeesIdRefunds", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetAppsSecrets", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetAppsSecretsFind", "probed": "2026-09-23", "verdict": "absent"}
+{"key_restricted": true, "op": "GetBalance", "permissions": ["balance_amount_read"], "probed": "2026-09-23", "verdict": "catalogued", "via": "oauth"}
+{"op": "GetBalanceHistory", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetBalanceHistoryId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetBalanceSettings", "probed": "2026-09-23", "verdict": "absent"}
+{"key_restricted": true, "op": "GetBalanceTransactions", "permissions": ["balance_read"], "probed": "2026-09-23", "verdict": "catalogued", "via": "oauth"}
+{"key_restricted": true, "op": "GetBalanceTransactionsId", "permissions": ["balance_read"], "probed": "2026-09-23", "verdict": "catalogued", "via": "oauth"}
+{"op": "GetBillingAlerts", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetBillingAlertsId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetBillingCreditBalanceSummary", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetBillingCreditBalanceTransactions", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetBillingCreditBalanceTransactionsId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetBillingCreditGrants", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetBillingCreditGrantsId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetBillingFeedbackOptions", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetBillingFeedbackOptionsId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetBillingMeters", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetBillingMetersId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetBillingMetersIdEventSummaries", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetBillingPortalConfigurations", "permissions": ["customer_portal_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetBillingPortalConfigurationsConfiguration", "permissions": ["customer_portal_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetCharges", "permissions": ["charge_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetChargesCharge", "permissions": ["charge_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetChargesChargeDispute", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetChargesChargeRefunds", "permissions": ["charge_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetChargesChargeRefundsRefund", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetChargesSearch", "permissions": ["charge_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetCheckoutSessions", "permissions": ["checkout_session_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetCheckoutSessionsSession", "permissions": ["checkout_session_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetCheckoutSessionsSessionLineItems", "permissions": ["checkout_session_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetClimateOrders", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetClimateOrdersOrder", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetClimateProducts", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetClimateProductsProduct", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetClimateSuppliers", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetClimateSuppliersSupplier", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetConfirmationTokensConfirmationToken", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetCountrySpecs", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetCountrySpecsCountry", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetCoupons", "permissions": ["coupon_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetCouponsCoupon", "permissions": ["coupon_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetCreditNotes", "permissions": ["credit_note_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetCreditNotesCreditNoteLines", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetCreditNotesId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetCreditNotesPreview", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetCreditNotesPreviewLines", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetCustomers", "permissions": ["customer_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetCustomersCustomer", "permissions": ["customer_limited_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetCustomersCustomerBalanceTransactions", "permissions": ["customer_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetCustomersCustomerBalanceTransactionsTransaction", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetCustomersCustomerBankAccounts", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetCustomersCustomerBankAccountsId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetCustomersCustomerCards", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetCustomersCustomerCardsId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetCustomersCustomerCashBalance", "permissions": ["customer_limited_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetCustomersCustomerCashBalanceTransactions", "permissions": ["customer_balance_transactions_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetCustomersCustomerCashBalanceTransactionsTransaction", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetCustomersCustomerDiscount", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetCustomersCustomerPaymentMethods", "permissions": ["payment_method_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetCustomersCustomerPaymentMethodsPaymentMethod", "permissions": ["payment_method_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetCustomersCustomerSources", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetCustomersCustomerSourcesId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetCustomersCustomerSubscriptions", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetCustomersCustomerSubscriptionsSubscriptionExposedId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetCustomersCustomerSubscriptionsSubscriptionExposedIdDiscount", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetCustomersCustomerTaxIds", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetCustomersCustomerTaxIdsId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetCustomersSearch", "permissions": ["customer_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetDisputes", "permissions": ["dispute_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetDisputesDispute", "permissions": ["dispute_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetEntitlementsActiveEntitlements", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetEntitlementsActiveEntitlementsId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetEntitlementsFeatures", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetEntitlementsFeaturesId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetEvents", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetEventsId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetExchangeRates", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetExchangeRatesRateId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetFileLinks", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetFileLinksLink", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetFiles", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetFilesFile", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetFinancialConnectionsAccounts", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetFinancialConnectionsAccountsAccount", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetFinancialConnectionsAccountsAccountOwners", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetFinancialConnectionsSessionsSession", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetFinancialConnectionsTransactions", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetFinancialConnectionsTransactionsTransaction", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetForwardingRequests", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetForwardingRequestsId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetIdentityVerificationReports", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetIdentityVerificationReportsReport", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetIdentityVerificationSessions", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetIdentityVerificationSessionsSession", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetInvoicePayments", "permissions": ["invoice_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetInvoicePaymentsInvoicePayment", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetInvoiceRenderingTemplates", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetInvoiceRenderingTemplatesTemplate", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetInvoiceitems", "permissions": ["invoice_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetInvoiceitemsInvoiceitem", "permissions": ["invoice_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetInvoices", "permissions": ["invoice_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetInvoicesInvoice", "permissions": ["invoice_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetInvoicesInvoiceLines", "permissions": ["invoice_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetInvoicesSearch", "permissions": ["invoice_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"key_restricted": true, "op": "GetIssuingAuthorizations", "permissions": ["issuing_authorization_read"], "probed": "2026-09-23", "verdict": "catalogued", "via": "oauth"}
+{"key_restricted": true, "op": "GetIssuingAuthorizationsAuthorization", "permissions": ["issuing_authorization_read"], "probed": "2026-09-23", "verdict": "catalogued", "via": "oauth"}
+{"key_restricted": true, "op": "GetIssuingCardholders", "permissions": ["issuing_cardholder_read"], "probed": "2026-09-23", "verdict": "catalogued", "via": "oauth"}
+{"key_restricted": true, "op": "GetIssuingCardholdersCardholder", "permissions": ["issuing_cardholder_read"], "probed": "2026-09-23", "verdict": "catalogued", "via": "oauth"}
+{"key_restricted": true, "op": "GetIssuingCards", "permissions": ["issuing_card_read"], "probed": "2026-09-23", "verdict": "catalogued", "via": "oauth"}
+{"key_restricted": true, "op": "GetIssuingCardsCard", "probed": "2026-09-23", "verdict": "catalogued", "via": "oauth"}
+{"key_restricted": true, "op": "GetIssuingDisputes", "permissions": ["issuing_dispute_read"], "probed": "2026-09-23", "verdict": "catalogued", "via": "oauth"}
+{"key_restricted": true, "op": "GetIssuingDisputesDispute", "permissions": ["issuing_dispute_read"], "probed": "2026-09-23", "verdict": "catalogued", "via": "oauth"}
+{"op": "GetIssuingPersonalizationDesigns", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetIssuingPersonalizationDesignsPersonalizationDesign", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetIssuingPhysicalBundles", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetIssuingPhysicalBundlesPhysicalBundle", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetIssuingSettlementsSettlement", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetIssuingTokens", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetIssuingTokensToken", "probed": "2026-09-23", "verdict": "absent"}
+{"key_restricted": true, "op": "GetIssuingTransactions", "permissions": ["issuing_transaction_read"], "probed": "2026-09-23", "verdict": "catalogued", "via": "oauth"}
+{"key_restricted": true, "op": "GetIssuingTransactionsTransaction", "permissions": ["issuing_transaction_read"], "probed": "2026-09-23", "verdict": "catalogued", "via": "oauth"}
+{"op": "GetLinkAccountSessionsSession", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetLinkedAccounts", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetLinkedAccountsAccount", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetLinkedAccountsAccountOwners", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetMandatesMandate", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetPaymentAttemptRecords", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetPaymentAttemptRecordsId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetPaymentIntents", "permissions": ["payment_intent_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetPaymentIntentsIntent", "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetPaymentIntentsIntentAmountDetailsLineItems", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetPaymentIntentsSearch", "permissions": ["payment_intent_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetPaymentLinks", "permissions": ["payment_links_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetPaymentLinksPaymentLink", "permissions": ["payment_links_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetPaymentLinksPaymentLinkLineItems", "permissions": ["payment_links_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetPaymentMethodConfigurations", "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetPaymentMethodConfigurationsConfiguration", "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetPaymentMethodDomains", "permissions": ["payment_method_domain_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetPaymentMethodDomainsPaymentMethodDomain", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetPaymentMethods", "permissions": ["payment_method_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetPaymentMethodsPaymentMethod", "permissions": ["payment_method_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetPaymentRecords", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetPaymentRecordsId", "probed": "2026-09-23", "verdict": "absent"}
+{"key_restricted": true, "op": "GetPayouts", "permissions": ["payout_read"], "probed": "2026-09-23", "verdict": "catalogued", "via": "oauth"}
+{"key_restricted": true, "op": "GetPayoutsPayout", "permissions": ["payout_read"], "probed": "2026-09-23", "verdict": "catalogued", "via": "oauth"}
+{"op": "GetPlans", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetPlansPlan", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetPrices", "permissions": ["plan_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetPricesPrice", "permissions": ["plan_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetPricesSearch", "permissions": ["plan_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetProducts", "permissions": ["product_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetProductsId", "permissions": ["product_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetProductsProductFeatures", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetProductsProductFeaturesId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetProductsSearch", "permissions": ["product_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetPromotionCodes", "permissions": ["promotion_code_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetPromotionCodesPromotionCode", "permissions": ["promotion_code_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetQuotes", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetQuotesQuote", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetQuotesQuoteComputedUpfrontLineItems", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetQuotesQuoteLineItems", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetQuotesQuotePdf", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetRadarEarlyFraudWarnings", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetRadarEarlyFraudWarningsEarlyFraudWarning", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetRadarValueListItems", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetRadarValueListItemsItem", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetRadarValueLists", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetRadarValueListsValueList", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetRefunds", "permissions": ["charge_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetRefundsRefund", "permissions": ["charge_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetReportingReportRuns", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetReportingReportRunsReportRun", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetReportingReportTypes", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetReportingReportTypesReportType", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetReviews", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetReviewsReview", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetSetupAttempts", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetSetupIntents", "permissions": ["setup_intent_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetSetupIntentsIntent", "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetShippingRates", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetShippingRatesShippingRateToken", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetSigmaScheduledQueryRuns", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetSigmaScheduledQueryRunsScheduledQueryRun", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetSourcesSource", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetSourcesSourceMandateNotificationsMandateNotification", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetSourcesSourceSourceTransactions", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetSourcesSourceSourceTransactionsSourceTransaction", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetSubscriptionItems", "permissions": ["subscription_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetSubscriptionItemsItem", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetSubscriptionSchedules", "permissions": ["subscription_schedule_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetSubscriptionSchedulesSchedule", "permissions": ["subscription_schedule_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetSubscriptions", "permissions": ["subscription_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetSubscriptionsSearch", "permissions": ["subscription_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetSubscriptionsSubscriptionExposedId", "permissions": ["subscription_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetTaxAssociationsFind", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetTaxCalculationsCalculation", "permissions": ["tax_product_transactions_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetTaxCalculationsCalculationLineItems", "permissions": ["tax_product_transactions_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetTaxCodes", "permissions": ["tax_code_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetTaxCodesId", "permissions": ["tax_code_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetTaxIds", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetTaxIdsId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetTaxRates", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetTaxRatesTaxRate", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetTaxRegistrations", "permissions": ["tax_product_settings_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetTaxRegistrationsId", "permissions": ["tax_product_settings_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetTaxSettings", "permissions": ["tax_product_settings_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetTaxTransactionsTransaction", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetTaxTransactionsTransactionLineItems", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetTerminalConfigurations", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetTerminalConfigurationsConfiguration", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetTerminalLocations", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetTerminalLocationsLocation", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetTerminalReaders", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetTerminalReadersReader", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetTestHelpersTestClocks", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetTestHelpersTestClocksTestClock", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetTokensToken", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetTopups", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetTopupsTopup", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetTransfers", "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetTransfersIdReversals", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetTransfersTransfer", "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetTransfersTransferReversalsId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetTreasuryCreditReversals", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetTreasuryCreditReversalsCreditReversal", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetTreasuryDebitReversals", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetTreasuryDebitReversalsDebitReversal", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetTreasuryFinancialAccounts", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetTreasuryFinancialAccountsFinancialAccount", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetTreasuryFinancialAccountsFinancialAccountFeatures", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetTreasuryInboundTransfers", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetTreasuryInboundTransfersId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetTreasuryOutboundPayments", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetTreasuryOutboundPaymentsId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetTreasuryOutboundTransfers", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetTreasuryOutboundTransfersOutboundTransfer", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetTreasuryReceivedCredits", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetTreasuryReceivedCreditsId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetTreasuryReceivedDebits", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetTreasuryReceivedDebitsId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetTreasuryTransactionEntries", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetTreasuryTransactionEntriesId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetTreasuryTransactions", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetTreasuryTransactionsId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "GetWebhookEndpoints", "permissions": ["webhook_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "GetWebhookEndpointsWebhookEndpoint", "permissions": ["webhook_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "PostAccountLinks", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostAccountSessions", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostAccounts", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostAccountsAccount", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostAccountsAccountBankAccounts", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostAccountsAccountBankAccountsId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostAccountsAccountCapabilitiesCapability", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostAccountsAccountExternalAccounts", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostAccountsAccountExternalAccountsId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostAccountsAccountLoginLinks", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostAccountsAccountPeople", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostAccountsAccountPeoplePerson", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostAccountsAccountPersons", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostAccountsAccountPersonsPerson", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostAccountsAccountReject", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostAccountsAccountUnreject", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostApplePayDomains", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostApplicationFeesFeeRefundsId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostApplicationFeesIdRefund", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostApplicationFeesIdRefunds", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostAppsSecrets", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostAppsSecretsDelete", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostBalanceSettings", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostBillingAlerts", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostBillingAlertsIdActivate", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostBillingAlertsIdArchive", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostBillingAlertsIdDeactivate", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostBillingCreditGrants", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostBillingCreditGrantsId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostBillingCreditGrantsIdExpire", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostBillingCreditGrantsIdVoid", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostBillingFeedbackOptions", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostBillingFeedbackOptionsId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostBillingFeedbackOptionsIdDeactivate", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostBillingMeterEventAdjustments", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostBillingMeterEvents", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostBillingMeters", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostBillingMetersId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostBillingMetersIdDeactivate", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostBillingMetersIdReactivate", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostBillingPortalConfigurations", "permissions": ["customer_portal_write"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "PostBillingPortalConfigurationsConfiguration", "permissions": ["customer_portal_write"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "PostBillingPortalSessions", "permissions": ["customer_portal_session_write"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "PostCharges", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostChargesCharge", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostChargesChargeCapture", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostChargesChargeDispute", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostChargesChargeDisputeClose", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostChargesChargeRefund", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostChargesChargeRefunds", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostChargesChargeRefundsRefund", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostCheckoutSessions", "permissions": ["checkout_session_write"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "PostCheckoutSessionsSession", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostCheckoutSessionsSessionExpire", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostClimateOrders", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostClimateOrdersOrder", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostClimateOrdersOrderCancel", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostCoupons", "permissions": ["coupon_write"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "PostCouponsCoupon", "permissions": ["coupon_write"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "PostCreditNotes", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostCreditNotesId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostCreditNotesIdVoid", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostCustomerSessions", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostCustomers", "permissions": ["customer_write"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "PostCustomersCustomer", "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "PostCustomersCustomerBalanceTransactions", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostCustomersCustomerBalanceTransactionsTransaction", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostCustomersCustomerBankAccounts", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostCustomersCustomerBankAccountsId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostCustomersCustomerBankAccountsIdVerify", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostCustomersCustomerCards", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostCustomersCustomerCardsId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostCustomersCustomerCashBalance", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostCustomersCustomerFundingInstructions", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostCustomersCustomerSources", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostCustomersCustomerSourcesId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostCustomersCustomerSourcesIdVerify", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostCustomersCustomerSubscriptions", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostCustomersCustomerSubscriptionsSubscriptionExposedId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostCustomersCustomerTaxIds", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostDisputesDispute", "permissions": ["dispute_write"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "PostDisputesDisputeClose", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostEntitlementsFeatures", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostEntitlementsFeaturesId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostEphemeralKeys", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostExternalAccountsId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostFileLinks", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostFileLinksLink", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostFiles", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostFinancialConnectionsAccountsAccountDisconnect", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostFinancialConnectionsAccountsAccountRefresh", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostFinancialConnectionsAccountsAccountSubscribe", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostFinancialConnectionsAccountsAccountUnsubscribe", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostFinancialConnectionsSessions", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostForwardingRequests", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostIdentityVerificationSessions", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostIdentityVerificationSessionsSession", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostIdentityVerificationSessionsSessionCancel", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostIdentityVerificationSessionsSessionRedact", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostInvoiceRenderingTemplatesTemplateArchive", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostInvoiceRenderingTemplatesTemplateUnarchive", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostInvoiceitems", "permissions": ["invoice_write"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "PostInvoiceitemsInvoiceitem", "permissions": ["invoice_write"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "PostInvoices", "permissions": ["invoice_write"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "PostInvoicesCreatePreview", "permissions": ["invoice_read"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "PostInvoicesInvoice", "permissions": ["invoice_write"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "PostInvoicesInvoiceAddLines", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostInvoicesInvoiceAttachPayment", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostInvoicesInvoiceFinalize", "permissions": ["invoice_write"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "PostInvoicesInvoiceLinesLineItemId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostInvoicesInvoiceMarkUncollectible", "permissions": ["invoice_write"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "PostInvoicesInvoicePay", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostInvoicesInvoiceRemoveLines", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostInvoicesInvoiceSend", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostInvoicesInvoiceUpdateLines", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostInvoicesInvoiceVoid", "permissions": ["invoice_write"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "PostIssuingAuthorizationsAuthorization", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostIssuingAuthorizationsAuthorizationApprove", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostIssuingAuthorizationsAuthorizationDecline", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostIssuingCardholders", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostIssuingCardholdersCardholder", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostIssuingCards", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostIssuingCardsCard", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostIssuingDisputes", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostIssuingDisputesDispute", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostIssuingDisputesDisputeSubmit", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostIssuingPersonalizationDesigns", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostIssuingPersonalizationDesignsPersonalizationDesign", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostIssuingSettlementsSettlement", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostIssuingTokensToken", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostIssuingTransactionsTransaction", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostLinkAccountSessions", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostLinkedAccountsAccountDisconnect", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostLinkedAccountsAccountRefresh", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostPaymentIntents", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostPaymentIntentsIntent", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostPaymentIntentsIntentApplyCustomerBalance", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostPaymentIntentsIntentCancel", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostPaymentIntentsIntentCapture", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostPaymentIntentsIntentConfirm", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostPaymentIntentsIntentIncrementAuthorization", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostPaymentIntentsIntentVerifyMicrodeposits", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostPaymentLinks", "permissions": ["payment_links_write"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "PostPaymentLinksPaymentLink", "permissions": ["payment_links_write"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "PostPaymentMethodConfigurations", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostPaymentMethodConfigurationsConfiguration", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostPaymentMethodDomains", "permissions": ["payment_method_domain_write"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "PostPaymentMethodDomainsPaymentMethodDomain", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostPaymentMethodDomainsPaymentMethodDomainValidate", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostPaymentMethods", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostPaymentMethodsPaymentMethod", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostPaymentMethodsPaymentMethodAttach", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostPaymentMethodsPaymentMethodDetach", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostPaymentRecordsIdReportPaymentAttempt", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostPaymentRecordsIdReportPaymentAttemptCanceled", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostPaymentRecordsIdReportPaymentAttemptFailed", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostPaymentRecordsIdReportPaymentAttemptGuaranteed", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostPaymentRecordsIdReportPaymentAttemptInformational", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostPaymentRecordsIdReportRefund", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostPaymentRecordsReportPayment", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostPayouts", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostPayoutsPayout", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostPayoutsPayoutCancel", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostPayoutsPayoutReverse", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostPlans", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostPlansPlan", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostPrices", "permissions": ["plan_write"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "PostPricesPrice", "permissions": ["plan_write"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "PostProducts", "permissions": ["product_write"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "PostProductsId", "permissions": ["product_write"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "PostProductsProductFeatures", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostPromotionCodes", "permissions": ["promotion_code_write"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "PostPromotionCodesPromotionCode", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostQuotes", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostQuotesQuote", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostQuotesQuoteAccept", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostQuotesQuoteCancel", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostQuotesQuoteFinalize", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostRadarPaymentEvaluations", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostRadarValueListItems", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostRadarValueLists", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostRadarValueListsValueList", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostRefunds", "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "PostRefundsRefund", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostRefundsRefundCancel", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostReportingReportRuns", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostReviewsReviewApprove", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostSetupIntents", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostSetupIntentsIntent", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostSetupIntentsIntentCancel", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostSetupIntentsIntentConfirm", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostSetupIntentsIntentVerifyMicrodeposits", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostShippingRates", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostShippingRatesShippingRateToken", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostSigmaSavedQueriesId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostSources", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostSourcesSource", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostSourcesSourceVerify", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostSubscriptionItems", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostSubscriptionItemsItem", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostSubscriptionSchedules", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostSubscriptionSchedulesSchedule", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostSubscriptionSchedulesScheduleCancel", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostSubscriptionSchedulesScheduleRelease", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostSubscriptions", "permissions": ["subscription_write"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "PostSubscriptionsSubscriptionExposedId", "permissions": ["subscription_write"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "PostSubscriptionsSubscriptionMigrate", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostSubscriptionsSubscriptionResume", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTaxCalculations", "permissions": ["tax_product_transactions_write"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "PostTaxIds", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTaxRates", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTaxRatesTaxRate", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTaxRegistrations", "permissions": ["tax_product_settings_write"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "PostTaxRegistrationsId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTaxSettings", "permissions": ["tax_product_settings_write"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "PostTaxTransactionsCreateFromCalculation", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTaxTransactionsCreateReversal", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTerminalConfigurations", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTerminalConfigurationsConfiguration", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTerminalConnectionTokens", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTerminalLocations", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTerminalLocationsLocation", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTerminalOnboardingLinks", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTerminalReaders", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTerminalReadersReader", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTerminalReadersReaderCancelAction", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTerminalReadersReaderCollectInputs", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTerminalReadersReaderCollectPaymentMethod", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTerminalReadersReaderConfirmPaymentIntent", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTerminalReadersReaderProcessPaymentIntent", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTerminalReadersReaderProcessSetupIntent", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTerminalReadersReaderRefundPayment", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTerminalReadersReaderSetReaderDisplay", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTerminalRefunds", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTestHelpersConfirmationTokens", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTestHelpersCustomersCustomerFundCashBalance", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTestHelpersIssuingAuthorizations", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTestHelpersIssuingAuthorizationsAuthorizationCapture", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTestHelpersIssuingAuthorizationsAuthorizationExpire", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTestHelpersIssuingAuthorizationsAuthorizationFinalizeAmount", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTestHelpersIssuingAuthorizationsAuthorizationFraudChallengesRespond", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTestHelpersIssuingAuthorizationsAuthorizationIncrement", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTestHelpersIssuingAuthorizationsAuthorizationReverse", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTestHelpersIssuingCardsCardShippingDeliver", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTestHelpersIssuingCardsCardShippingFail", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTestHelpersIssuingCardsCardShippingReturn", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTestHelpersIssuingCardsCardShippingShip", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTestHelpersIssuingCardsCardShippingSubmit", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTestHelpersIssuingPersonalizationDesignsPersonalizationDesignActivate", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTestHelpersIssuingPersonalizationDesignsPersonalizationDesignDeactivate", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTestHelpersIssuingPersonalizationDesignsPersonalizationDesignReject", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTestHelpersIssuingSettlements", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTestHelpersIssuingSettlementsSettlementComplete", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTestHelpersIssuingTransactionsCreateForceCapture", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTestHelpersIssuingTransactionsCreateUnlinkedRefund", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTestHelpersIssuingTransactionsTransactionRefund", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTestHelpersRefundsRefundExpire", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTestHelpersTerminalReadersReaderPresentPaymentMethod", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTestHelpersTerminalReadersReaderSucceedInputCollection", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTestHelpersTerminalReadersReaderTimeoutInputCollection", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTestHelpersTestClocks", "permissions": ["billing_clock_write"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "PostTestHelpersTestClocksTestClockAdvance", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTestHelpersTreasuryInboundTransfersIdFail", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTestHelpersTreasuryInboundTransfersIdReturn", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTestHelpersTreasuryInboundTransfersIdSucceed", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTestHelpersTreasuryOutboundPaymentsId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTestHelpersTreasuryOutboundPaymentsIdFail", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTestHelpersTreasuryOutboundPaymentsIdPost", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTestHelpersTreasuryOutboundPaymentsIdReturn", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTestHelpersTreasuryOutboundTransfersOutboundTransfer", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTestHelpersTreasuryOutboundTransfersOutboundTransferFail", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTestHelpersTreasuryOutboundTransfersOutboundTransferPost", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTestHelpersTreasuryOutboundTransfersOutboundTransferReturn", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTestHelpersTreasuryReceivedCredits", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTestHelpersTreasuryReceivedDebits", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTokens", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTopups", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTopupsTopup", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTopupsTopupCancel", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTransfers", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTransfersIdReversals", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTransfersTransfer", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTransfersTransferReversalsId", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTreasuryCreditReversals", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTreasuryDebitReversals", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTreasuryFinancialAccounts", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTreasuryFinancialAccountsFinancialAccount", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTreasuryFinancialAccountsFinancialAccountClose", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTreasuryFinancialAccountsFinancialAccountFeatures", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTreasuryInboundTransfers", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTreasuryInboundTransfersInboundTransferCancel", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTreasuryOutboundPayments", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTreasuryOutboundPaymentsIdCancel", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTreasuryOutboundTransfers", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostTreasuryOutboundTransfersOutboundTransferCancel", "probed": "2026-09-23", "verdict": "absent"}
+{"op": "PostWebhookEndpoints", "permissions": ["webhook_write"], "probed": "2026-09-23", "verdict": "catalogued"}
+{"op": "PostWebhookEndpointsWebhookEndpoint", "permissions": ["webhook_write"], "probed": "2026-09-23", "verdict": "catalogued"}
