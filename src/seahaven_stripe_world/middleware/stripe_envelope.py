@@ -37,7 +37,7 @@ from seahaven_stripe_world.errors import CatalogueRefusal, StripeToolError
 from seahaven_stripe_world.stripe_errors import StripeApiError
 from seahaven_stripe_world.world import world
 
-__all__ = ["stripe_envelope"]
+__all__ = ["API_VERSION", "mint_request", "response_headers", "stripe_envelope"]
 
 #: The pinned API version, written once -- ``emit_event`` stores it per event,
 #: the ``Stripe-Version`` header echoes it per response.
@@ -58,8 +58,8 @@ _RAW_TOOLS = frozenset(("call_stripe",))
 _HTTP_TOOLS = _MCP_TOOLS | _RAW_TOOLS
 
 
-def _headers(ctx: seahaven.Ctx) -> dict[str, str]:
-    """The response headers every raw-HTTP-face call carries.
+def response_headers(ctx: seahaven.Ctx) -> dict[str, str]:
+    """The response headers every raw-HTTP-face call carries, and the HTTP API's.
 
     ``Stripe-Version`` is always present.  ``Request-Id`` is always present
     (the envelope mints one per call).  ``Idempotency-Key`` is present only
@@ -136,10 +136,18 @@ def _render_catalogue_refusal(error: CatalogueRefusal) -> StripeToolError:
 def _mint_request(ctx: seahaven.Ctx, call: seahaven.Call) -> None:
     """Mint a request id and park it -- shared by both rendering paths."""
     key = call.arguments.get("idempotency_key")
-    ctx.state["_request"] = {
-        "id": stripe_id(ctx, "req_", timestamp=ctx.clock.iso()),
-        "idempotency_key": key if isinstance(key, str) else None,
-    }
+    mint_request(ctx, key if isinstance(key, str) else None)
+
+
+def mint_request(ctx: seahaven.Ctx, idempotency_key: str | None) -> str:
+    """Mint this request's ``req_`` id and park it with the key; answers the id.
+
+    The tool paths and the HTTP handler both call it, so an event's
+    ``request.id`` is populated the same way whichever face made the change.
+    """
+    request_id = stripe_id(ctx, "req_", timestamp=ctx.clock.iso())
+    ctx.state["_request"] = {"id": request_id, "idempotency_key": idempotency_key}
+    return request_id
 
 
 @world.middleware
@@ -181,7 +189,7 @@ def _raw_envelope(ctx: seahaven.Ctx, call: seahaven.Call, next_: Handler) -> Any
     try:
         result = next_(ctx, call)
     except StripeApiError as error:
-        return {"status": error.status, "body": error.envelope(), "headers": _headers(ctx)}
+        return {"status": error.status, "body": error.envelope(), "headers": response_headers(ctx)}
     if isinstance(result, ApiResponse):
-        return {"status": result.status, "body": result.body, "headers": _headers(ctx)}
+        return {"status": result.status, "body": result.body, "headers": response_headers(ctx)}
     return result

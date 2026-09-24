@@ -19,12 +19,28 @@ dependencies = ["seahaven~=0.0"]
 [project.optional-dependencies]
 serve = ["seahaven[serve]"]
 mcp = ["seahaven[mcp]"]
+# `serve_http.py`: this world's Stripe HTTP API under `seahaven.http`, which
+# needs Starlette and uvicorn and nothing else. Named apart from `serve` because
+# that one is openenv, which cannot import on 3.14 and conflicts with `mcp`.
+http = ["starlette>=0.47", "uvicorn>=0.35"]
 
 [dependency-groups]
 # `stripe` is the conformance recorder's transport and nothing else: the test
 # suite replays committed cassettes and never imports it
 # (components/conformance.md Dependencies, enforced by a static test).
-dev = ["pytest>=8", "ruff>=0.14", "ty>=0.0.1a21", "stripe>=13"]
+#
+# The `http` extra and `httpx` are here so that a checkout's plain `uv run
+# serve_http.py` and `uv run pytest` have the HTTP server and its test client
+# (`tests/http_api/`); `stripe` also drives those tests' SDK smoke test, offline
+# against a local server.
+dev = [
+    "pytest>=8",
+    "ruff>=0.14",
+    "ty>=0.0.1a21",
+    "stripe>=13",
+    "httpx>=0.28",
+    "seahaven-stripe-world[http]",
+]
 
 # Seahaven is unpublished; while that is true the bare `seahaven` requirement
 # above resolves to the framework's own repository rather than to the
@@ -37,7 +53,7 @@ dev = ["pytest>=8", "ruff>=0.14", "ty>=0.0.1a21", "stripe>=13"]
 # before the sync, or `uv sync` fails as a git auth error that reads like a bad
 # lock. CI does that in its own guarded step (`.github/workflows/ci.yml`).
 [tool.uv.sources]
-seahaven = { git = "https://github.com/Kiln-AI/Seahaven.git", rev = "8bfd3cb2da745fc170f87236351e1b8150db2df1" }
+seahaven = { git = "https://github.com/Kiln-AI/Seahaven.git", rev = "f7175f10ac0d84fd8c669cb9f3f8b6684db29d25" }
 
 [tool.uv]
 conflicts = [[{ extra = "serve" }, { extra = "mcp" }]]

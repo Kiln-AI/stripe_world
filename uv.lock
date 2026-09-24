@@ -52,7 +52,7 @@ version = "4.15.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "idna" },
-    { name = "typing-extensions", marker = "python_full_version < '3.15'" },
+    { name = "typing-extensions", marker = "python_full_version < '3.15' or (extra == 'extra-21-seahaven-stripe-world-mcp' and extra == 'extra-21-seahaven-stripe-world-serve')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/a9/d2/f4d173e22df740bc37b1db102b386ba719b66e95b0f0d751f556b387e6d2/anyio-4.15.1.tar.gz", hash = "sha256:9f28306018cbd6d329e64a36d58256edff76dd996fe423bc957326e578b82a94", size = 276966, upload-time = "2026-09-05T10:42:39.44Z" }
 wheels = [
@@ -1806,7 +1806,7 @@ wheels = [
 [[package]]
 name = "seahaven"
 version = "0.0.1"
-source = { git = "https://github.com/Kiln-AI/Seahaven.git?rev=8bfd3cb2da745fc170f87236351e1b8150db2df1#8bfd3cb2da745fc170f87236351e1b8150db2df1" }
+source = { git = "https://github.com/Kiln-AI/Seahaven.git?rev=f7175f10ac0d84fd8c669cb9f3f8b6684db29d25#f7175f10ac0d84fd8c669cb9f3f8b6684db29d25" }
 dependencies = [
     { name = "apsw" },
     { name = "pydantic" },
@@ -1830,6 +1830,10 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+http = [
+    { name = "starlette" },
+    { name = "uvicorn" },
+]
 mcp = [
     { name = "seahaven", extra = ["mcp"], marker = "extra == 'extra-21-seahaven-stripe-world-mcp'" },
 ]
@@ -1839,24 +1843,30 @@ serve = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "httpx" },
     { name = "pytest" },
     { name = "ruff" },
+    { name = "seahaven-stripe-world", extra = ["http"] },
     { name = "stripe" },
     { name = "ty" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "seahaven", git = "https://github.com/Kiln-AI/Seahaven.git?rev=8bfd3cb2da745fc170f87236351e1b8150db2df1" },
-    { name = "seahaven", extras = ["mcp"], marker = "extra == 'mcp'", git = "https://github.com/Kiln-AI/Seahaven.git?rev=8bfd3cb2da745fc170f87236351e1b8150db2df1" },
-    { name = "seahaven", extras = ["serve"], marker = "extra == 'serve'", git = "https://github.com/Kiln-AI/Seahaven.git?rev=8bfd3cb2da745fc170f87236351e1b8150db2df1" },
+    { name = "seahaven", git = "https://github.com/Kiln-AI/Seahaven.git?rev=f7175f10ac0d84fd8c669cb9f3f8b6684db29d25" },
+    { name = "seahaven", extras = ["mcp"], marker = "extra == 'mcp'", git = "https://github.com/Kiln-AI/Seahaven.git?rev=f7175f10ac0d84fd8c669cb9f3f8b6684db29d25" },
+    { name = "seahaven", extras = ["serve"], marker = "extra == 'serve'", git = "https://github.com/Kiln-AI/Seahaven.git?rev=f7175f10ac0d84fd8c669cb9f3f8b6684db29d25" },
+    { name = "starlette", marker = "extra == 'http'", specifier = ">=0.47" },
+    { name = "uvicorn", marker = "extra == 'http'", specifier = ">=0.35" },
 ]
-provides-extras = ["serve", "mcp"]
+provides-extras = ["serve", "mcp", "http"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "httpx", specifier = ">=0.28" },
     { name = "pytest", specifier = ">=8" },
     { name = "ruff", specifier = ">=0.14" },
+    { name = "seahaven-stripe-world", extras = ["http"] },
     { name = "stripe", specifier = ">=13" },
     { name = "ty", specifier = ">=0.0.1a21" },
 ]

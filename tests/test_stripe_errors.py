@@ -208,17 +208,23 @@ def test_decline_is_never_raised() -> None:
 
 
 def test_envelope_is_the_only_boundary() -> None:
-    """AST lint: `except StripeApiError` appears only in
-    `middleware/stripe_envelope.py` (`components/cross_cutting.md` §3.5.3)."""
+    """AST lint: `except StripeApiError` appears only at the boundaries
+    (`components/cross_cutting.md` §3.5.3): the tool chain's envelope and
+    idempotency layers, and the HTTP handler, which is the HTTP face's
+    envelope."""
     import ast
     from pathlib import Path
 
     src = Path(__file__).resolve().parent.parent / "src" / "seahaven_stripe_world"
-    allowed = {"stripe_envelope.py", "idempotency.py"}  # these two handle it by design
+    allowed = {  # these handle it by design
+        "middleware/stripe_envelope.py",
+        "middleware/idempotency.py",
+        "http_api/handler.py",
+    }
     for py in sorted(src.rglob("*.py")):
         if "__pycache__" in str(py):
             continue
-        if py.name in allowed:
+        if py.relative_to(src).as_posix() in allowed:
             continue
         tree = ast.parse(py.read_text(), filename=str(py))
         for node in ast.walk(tree):
@@ -230,5 +236,5 @@ def test_envelope_is_the_only_boundary() -> None:
                     name = node.type.attr
                 assert name != "StripeApiError", (
                     f"{py.name}:{node.lineno}: `except StripeApiError` outside the "
-                    "boundary — only stripe_envelope.py and idempotency.py may catch it"
+                    f"boundary — only {sorted(allowed)} may catch it"
                 )

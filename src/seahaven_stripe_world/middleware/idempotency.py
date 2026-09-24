@@ -13,10 +13,14 @@ table is untracked, so none of this appears in a graded change log — and a
 short-circuit writes nothing anywhere, which is the property the headline
 eval's reward function counts on (`inst.change_log()` gains zero records
 for a replayed call, not merely zero new `charges` rows).
+
+`replay_or_run` is the layer's whole logic, shared with the HTTP handler
+(`http_api/handler.py`), which honours the `Idempotency-Key` header with it.
 """
 
 import hashlib
 import json
+from collections.abc import Callable
 from typing import Any
 
 import seahaven
@@ -31,7 +35,7 @@ from seahaven_stripe_world.stripe_errors import (
 )
 from seahaven_stripe_world.world import world
 
-__all__ = ["idempotency", "request_hash"]
+__all__ = ["idempotency", "replay_or_run", "request_hash"]
 
 
 def request_hash(method: str, path: str, params: Any) -> str:
@@ -81,7 +85,35 @@ def idempotency(ctx: seahaven.Ctx, call: seahaven.Call, next_: Handler) -> Any:
         # key is reserved for a request that cannot be dispatched.
         return next_(ctx, call)
 
-    params = call.arguments.get("params")
+    response, _replayed = replay_or_run(
+        ctx,
+        method=method,
+        path=path,
+        params=call.arguments.get("params"),
+        key=key,
+        run=lambda: next_(ctx, call),
+    )
+    return response
+
+
+def replay_or_run(
+    ctx: seahaven.Ctx,
+    *,
+    method: str,
+    path: str,
+    params: Any,
+    key: str,
+    run: Callable[[], Any],
+) -> tuple[ApiResponse, bool]:
+    """A keyed POST: its stored response, or `run()`'s, stored under `key` (§3.1.4).
+
+    Answers the response and whether it was replayed. Raises
+    `idempotency_key_in_use` or `idempotency_mismatch` for a key that cannot be
+    replayed. `run` answers an `ApiResponse` or raises; a `StripeApiError` it
+    raises is stored and re-raised, unless it is `pre_execution`, which retracts
+    the key. The key's writes land outside whatever `run` rolls back: the tool
+    chain's per-call transaction here, the HTTP handler's savepoint there.
+    """
     digest = request_hash(method, path, params)
 
     stored = ctx.db.one("SELECT * FROM idempotency_keys WHERE key = ?", key)
@@ -95,7 +127,7 @@ def idempotency(ctx: seahaven.Ctx, call: seahaven.Call, next_: Handler) -> Any:
         body = _json.loads(stored["body"])
         if not isinstance(body, dict):
             raise seahaven.WorldBug(f"idempotency key {key!r} holds a non-object body")
-        return ApiResponse(int(stored["status"]), body)
+        return ApiResponse(int(stored["status"]), body), True
 
     ctx.db.execute(
         "INSERT INTO idempotency_keys (key, method, path, request_hash, state, status,"
@@ -107,7 +139,7 @@ def idempotency(ctx: seahaven.Ctx, call: seahaven.Call, next_: Handler) -> Any:
         ctx.clock.iso(),
     )
     try:
-        result = next_(ctx, call)
+        result = run()
     except StripeApiError as error:
         if error.pre_execution:
             # Stripe caches only what execution began; "you can retry these
@@ -128,7 +160,7 @@ def idempotency(ctx: seahaven.Ctx, call: seahaven.Call, next_: Handler) -> Any:
         raise
     if not isinstance(result, ApiResponse):
         raise seahaven.WorldBug(
-            f"stripe_api_write returned {type(result).__name__}, not ApiResponse — "
+            f"{method.upper()} {path} answered {type(result).__name__}, not ApiResponse — "
             "the idempotency layer stores status+body and cannot cache this"
         )
     ctx.db.execute(
@@ -137,4 +169,4 @@ def idempotency(ctx: seahaven.Ctx, call: seahaven.Call, next_: Handler) -> Any:
         _json.dumps(result.body),
         key,
     )
-    return result
+    return result, False

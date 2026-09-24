@@ -61,9 +61,12 @@ jobs:
       # `uv lock` is caught here instead of resolving to something nobody
       # reviewed. No `--extra serve`: `seahaven.openenv` pulls in `beartype`
       # via `fastmcp`, which imports `collections.abc.ByteString` and so cannot
-      # import at all on 3.14. Nothing in this repo's suites needs it.
+      # import at all on 3.14. Nothing in this repo's suites needs it. The
+      # `http` extra is what `serve_http.py` and `tests/http_api/` run on (the
+      # dev group carries it too; named here so dropping it from the group
+      # cannot quietly skip those tests).
       - name: Install the project
-        run: uv sync --locked
+        run: uv sync --locked --extra http
 
       - name: Format
         run: uv run --no-sync ruff format --check

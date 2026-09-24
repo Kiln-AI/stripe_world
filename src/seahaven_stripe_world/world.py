@@ -29,6 +29,12 @@ world = seahaven.World(
     version="0.1.0",
     schema=seahaven.sql_files(__package__, "schema"),
     untracked_tables=("counters", "idempotency_keys"),
+    # The frozen instant this world was built and recorded against: every suite,
+    # the fixture recipe and replay determinism assume a clock that reads the
+    # start instant for the instance's whole life. The core's default became
+    # `running` (clock.md, "Modes"); the HTTP server still overrides this with
+    # `wall` per instance, as a sandbox should read the time.
+    default_clock_mode="fixed",
     # What the MCP handshake publishes, and the only name here the tool-calling
     # agent ever reads: Stripe's own server name, verbatim, so an agent that
     # reads the handshake sees the product and not the replica. The line the
