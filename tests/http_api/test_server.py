@@ -86,7 +86,7 @@ def test_create_retrieve_and_list_a_customer_with_form_bodies(api: Api) -> None:
     )
     assert created.status_code == 200
     customer = created.json()
-    assert customer["livemode"] is False  # one test-mode account
+    assert customer["livemode"] is True  # the world's default mode
     assert customer["invoice_settings"]["footer"] == "Thanks"
     assert created.headers["content-type"] == "application/json"
     assert created.headers["stripe-version"] == "2026-08-26.dahlia"
@@ -201,25 +201,13 @@ def test_each_instance_id_is_its_own_account(
     assert len(one.get("/v1/customers").json()["data"]) == 1
 
 
-def test_the_script_serves_this_world_with_the_fixed_defaults(
-    monkeypatch: pytest.MonkeyPatch,
+def test_test_mode_is_a_startup_option_of_the_instance(
+    client: httpx.Client, _schema_conformance: list[CapturedCall]
 ) -> None:
-    import runpy
-    from pathlib import Path
-
-    import seahaven.http
-
-    from seahaven_stripe_world import world
-    from seahaven_stripe_world.http_api import RESET_OPTIONS, handle
-
-    calls: list[tuple[Any, ...]] = []
-    monkeypatch.setattr(
-        seahaven.http, "serve", lambda *args, **kwargs: calls.append((args, kwargs))
-    )
-    runpy.run_path(str(Path(__file__).parents[2] / "serve_http.py"), run_name="__main__")
-    assert calls == [
-        (
-            (world, handle),
-            {"host": "127.0.0.1", "port": 8000, "reset_options": RESET_OPTIONS},
-        )
-    ]
+    put = client.put("/worlds/sandbox", json={"startup": {"livemode": False}})
+    assert put.status_code == 201
+    sandbox = Api(client, _schema_conformance, "sandbox")
+    customer = sandbox.post("/v1/customers", {"email": "test@example.test"}).json()
+    assert customer["livemode"] is False
+    missing = sandbox.post("/v1/invoiceitems/ii_nope", {"description": "x"})
+    assert missing.json()["error"]["message"] == "No such Invoice Item: 'ii_nope'(livemode=false)"

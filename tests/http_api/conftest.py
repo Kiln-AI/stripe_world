@@ -8,15 +8,15 @@ import pytest
 import seahaven.http
 
 from seahaven_stripe_world import world
-from seahaven_stripe_world.http_api import RESET_OPTIONS, handle
+from seahaven_stripe_world.http_api import handle
 
 uvicorn = pytest.importorskip("uvicorn")
 
 
 @pytest.fixture
 def server_url() -> Iterator[str]:
-    """`http://127.0.0.1:<port>`, serving this world as `serve_http.py` does."""
-    served = seahaven.http.app(world, handle, reset_options=RESET_OPTIONS)
+    """`http://127.0.0.1:<port>`, serving this world as `serve_http.py` does with no options."""
+    served = seahaven.http.app(world, handle)
     server = uvicorn.Server(uvicorn.Config(served, host="127.0.0.1", port=0, log_level="warning"))
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()

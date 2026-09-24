@@ -14,12 +14,15 @@ while a returned `ApiResponse`, such as a `402` decline, keeps its rows. Any
 other exception is a bug in this world and is left to `seahaven.http`, which
 rolls the request back and answers `500`.
 
-Every instance is one test-mode account, whatever key a request carries, and
-`Stripe-Account` is ignored. Nothing here reads `ctx.call`, which is `None`
-under the server.
+Every instance is one account, whatever key a request carries, in the mode its
+`startup` gives it: live, the world's default, unless the instance was made
+with the startup keyword `livemode` set to false (`serve_http.py`'s docstring
+says how). A key's `sk_test_`/`sk_live_` prefix is not checked against the
+mode, and `Stripe-Account` is ignored. Nothing here reads `ctx.call`, which is
+`None` under the server.
 """
 
-from typing import Any, Final
+from typing import Final
 
 import seahaven
 from seahaven.http import HttpRequest, HttpResponse
@@ -32,14 +35,7 @@ from seahaven_stripe_world.middleware.idempotency import replay_or_run
 from seahaven_stripe_world.middleware.stripe_envelope import mint_request, response_headers
 from seahaven_stripe_world.stripe_errors import StripeApiError, invalid_request
 
-__all__ = ["RESET_OPTIONS", "handle"]
-
-#: What every instance the server makes starts from, before a `PUT` body is
-#: laid over it: the schema with no rows, as one test-mode account, which is
-#: what a new Stripe sandbox is. A `PUT` body replaces a key whole, so one that
-#: sets `startup` and leaves out `livemode` makes a live-mode account; such a
-#: body keeps test mode by setting `livemode` to false inside `startup` itself.
-RESET_OPTIONS: Final[dict[str, Any]] = {"fixture": "empty", "startup": dict(livemode=False)}
+__all__ = ["handle"]
 
 # Stripe's answer to a request with no key, and the challenge header its 401s
 # carry, as public reports of the live API quote them (stripe/stripe-node#950

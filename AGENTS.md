@@ -8,9 +8,11 @@ if this world adds other worlds.
 
 Commands: `uv run ruff format --check && uv run ruff check`, `uv run ty check`, `uv run pytest`,
 `uv run seahaven check` (run all before every commit), `uv run seahaven fixture list`,
-`uv run seahaven serve`, `uv run serve_http.py` (Stripe's HTTP API; see Code layout). No `--world`
-is needed: `[project] name` normalises to the package, which is what the CLI's project-name
-heuristic imports.
+`uv run seahaven serve`, `uv run serve_http.py [--host H] [--port N] [--max-instances N]
+[--fixture NAME] [--seed N] [--now ISO] [--clock-mode MODE] [--reset-options JSON]` (Stripe's HTTP
+API; `seahaven.http.main`'s options, with the `SEAHAVEN_*` variables of `seahaven mcp`; see Code
+layout). No `--world` is needed: `[project] name` normalises to the package, which is what the
+CLI's project-name heuristic imports.
 Conformance cassettes re-record with `uv run python -m tools_dev.record --scenario <name>`
 (`--list` prints names; needs a test-mode key, never runs in CI).
 CI (`.github/workflows/ci.yml`) runs that same check list on every push to main and every pull
@@ -103,10 +105,12 @@ the code carries a comment linking to its entry there.
   each operation's `Param`s; `handler.py` checks for a key (any key; none is Stripe's 401), honours
   `Idempotency-Key` through `middleware/idempotency.replay_or_run`, runs `dispatch` in a savepoint
   so a raised `StripeApiError` loses only this request's writes, and answers the bare object or
-  the envelope with `Request-Id`/`Stripe-Version` headers. `serve_http.py` at the root serves it
-  on `127.0.0.1:8000` from the `empty` fixture, one test-mode account per
-  `/worlds/<id>`; point an SDK's API base at `http://127.0.0.1:8000/worlds/<id>`. No options yet
-  (they arrive with `seahaven.http.main`).
+  the envelope with `Request-Id`/`Stripe-Version` headers. `serve_http.py` at the root is
+  `seahaven.http.main(world, handle)`, one account per `/worlds/<id>`; point an SDK's API base at
+  `http://127.0.0.1:8000/worlds/<id>`. With no options an instance is blank (the same as the
+  `empty` fixture) and live, the world's default. Test mode is opt-in:
+  `--reset-options '{"startup": {"livemode": false}}'` or `SEAHAVEN_RESET_OPTIONS`. The HTTP face
+  is additive: it changes no tool behaviour and no world default.
 - `tests/conformance/` — cassette replay, the allowed-differences declaration, and cassettes.
 - `tests/schema_conformance/` — OpenAPI-spec validation of every response body.
 

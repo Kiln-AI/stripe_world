@@ -119,6 +119,10 @@ uv run seahaven check
 # Serve over OpenEnv
 uv run seahaven serve
 
+# Serve Stripe's HTTP API: point a Stripe SDK at http://127.0.0.1:8000/worlds/<id>, any key.
+# Live mode by default, as the tools are; this makes every instance a test-mode account.
+uv run serve_http.py --reset-options '{"startup": {"livemode": false}}'
+
 # List fixtures
 uv run seahaven fixture list
 ```
@@ -183,6 +187,7 @@ docs ship inside the installed package: `uv run seahaven docs` prints the direct
 
 ```
 pyproject.toml
+serve_http.py                           # serves http_api/ (seahaven.http.main)
 AGENTS.md                               # coding-agent instructions
 README.md                               # this file
 SEAHAVEN_FINDINGS.md                    # friction log (continuous from Phase 1)
@@ -201,6 +206,7 @@ src/seahaven_stripe_world/
   discovery/                            # stripe_api_search and stripe_api_details
   tools/                                # the eight registered tools
   middleware/                           # error handler, stripe envelope, idempotency
+  http_api/                             # Stripe's HTTP API as a seahaven.http handler
   spec/                                 # spec3.json, spec3.min.json, mcp_catalogue.jsonl, products table
 fixtures/empty/                         # the one shipped fixture
 tests/                                  # 1000+ tests
