@@ -18,7 +18,7 @@ from seahaven_stripe_world.dispatch.routes import ALL, Route
 from seahaven_stripe_world.http_api import handle
 from seahaven_stripe_world.stripe_errors import invalid_request
 
-pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
+pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW, clock_mode="fixed")
 
 AUTH = ("Authorization", "Bearer sk_test_anything")
 FORM = ("Content-Type", "application/x-www-form-urlencoded")

@@ -67,7 +67,7 @@ def _fill(rule: Any, owner: str | None = None, field: str | None = None) -> Any:
 
 # --- the happy path: real objects, through the real tools -----------------------
 
-pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
+pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW, clock_mode="fixed")
 
 
 def test_a_live_customer_validates(

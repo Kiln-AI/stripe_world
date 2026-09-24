@@ -13,7 +13,7 @@ import seahaven
 from conftest import BLANK_NOW, api_read, api_write, dispatch_tool
 from seahaven_stripe_world.errors import StripeToolError
 
-pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
+pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW, clock_mode="fixed")
 
 
 # -- helpers ------------------------------------------------------------------
@@ -160,6 +160,9 @@ def test_list_events_type_and_types_mutually_exclusive(instance: seahaven.Instan
     assert "mutually exclusive" in exc_info.value.message
 
 
+# The assertions read every event as created at exactly BLANK_NOW, which only a
+# fixed clock gives; the core's default clock (`running`) moves on from it.
+@pytest.mark.seahaven(fixture=None, now=BLANK_NOW, clock_mode="fixed")
 def test_list_events_created_range(instance: seahaven.Instance) -> None:
     """Range filter on created timestamp."""
     from seahaven_stripe_world._time import to_unix

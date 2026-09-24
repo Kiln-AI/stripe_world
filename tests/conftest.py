@@ -70,6 +70,7 @@ def probe(tmp_path: Path) -> Callable[..., seahaven.World]:
             work_dir=tmp_path / "work",
             state_format="seahaven.state/1",
             untracked_tables=("counters", "idempotency_keys"),
+            default_clock_mode="fixed",
         )
         built.middleware(error_handler)
         built.middleware(stripe_envelope)

@@ -25,7 +25,7 @@ from conftest import BLANK_NOW, api_read, api_write
 from schema_conformance.validate import BY_OBJECT, RULES
 from seahaven_stripe_world.serialize.fields import FieldMap
 
-pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
+pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW, clock_mode="fixed")
 
 
 # The fields injected centrally by to_api / the framework, not by any FieldMap.

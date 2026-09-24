@@ -18,7 +18,7 @@ from seahaven_stripe_world.dispatch.routes import Route
 from seahaven_stripe_world.errors import StripeToolError
 from seahaven_stripe_world.stripe_errors import StripeApiError
 
-pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
+pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW, clock_mode="fixed")
 
 
 def read(instance: seahaven.Instance, path: str, params: dict | None = None) -> dict:

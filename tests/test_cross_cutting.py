@@ -13,7 +13,7 @@ import pytest
 
 from conftest import BLANK_NOW, api_write, dispatch_tool
 
-pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
+pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW, clock_mode="fixed")
 
 
 # -- middleware chain order ----------------------------------------------------
