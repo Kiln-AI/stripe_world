@@ -72,9 +72,13 @@ def build(fixture_id: str, *, world: seahaven.World | None = None) -> seahaven.F
 
     The instance is destroyed whether the build succeeds or not, and a failure
     leaves no fixture directory behind: `freeze` publishes by rename.
+
+    The clock is `fixed`, whatever the world's default, so the fixture's `now`
+    is `NOW` exactly and a rebuild writes the same bytes (the core's own
+    fixture template does the same).
     """
     into = world if world is not None else _package_world()
-    with into.instance(None, now=NOW) as inst:
+    with into.instance(None, now=NOW, clock_mode="fixed") as inst:
         BUILDERS[fixture_id](inst)
         return inst.freeze(fixture_id, DESCRIPTIONS[fixture_id])
 

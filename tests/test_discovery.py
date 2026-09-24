@@ -16,7 +16,7 @@ from conftest import BLANK_NOW, api_details, api_search
 from seahaven_stripe_world.discovery import index
 from seahaven_stripe_world.spec.catalogue import CATALOGUED
 
-pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
+pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW, clock_mode="fixed")
 
 REPO = Path(__file__).resolve().parents[1]
 

@@ -8,7 +8,7 @@ from conftest import BLANK_NOW, api_read, api_write, dispatch_tool
 from seahaven_stripe_world.dispatch.response import ApiResponse
 from seahaven_stripe_world.errors import StripeToolError
 
-pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
+pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW, clock_mode="fixed")
 
 
 @pytest.fixture(autouse=True, scope="module")

@@ -8,7 +8,7 @@ from conftest import BLANK_NOW, api_read, api_write
 from seahaven_stripe_world.errors import StripeToolError, UnknownOperation
 from seahaven_stripe_world.startup import ACCOUNT_ID
 
-pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
+pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW, clock_mode="fixed")
 
 
 def test_the_return_shape_is_a_bare_body(instance: seahaven.Instance) -> None:

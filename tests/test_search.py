@@ -13,7 +13,7 @@ from conftest import BLANK_NOW, api_read, api_write
 from seahaven_stripe_world.errors import StripeToolError
 from seahaven_stripe_world.search.parser import Combinator, Operator, ParseError, parse
 
-pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
+pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW, clock_mode="fixed")
 
 
 # ---------------------------------------------------------------------------

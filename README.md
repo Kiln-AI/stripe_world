@@ -39,6 +39,23 @@ alongside this world's eight (see `specs/projects/no_tells/functional_spec.md` Â
 **This world is not a standalone drop-in for the Stripe MCP server** and should not be deployed
 as one.
 
+## Stripe's HTTP API
+
+The same world also speaks Stripe's REST API, so the Stripe SDKs work against it without changes.
+This is useful anywhere a mock Stripe would be: unit tests, CI, etc.
+
+```bash
+uv run serve_http.py --reset-options '{"startup": {"livemode": false}}'
+```
+```python
+stripe.api_base = "http://127.0.0.1:8000/worlds/ci-run-42"
+customer = stripe.Customer.create(email="jenny@example.com")
+```
+
+One server can host hundreds of separate Stripe accounts/environments. Every `/worlds/<id>` is its
+own instance with its own data, created the first time a request uses that id. See the
+[docs](https://github.com/Kiln-AI/Seahaven/blob/main/src/seahaven/docs/http_apis.md) for details.
+
 ## What it covers
 
 **155 routed operations** across 24 SQLite tables, pinned to Stripe API version
@@ -119,6 +136,9 @@ uv run seahaven check
 # Serve over OpenEnv
 uv run seahaven serve
 
+# Serve Stripe's HTTP API (see "Stripe's HTTP API" above)
+uv run serve_http.py --reset-options '{"startup": {"livemode": false}}'
+
 # List fixtures
 uv run seahaven fixture list
 ```
@@ -183,6 +203,7 @@ docs ship inside the installed package: `uv run seahaven docs` prints the direct
 
 ```
 pyproject.toml
+serve_http.py                           # serves http_api/ (seahaven.http.main)
 AGENTS.md                               # coding-agent instructions
 README.md                               # this file
 SEAHAVEN_FINDINGS.md                    # friction log (continuous from Phase 1)
@@ -201,6 +222,7 @@ src/seahaven_stripe_world/
   discovery/                            # stripe_api_search and stripe_api_details
   tools/                                # the eight registered tools
   middleware/                           # error handler, stripe envelope, idempotency
+  http_api/                             # Stripe's HTTP API as a seahaven.http handler
   spec/                                 # spec3.json, spec3.min.json, mcp_catalogue.jsonl, products table
 fixtures/empty/                         # the one shipped fixture
 tests/                                  # 1000+ tests

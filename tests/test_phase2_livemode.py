@@ -19,7 +19,7 @@ from seahaven_stripe_world.serialize.fields import NO_LIVEMODE_OBJECTS
 from seahaven_stripe_world.startup import ACCOUNT_ID
 from seahaven_stripe_world.world import world
 
-pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
+pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW, clock_mode="fixed")
 
 SRC_DIR = Path(__file__).resolve().parent.parent / "src" / "seahaven_stripe_world"
 

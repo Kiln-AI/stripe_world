@@ -11,7 +11,7 @@ from seahaven_stripe_world.billing import dunning
 from seahaven_stripe_world.errors import StripeToolError
 from seahaven_stripe_world.spec.enums import DECLINE_CODES
 
-pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
+pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW, clock_mode="fixed")
 
 
 # --- the pure core -----------------------------------------------------------------------

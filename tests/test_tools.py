@@ -7,7 +7,7 @@ from conftest import BLANK_NOW
 from seahaven_stripe_world.errors import SessionValidation, UnknownOperation
 from seahaven_stripe_world.startup import ACCOUNT_ID
 
-pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
+pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW, clock_mode="fixed")
 
 
 def test_the_read_tool_refuses_a_non_string_operation_id(instance: seahaven.Instance) -> None:

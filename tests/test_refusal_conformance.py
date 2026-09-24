@@ -25,7 +25,7 @@ from conftest import BLANK_NOW
 from seahaven_stripe_world.errors import StripeToolError, UnknownOperation
 from seahaven_stripe_world.startup import ACCOUNT_ID
 
-pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
+pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW, clock_mode="fixed")
 
 
 def _load_catalogue() -> list[dict]:

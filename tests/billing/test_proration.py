@@ -12,7 +12,7 @@ from conftest import BLANK_NOW
 from seahaven_stripe_world.billing import proration
 from seahaven_stripe_world.billing._money import floor_cents
 
-pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW)
+pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW, clock_mode="fixed")
 
 # A 30-day window (2026-09-01 -> 2026-10-01), the frozen clock's own.
 T0 = 1_788_271_200
