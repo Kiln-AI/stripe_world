@@ -1,3 +1,10 @@
+<p align="center">
+  <img width="200" height="150" alt="Stripe World Logo" src="https://github.com/user-attachments/assets/aec87601-05bb-487c-8bff-ed083de83564" />
+</p>
+<h3 align="center">
+  A <a href="https://github.com/Kiln-AI/Seahaven">Seahaven</a> World, Implementing the Stripe API
+</h3>
+
 # seahaven-stripe-world
 
 A Seahaven world: a faithful, stateful, forkable replica of Stripe's Billing and Payments core.
