@@ -2,7 +2,7 @@
   <img width="200" height="150" alt="Stripe World logo, a remix of the Seahaven logo" src="https://github.com/user-attachments/assets/aec87601-05bb-487c-8bff-ed083de83564" />
 </p>
 <h3 align="center">
-  A working copy of Stripe for your agents and tests.<br/>
+  A stateful Stripe sandbox for agent evals, RL and tests<br/>
   Built with <a href="https://github.com/Kiln-AI/Seahaven">Seahaven</a>.
 </h3>
 
