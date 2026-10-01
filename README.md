@@ -19,10 +19,8 @@ Stripe World is a stateful copy of Stripe's Billing and Payments API. Run a hund
 accounts in one process, each starting from a state you chose, with every row each one changed
 logged for you to check.
 
-> **Stripe World is a Seahaven demo.** It was built to show what a [Seahaven](https://github.com/Kiln-AI/Seahaven)
-> world can be, and its logo is a remix of Seahaven's. If you want a realistic copy of *your*
-> system, for your agents or your tests, that's what Seahaven is for.
->
+**Stripe World is a Seahaven demo.** It was built to show what a [Seahaven](https://github.com/Kiln-AI/Seahaven) world can be. If you want a realistic copy of *your* system, for your agents or your tests, that's what Seahaven is for.
+
 > **Not affiliated with Stripe.** Stripe's field names, enum values and id prefixes are reused as API
 > vocabulary under the MIT licence of Stripe's OpenAPI spec; see
 > [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md).
@@ -30,17 +28,16 @@ logged for you to check.
 ## How real is it?
 
 - **155 Stripe API operations across 24 tables**, pinned to API version `2026-08-26.dahlia`. Every
-  object shape comes from Stripe's OpenAPI spec, not from memory.
+  object shape aligned to Stripe's OpenAPI spec.
 - **A billing engine, not just CRUD.** Subscriptions move through all eight statuses. Invoices go
   from draft to open to paid, void or uncollectible. Proration, dunning, credit notes and a balance
   ledger behave the way Stripe's do, and Stripe's test cards (`tok_visa`,
   `tok_visa_chargeDeclinedInsufficientFunds`, …) succeed, decline and dispute on cue.
-- **Stripe's own tools.** Agents get the same tools as Stripe's MCP server, so an agent that works
+- **Stripe's own MCP tools.** Agents get the same tools as Stripe's MCP server, so an agent that works
   here works against the real thing.
-- **Stripe's own SDKs.** It also speaks Stripe's HTTP API. Point an official Stripe SDK at it and
-  your code runs unchanged, apart from webhooks: events are recorded and listable, not
-  delivered.
-- **Checked against the real API.** 19 recordings of real Stripe API sessions are replayed against
+- **Stripe's own API/SDK.** It also speaks Stripe's HTTP API. Point an official Stripe SDK at it and
+  your code runs unchanged, apart from webhooks.
+- **Checked against the real API.** recordings of real Stripe API sessions are replayed against
   it in CI, and every object it returns is validated against Stripe's OpenAPI spec.
 
 |                                         | Stripe World | Stripe test mode | stripe-mock |
@@ -76,8 +73,7 @@ synthetic worlds for agent evals, RL and testing. Seahaven provides:
 - **Serving.** OpenEnv for eval and RL harnesses and HTTP for software tests, each hosting hundreds
   of instances in one process; MCP for chat apps; and a web console to drive a world by hand.
 
-Stripe World supplies only what is Stripe's: the tables, the API operations and the billing rules.
-Everything this README shows off beyond that is Seahaven.
+Stripe World supplies only what is specific to Stripe: the tables, the API operations and the billing rules.
 
 **[Build a world of your own →](https://github.com/Kiln-AI/Seahaven#quickstart)**
 
@@ -330,11 +326,6 @@ Ready-made fixtures with richer histories are on the way.
 
 ## What's modelled
 
-<details>
-<summary>Resources, billing engine and API behaviour</summary>
-
-<!-- Fuller feature list (tables, magic cards, etc.) goes here. -->
-
 **Resources:** customers, payment methods, products, prices, coupons, promotion codes, tax rates,
 payment intents, charges, refunds, disputes, setup intents, balance, balance transactions,
 payouts, subscriptions, subscription items, subscription schedules, invoices, invoice items, credit
@@ -356,14 +347,7 @@ notes, customer balance transactions and events.
 **API behaviour:** search on seven resources with Stripe's query language, idempotency keys,
 cursor pagination, `expand[]`, and an event for every state change.
 
-</details>
-
 ## Getting started
-
-Stripe World needs Python 3.14 (a final release, not a release candidate) and
-[uv](https://docs.astral.sh/uv/). Seahaven is not on PyPI yet:
-`uv sync` installs it from [its GitHub repository](https://github.com/Kiln-AI/Seahaven) at a pinned
-commit, so you need read access to that repository.
 
 ```sh
 git clone https://github.com/Kiln-AI/stripe_world.git
