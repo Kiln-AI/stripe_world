@@ -35,6 +35,8 @@ logged for you to check.
 > vocabulary under the MIT licence of Stripe's OpenAPI spec; see
 > [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md).
 
+**[Try it on Hugging Face Spaces →](https://huggingface.co/spaces/scosman/stripe_world)**
+
 ## How real is it?
 
 - **155 Stripe API operations across 24 tables**, pinned to API version `2026-08-26.dahlia`. Every
@@ -281,14 +283,14 @@ implementation planner and feedback tools are not reproduced.
 ## Connecting to the published world
 
 Stripe World is published as the Hugging Face Space
-[Kiln-AI/stripe_world](https://huggingface.co/spaces/Kiln-AI/stripe_world). Connect to it with
+[scosman/stripe_world](https://huggingface.co/spaces/scosman/stripe_world). Connect to it with
 OpenEnv's generic client. Your side needs the `openenv` package (`pip install openenv`) and nothing
 from this repository:
 
 ```py
 from openenv import AutoEnv
 
-with AutoEnv.from_hub("Kiln-AI/stripe_world", skip_install=True) as env:
+with AutoEnv.from_hub("scosman/stripe_world", skip_install=True) as env:
     env.reset(seed=7, startup={"livemode": False})
     tools = env.step({"type": "list_tools"}).observation["tools"]
     account = env.step(
