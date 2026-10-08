@@ -1805,12 +1805,16 @@ wheels = [
 
 [[package]]
 name = "seahaven"
-version = "0.0.1"
-source = { git = "https://github.com/Kiln-AI/Seahaven.git?rev=0360978ced1d9f306d2bb3c2d6e9d1d548e8d525#0360978ced1d9f306d2bb3c2d6e9d1d548e8d525" }
+version = "0.6.0"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "apsw" },
     { name = "pydantic" },
     { name = "pyyaml" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/00/35/e36f8aa5ef5bf51f87ea5bd82cfe1524c0a7a7f6a52d78e6bebca490c222/seahaven-0.6.0.tar.gz", hash = "sha256:ae30bf452f7ae9460901743a461596cc8bb664edfb3f23e0c0944e701a2b857d", size = 432700, upload-time = "2026-10-08T21:06:42.374Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/73/c3/35023ba480326800a32893e2528f919ce02a5277beec1f109e17f852305f/seahaven-0.6.0-py3-none-any.whl", hash = "sha256:30efba0aee46ea01b82fb7cc8a80d281b8b62a84b5a14326f9599ab9c036c6bc", size = 489776, upload-time = "2026-10-08T21:06:41.202Z" },
 ]
 
 [package.optional-dependencies]
@@ -1853,9 +1857,9 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "seahaven", git = "https://github.com/Kiln-AI/Seahaven.git?rev=0360978ced1d9f306d2bb3c2d6e9d1d548e8d525" },
-    { name = "seahaven", extras = ["mcp"], marker = "extra == 'mcp'", git = "https://github.com/Kiln-AI/Seahaven.git?rev=0360978ced1d9f306d2bb3c2d6e9d1d548e8d525" },
-    { name = "seahaven", extras = ["serve"], marker = "extra == 'serve'", git = "https://github.com/Kiln-AI/Seahaven.git?rev=0360978ced1d9f306d2bb3c2d6e9d1d548e8d525" },
+    { name = "seahaven", specifier = "~=0.6" },
+    { name = "seahaven", extras = ["mcp"], marker = "extra == 'mcp'" },
+    { name = "seahaven", extras = ["serve"], marker = "extra == 'serve'" },
     { name = "starlette", marker = "extra == 'http'", specifier = ">=0.47" },
     { name = "uvicorn", marker = "extra == 'http'", specifier = ">=0.35" },
 ]

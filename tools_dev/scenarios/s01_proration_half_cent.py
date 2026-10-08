@@ -17,8 +17,9 @@ what the account can produce, and the rounding of a line is mode-
 independent arithmetic: declared in `allowed_differences.py`.
 """
 
-from conformance.cassette import Ref
 from tools_dev.scenarios._dsl import ref
+
+from conformance.cassette import Ref
 
 SCENARIO = "01_proration_half_cent"
 DESCRIPTION = (

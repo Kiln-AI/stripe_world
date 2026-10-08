@@ -37,12 +37,12 @@ sys.path.insert(0, str(REPO_ROOT / "tests"))
 
 import stripe  # noqa: E402  (recording-only; see the module docstring)
 from stripe import StripeClient  # noqa: E402
-
-from conformance import redact  # noqa: E402
-from conformance.cassette import Cassette, Step, dump  # noqa: E402
 from tools_dev.scenarios import registry  # noqa: E402
 from tools_dev.scenarios._dsl import PINNED_VERSION, Recorder, Wire  # noqa: E402
 from tools_dev.scenarios._key import RecordRefused, resolve_api_key  # noqa: E402
+
+from conformance import redact  # noqa: E402
+from conformance.cassette import Cassette, Step, dump  # noqa: E402
 
 CASSETTES_DIR = REPO_ROOT / "tests" / "conformance" / "cassettes"
 

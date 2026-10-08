@@ -1,0 +1,15 @@
+# The environment card OpenEnv's tooling reads. `openenv push` reads `name`.
+# OpenEnv's Modal and Daytona providers find this file inside the running image
+# and start the server with `python -m uvicorn <app>` from this directory, so
+# `app` names this world's ASGI app.
+#
+# There is no `validation:` block, so `openenv validate` reports one failure.
+# That block declares a reward range and a reward oracle, and a Seahaven world
+# has no reward to declare.
+spec_version: 1
+name: seahaven-stripe-world
+type: space
+runtime: fastapi
+app: seahaven_stripe_world.openenv_app:app
+port: 8000
+version: 0.1.0

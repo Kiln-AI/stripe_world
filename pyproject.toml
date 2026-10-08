@@ -14,7 +14,7 @@ readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE", "THIRD_PARTY_LICENSES.md"]
 requires-python = ">=3.14"
-dependencies = ["seahaven~=0.0"]
+dependencies = ["seahaven~=0.6"]
 
 # The server and its client. Left out of the default install because openenv's
 # own dependency tree is large, and a world used in process never needs it.
@@ -23,7 +23,7 @@ serve = ["seahaven[serve]"]
 mcp = ["seahaven[mcp]"]
 # `serve_http.py`: this world's Stripe HTTP API under `seahaven.http`, which
 # needs Starlette and uvicorn and nothing else. Named apart from `serve` because
-# that one is openenv, which cannot import on 3.14 and conflicts with `mcp`.
+# that one is openenv, whose dependency tree is large and conflicts with `mcp`.
 http = ["starlette>=0.47", "uvicorn>=0.35"]
 
 [dependency-groups]
@@ -43,19 +43,6 @@ dev = [
     "httpx>=0.28",
     "seahaven-stripe-world[http]",
 ]
-
-# Seahaven is unpublished; while that is true the bare `seahaven` requirement
-# above resolves to the framework's own repository rather than to the
-# placeholder PyPI release (`authoring.md`, "Before you run the `uv sync` that
-# `seahaven new` prints"). Pinned to a full commit SHA, never a branch or tag: a
-# moving ref would swap the core out between one `uv sync` and the next with
-# nothing in history to say when. Move the core by editing this `rev` and
-# re-running `uv lock`, in a commit of its own. The repository is private: a
-# checkout that cannot already read it over HTTPS has to give git a credential
-# before the sync, or `uv sync` fails as a git auth error that reads like a bad
-# lock. CI does that in its own guarded step (`.github/workflows/ci.yml`).
-[tool.uv.sources]
-seahaven = { git = "https://github.com/Kiln-AI/Seahaven.git", rev = "0360978ced1d9f306d2bb3c2d6e9d1d548e8d525" }
 
 [tool.uv]
 conflicts = [[{ extra = "serve" }, { extra = "mcp" }]]
