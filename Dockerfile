@@ -2,6 +2,11 @@
 # Dockerfile is what lets one be pushed without a server/ directory.
 FROM ghcr.io/huggingface/openenv-base:latest
 
+# openenv-base:latest is python:3.11-slim with uv 0.5.27, which can download no
+# final CPython 3.14, so the `uv sync` below fails with "No interpreter found for
+# Python >=3.14". This is the uv that wrote uv.lock; it downloads 3.14 itself.
+COPY --from=ghcr.io/astral-sh/uv:0.12.18 /uv /uvx /usr/local/bin/
+
 WORKDIR /app
 COPY . /app
 
