@@ -8,12 +8,6 @@ FROM ghcr.io/huggingface/openenv-base:latest
 # this is an exact version: a rebuild of the Space gets the same uv.
 COPY --from=ghcr.io/astral-sh/uv:0.12.18 /uv /uvx /usr/local/bin/
 
-# pyproject.toml pins Seahaven to a git commit, which uv fetches with the git
-# executable, and openenv-base ships none.
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends git \
-    && rm -rf /var/lib/apt/lists/*
-
 WORKDIR /app
 COPY . /app
 
