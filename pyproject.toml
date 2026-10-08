@@ -44,16 +44,12 @@ dev = [
     "seahaven-stripe-world[http]",
 ]
 
-# Seahaven is unpublished; while that is true the bare `seahaven` requirement
-# above resolves to the framework's own repository rather than to the
-# placeholder PyPI release (`authoring.md`, "Before you run the `uv sync` that
-# `seahaven new` prints"). Pinned to a full commit SHA, never a branch or tag: a
-# moving ref would swap the core out between one `uv sync` and the next with
-# nothing in history to say when. Move the core by editing this `rev` and
-# re-running `uv lock`, in a commit of its own. The repository is private: a
-# checkout that cannot already read it over HTTPS has to give git a credential
-# before the sync, or `uv sync` fails as a git auth error that reads like a bad
-# lock. CI does that in its own guarded step (`.github/workflows/ci.yml`).
+# The bare `seahaven` requirement above resolves to the framework's own public
+# repository at a pinned commit rather than to a PyPI release, so this world can
+# run on a core that has not been released yet. Pinned to a full commit SHA,
+# never a branch or tag: a moving ref would swap the core out between one
+# `uv sync` and the next with nothing in history to say when. Move the core by
+# editing this `rev` and re-running `uv lock`, in a commit of its own.
 [tool.uv.sources]
 seahaven = { git = "https://github.com/Kiln-AI/Seahaven.git", rev = "61adee0f244bdfcbd163f6fa14dd8da260fc7000" }
 
