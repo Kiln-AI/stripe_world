@@ -1,5 +1,9 @@
 ---
 title: Stripe World
+emoji: 💳
+colorFrom: indigo
+colorTo: purple
+short_description: A stateful Stripe API sandbox for agent evals and RL
 sdk: docker
 app_port: 8000
 base_path: /console
