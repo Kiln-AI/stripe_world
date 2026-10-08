@@ -369,6 +369,8 @@ conventions and project layout. Coding agents start at [AGENTS.md](AGENTS.md).
 
 ## License
 
+Stripe World is released under the [MIT License](LICENSE), the same licence as Seahaven.
+
 Stripe World is not affiliated with Stripe. Stripe's API vocabulary is used under the MIT licence of
 its OpenAPI spec; see [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md).
 
