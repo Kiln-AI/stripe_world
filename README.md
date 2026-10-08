@@ -1,5 +1,5 @@
 ---
-title: seahaven-stripe-world
+title: Stripe World
 sdk: docker
 app_port: 8000
 base_path: /console
@@ -161,6 +161,9 @@ uv run --extra serve python rollouts.py
 
 [Kiln](https://kiln.tech) connects to the same server as an OpenEnv client.
 
+To use the hosted copy instead of a local server, see
+[Connecting to the published world](#connecting-to-the-published-world).
+
 ### Software tests with the Stripe SDK (HTTP)
 
 `serve_http.py` serves Stripe's HTTP API. Every `/worlds/<id>` is its own Stripe account, created
@@ -274,6 +277,40 @@ Then ask Claude things like:
 Claude gets a fresh test-mode account each time it starts the server, and nothing is kept when it
 stops. The world provides 8 of the 10 tools on Stripe's MCP server; the documentation search,
 implementation planner and feedback tools are not reproduced.
+
+## Connecting to the published world
+
+Stripe World is published as the Hugging Face Space
+[Kiln-AI/stripe_world](https://huggingface.co/spaces/Kiln-AI/stripe_world). Connect to it with
+OpenEnv's generic client. Your side needs the `openenv` package (`pip install openenv`) and nothing
+from this repository:
+
+```py
+from openenv import AutoEnv
+
+with AutoEnv.from_hub("Kiln-AI/stripe_world", skip_install=True) as env:
+    env.reset(seed=7, startup={"livemode": False})
+    tools = env.step({"type": "list_tools"}).observation["tools"]
+    account = env.step(
+        {"type": "call_tool", "tool_name": "list_available_accounts_or_orgs", "arguments": {}}
+    ).observation["result"]["accounts"][0]
+    created = env.step(
+        {
+            "type": "call_tool",
+            "tool_name": "stripe_api_write",
+            "arguments": {
+                "stripe_api_operation_id": "PostCustomers",
+                "parameters": {"email": "jenny@example.com"},
+                "stripe_context": account["stripe_context"],
+                "livemode": account["livemode"],
+            },
+        }
+    ).observation
+    print(created["result"], env.state())
+```
+
+Always pass `skip_install=True`. Without it, `from_hub` tries to install this repository as a
+Python package, and that fails. For a server you run yourself, add `base_url="http://host:8000"`.
 
 ## Fixtures: save your own starting states
 
@@ -391,23 +428,3 @@ open-source library for building better AI products. Kiln connects to any Seahav
 scenarios against a fixture, [evaluate](https://kiln.tech/features/evals) your agent on the state
 it leaves behind, then [auto-optimize](https://kiln.tech/features/auto-optimize) prompts and models
 against those evals.
-
-## Connecting to the published world
-
-Once this world is pushed to a Hugging Face Space, connect to it with OpenEnv's generic client. Your
-side needs the `openenv` package (`pip install openenv`) and nothing from this repository:
-
-```py
-from openenv import AutoEnv
-
-with AutoEnv.from_hub("<owner>/seahaven-stripe-world", skip_install=True) as env:
-    env.reset(seed=7)
-    tools = env.step({"type": "list_tools"}).observation["tools"]
-    created = env.step(
-        {"type": "call_tool", "tool_name": "create_item", "arguments": {"name": "First"}}
-    ).observation
-    print(created["result"], env.state())
-```
-
-Always pass `skip_install=True`. Without it, `from_hub` tries to install this repository as a
-Python package, and that fails. For a server you run yourself, add `base_url="http://host:8000"`.
