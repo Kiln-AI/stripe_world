@@ -14,7 +14,7 @@ readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE", "THIRD_PARTY_LICENSES.md"]
 requires-python = ">=3.14"
-dependencies = ["seahaven~=0.0"]
+dependencies = ["seahaven~=0.6"]
 
 # The server and its client. Left out of the default install because openenv's
 # own dependency tree is large, and a world used in process never needs it.
@@ -43,15 +43,6 @@ dev = [
     "httpx>=0.28",
     "seahaven-stripe-world[http]",
 ]
-
-# The bare `seahaven` requirement above resolves to the framework's own public
-# repository at a pinned commit rather than to a PyPI release, so this world can
-# run on a core that has not been released yet. Pinned to a full commit SHA,
-# never a branch or tag: a moving ref would swap the core out between one
-# `uv sync` and the next with nothing in history to say when. Move the core by
-# editing this `rev` and re-running `uv lock`, in a commit of its own.
-[tool.uv.sources]
-seahaven = { git = "https://github.com/Kiln-AI/Seahaven.git", rev = "7c00046adf082457dae492bac202bea87dab9cd9" }
 
 [tool.uv]
 conflicts = [[{ extra = "serve" }, { extra = "mcp" }]]
