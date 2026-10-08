@@ -13,6 +13,8 @@ Commands: `uv run ruff format --check && uv run ruff check`, `uv run ty check`, 
 API; `seahaven.http.main`'s options, with the `SEAHAVEN_*` variables of `seahaven mcp`; see Code
 layout). No `--world` is needed: `[project] name` normalises to the package, which is what the
 CLI's project-name heuristic imports.
+Releasing to the Hugging Face Space follows `.github/RELEASING.md`. The README has no Space front
+matter, because GitHub would render it; the release sets the Space card instead.
 Conformance cassettes re-record with `uv run python -m tools_dev.record --scenario <name>`
 (`--list` prints names; needs a test-mode key, never runs in CI).
 CI (`.github/workflows/ci.yml`) runs that same check list on every push to main and every pull
