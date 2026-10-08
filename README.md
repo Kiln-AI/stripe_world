@@ -1,3 +1,13 @@
+---
+title: seahaven-stripe-world
+sdk: docker
+app_port: 8000
+base_path: /console
+tags:
+  - openenv
+  - seahaven
+---
+
 <p align="center">
   <img width="200" height="150" alt="Stripe World logo, a remix of the Seahaven logo" src="https://github.com/user-attachments/assets/aec87601-05bb-487c-8bff-ed083de83564" />
 </p>
@@ -381,3 +391,23 @@ open-source library for building better AI products. Kiln connects to any Seahav
 scenarios against a fixture, [evaluate](https://kiln.tech/features/evals) your agent on the state
 it leaves behind, then [auto-optimize](https://kiln.tech/features/auto-optimize) prompts and models
 against those evals.
+
+## Connecting to the published world
+
+Once this world is pushed to a Hugging Face Space, connect to it with OpenEnv's generic client. Your
+side needs the `openenv` package (`pip install openenv`) and nothing from this repository:
+
+```py
+from openenv import AutoEnv
+
+with AutoEnv.from_hub("<owner>/seahaven-stripe-world", skip_install=True) as env:
+    env.reset(seed=7)
+    tools = env.step({"type": "list_tools"}).observation["tools"]
+    created = env.step(
+        {"type": "call_tool", "tool_name": "create_item", "arguments": {"name": "First"}}
+    ).observation
+    print(created["result"], env.state())
+```
+
+Always pass `skip_install=True`. Without it, `from_hub` tries to install this repository as a
+Python package, and that fails. For a server you run yourself, add `base_url="http://host:8000"`.
