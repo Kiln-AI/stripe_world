@@ -1806,7 +1806,7 @@ wheels = [
 [[package]]
 name = "seahaven"
 version = "0.5.0"
-source = { git = "https://github.com/Kiln-AI/Seahaven.git?rev=61adee0f244bdfcbd163f6fa14dd8da260fc7000#61adee0f244bdfcbd163f6fa14dd8da260fc7000" }
+source = { git = "https://github.com/Kiln-AI/Seahaven.git?rev=7c00046adf082457dae492bac202bea87dab9cd9#7c00046adf082457dae492bac202bea87dab9cd9" }
 dependencies = [
     { name = "apsw" },
     { name = "pydantic" },
@@ -1853,9 +1853,9 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "seahaven", git = "https://github.com/Kiln-AI/Seahaven.git?rev=61adee0f244bdfcbd163f6fa14dd8da260fc7000" },
-    { name = "seahaven", extras = ["mcp"], marker = "extra == 'mcp'", git = "https://github.com/Kiln-AI/Seahaven.git?rev=61adee0f244bdfcbd163f6fa14dd8da260fc7000" },
-    { name = "seahaven", extras = ["serve"], marker = "extra == 'serve'", git = "https://github.com/Kiln-AI/Seahaven.git?rev=61adee0f244bdfcbd163f6fa14dd8da260fc7000" },
+    { name = "seahaven", git = "https://github.com/Kiln-AI/Seahaven.git?rev=7c00046adf082457dae492bac202bea87dab9cd9" },
+    { name = "seahaven", extras = ["mcp"], marker = "extra == 'mcp'", git = "https://github.com/Kiln-AI/Seahaven.git?rev=7c00046adf082457dae492bac202bea87dab9cd9" },
+    { name = "seahaven", extras = ["serve"], marker = "extra == 'serve'", git = "https://github.com/Kiln-AI/Seahaven.git?rev=7c00046adf082457dae492bac202bea87dab9cd9" },
     { name = "starlette", marker = "extra == 'http'", specifier = ">=0.47" },
     { name = "uvicorn", marker = "extra == 'http'", specifier = ">=0.35" },
 ]

@@ -51,7 +51,7 @@ dev = [
 # `uv sync` and the next with nothing in history to say when. Move the core by
 # editing this `rev` and re-running `uv lock`, in a commit of its own.
 [tool.uv.sources]
-seahaven = { git = "https://github.com/Kiln-AI/Seahaven.git", rev = "61adee0f244bdfcbd163f6fa14dd8da260fc7000" }
+seahaven = { git = "https://github.com/Kiln-AI/Seahaven.git", rev = "7c00046adf082457dae492bac202bea87dab9cd9" }
 
 [tool.uv]
 conflicts = [[{ extra = "serve" }, { extra = "mcp" }]]
