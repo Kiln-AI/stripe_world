@@ -148,7 +148,7 @@ and not yet built. The eval suite is also deferred.
 ## Development
 
 ```bash
-# Install (requires read access to the private Seahaven repository)
+# Install
 uv sync
 
 # Run the checks -- all four before every commit; CI runs the same list
@@ -228,10 +228,9 @@ with seahaven_stripe_world.world.instance("empty") as inst:
 
 ## The framework
 
-`seahaven` is taken from its own (private) repository at a pinned commit SHA --
-`[tool.uv.sources]` in `pyproject.toml` holds the full SHA, and `uv.lock` records the resolution.
-A checkout that cannot read `github.com/Kiln-AI/Seahaven` over HTTPS cannot sync. The framework's
-docs ship inside the installed package: `uv run seahaven docs` prints the directory.
+`seahaven` is the PyPI release: `pyproject.toml` requires `seahaven~=0.6`, and `uv.lock` records
+the exact version. The framework's docs ship inside the installed package: `uv run seahaven docs`
+prints the directory.
 
 `pydantic` is pinned to 2.12.3 through `override-dependencies`; the comment beside it in
 `pyproject.toml` says why, and when to revisit it.
