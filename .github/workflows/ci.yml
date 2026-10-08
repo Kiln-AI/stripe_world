@@ -5,8 +5,7 @@ on:
     branches: [main]
   pull_request:
 
-# A second push to a branch makes the first run's answer worthless, and these
-# jobs all cost a Seahaven clone.
+# A second push to a branch makes the first run's answer worthless.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
@@ -23,45 +22,10 @@ jobs:
           python-version: "3.14"
           enable-cache: true
 
-      # `seahaven` is a git dependency on a PRIVATE repository (see
-      # `[tool.uv.sources]`), and the default `GITHUB_TOKEN` is scoped to this
-      # repository alone -- it cannot read Kiln-AI/Seahaven. uv shells out to
-      # git, which has no way to be handed a token per-dependency, so the
-      # credential goes on globally before anything syncs.
-      #
-      # This step is deliberately its own, and guarded, because the failure it
-      # prevents is badly disguised: with no credential, git's 404 surfaces
-      # from inside `uv sync` as "failed to clone ... Authentication failed",
-      # which reads like a corrupt lock or a bad `rev` and sends the next
-      # person to `uv lock` rather than to the repository's secrets.
-      - name: Give git a credential for the private Seahaven repository
-        env:
-          SEAHAVEN_TOKEN: ${{ secrets.SEAHAVEN_CORE_TOKEN }}
-        run: |
-          if [ -z "$SEAHAVEN_TOKEN" ]; then
-            echo "::error::The secret SEAHAVEN_CORE_TOKEN is empty or not set for this run."
-            echo "::error::'seahaven' is a git dependency on the private Kiln-AI/Seahaven repo and cannot be fetched without it."
-            echo "::error::Set it under Settings -> Secrets and variables -> Actions. An organization secret also has to list this repository, and a fork's pull request cannot see either; run such a PR from a branch in this repository."
-            exit 1
-          fi
-          # A private key pasted in here would configure an HTTPS credential out
-          # of something only SSH can use, and git would not complain until it
-          # asked for a username several steps later. Cheaper to say it here.
-          case "$SEAHAVEN_TOKEN" in
-            -----BEGIN*)
-              echo "::error::SEAHAVEN_CORE_TOKEN holds an SSH private key, but this step configures an HTTPS credential."
-              echo "::error::Store a token with read access to Kiln-AI/Seahaven under that name, or switch this step to ssh-agent and the source URL in pyproject.toml to ssh://."
-              exit 1
-              ;;
-          esac
-          git config --global url."https://x-access-token:${SEAHAVEN_TOKEN}@github.com/".insteadOf "https://github.com/"
-
       # `--locked` and not a bare sync: it fails if `uv.lock` does not match
-      # `pyproject.toml`, so a change to the pinned `rev` that forgot its
-      # `uv lock` is caught here instead of resolving to something nobody
-      # reviewed. No `--extra serve`: `seahaven.openenv` pulls in `beartype`
-      # via `fastmcp`, which imports `collections.abc.ByteString` and so cannot
-      # import at all on 3.14. Nothing in this repo's suites needs it. The
+      # `pyproject.toml`, so a dependency change that forgot its `uv lock` is
+      # caught here instead of resolving to something nobody reviewed. No
+      # `--extra serve`: nothing in this repo's suites needs it. The
       # `http` extra is what `serve_http.py` and `tests/http_api/` run on (the
       # dev group carries it too; named here so dropping it from the group
       # cannot quietly skip those tests).
