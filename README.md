@@ -1,17 +1,3 @@
----
-title: Stripe World
-emoji: 💳
-colorFrom: indigo
-colorTo: purple
-short_description: Stripe API + MCP for agent evals and RL. Built with Seahaven
-sdk: docker
-app_port: 8000
-base_path: /console
-tags:
-  - openenv
-  - seahaven
----
-
 <p align="center">
   <img width="200" height="150" alt="Stripe World logo, a remix of the Seahaven logo" src="https://github.com/user-attachments/assets/aec87601-05bb-487c-8bff-ed083de83564" />
 </p>
