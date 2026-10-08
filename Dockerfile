@@ -7,6 +7,12 @@ FROM ghcr.io/huggingface/openenv-base:latest
 # Python >=3.14". This is the uv that wrote uv.lock; it downloads 3.14 itself.
 COPY --from=ghcr.io/astral-sh/uv:0.12.18 /uv /uvx /usr/local/bin/
 
+# pyproject.toml pins Seahaven to a git commit, which uv fetches with the git
+# executable, and openenv-base ships none.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 COPY . /app
 
@@ -29,5 +35,5 @@ ENV UV_NO_CACHE=1 UV_NO_SYNC=1
 
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 CMD \
-    python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"
+    /app/.venv/bin/python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"
 CMD ["uv", "run", "uvicorn", "seahaven_stripe_world.openenv_app:app", "--host", "0.0.0.0", "--port", "8000"]
