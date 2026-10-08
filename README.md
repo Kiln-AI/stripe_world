@@ -3,7 +3,7 @@ title: Stripe World
 emoji: 💳
 colorFrom: indigo
 colorTo: purple
-short_description: A stateful Stripe API sandbox for agent evals and RL
+short_description: An OpenEnv environment implementing the Stripe API and MCP, for agent evals and RL. Built with Seahaven.
 sdk: docker
 app_port: 8000
 base_path: /console
