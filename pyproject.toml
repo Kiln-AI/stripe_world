@@ -23,7 +23,7 @@ serve = ["seahaven[serve]"]
 mcp = ["seahaven[mcp]"]
 # `serve_http.py`: this world's Stripe HTTP API under `seahaven.http`, which
 # needs Starlette and uvicorn and nothing else. Named apart from `serve` because
-# that one is openenv, which cannot import on 3.14 and conflicts with `mcp`.
+# that one is openenv, whose dependency tree is large and conflicts with `mcp`.
 http = ["starlette>=0.47", "uvicorn>=0.35"]
 
 [dependency-groups]

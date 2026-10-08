@@ -16,10 +16,9 @@ CLI's project-name heuristic imports.
 Conformance cassettes re-record with `uv run python -m tools_dev.record --scenario <name>`
 (`--list` prints names; needs a test-mode key, never runs in CI).
 CI (`.github/workflows/ci.yml`) runs that same check list on every push to main and every pull
-request, over `uv sync --locked` — so a `rev` moved in `[tool.uv.sources]` without its `uv lock`
-fails there rather than resolving to something nobody reviewed. It syncs without the `serve` extra:
-`seahaven.openenv` pulls in `beartype`, which cannot import on 3.14, and no suite here needs it. It
-syncs the `http` extra (Starlette and uvicorn, which the dev group also pulls in).
+request, over `uv sync --locked` — so a dependency change without its `uv lock` fails there rather
+than resolving to something nobody reviewed. It syncs without the `serve` extra, which no suite here
+needs. It syncs the `http` extra (Starlette and uvicorn, which the dev group also pulls in).
 
 Rules: time comes from `ctx.clock` and ids and randomness from `ctx.ids`, so a replay of the same
 fixture and seed gives the same result; SQL goes through `ctx.db` (`ctx.db.conn` is the raw APSW
@@ -76,12 +75,9 @@ the code carries a comment linking to its entry there.
 - **Fixtures.** Only `empty` ships today (schema, no rows). The `small` and `large` fixtures are
   deferred, as is the eval suite.
 - **This repo is the world checkout**: `pyproject.toml` and `src/seahaven_stripe_world/` at the root, beside
-  `specs/` and `research/`. The framework is not vendored here: the bare `seahaven` requirement
-  resolves through `[tool.uv.sources]` to `github.com/Kiln-AI/Seahaven` at a pinned full commit
-  SHA, so `uv sync` installs the same core every time and moving it is one reviewable edit to that
-  `rev` plus a `uv lock`. Never a branch or tag there — a moving ref changes the core underneath a
-  green suite with nothing in history to say when. The repository is private, so a checkout without
-  HTTPS read access to it cannot sync (the failure surfaces inside `uv sync` as a git auth error).
+  `specs/` and `research/`. The framework is not vendored here: `seahaven~=0.6` resolves to the
+  PyPI release, and `uv.lock` pins the exact version, so `uv sync` installs the same core every time
+  and moving it is a `uv lock` change.
   `pydantic` is pinned to 2.12.3 per `SEAHAVEN_FINDINGS.md` Entry 1; do not remove the pin without
   reading that entry.
 
