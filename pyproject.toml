@@ -55,7 +55,7 @@ dev = [
 # before the sync, or `uv sync` fails as a git auth error that reads like a bad
 # lock. CI does that in its own guarded step (`.github/workflows/ci.yml`).
 [tool.uv.sources]
-seahaven = { git = "https://github.com/Kiln-AI/Seahaven.git", rev = "0360978ced1d9f306d2bb3c2d6e9d1d548e8d525" }
+seahaven = { git = "https://github.com/Kiln-AI/Seahaven.git", rev = "61adee0f244bdfcbd163f6fa14dd8da260fc7000" }
 
 [tool.uv]
 conflicts = [[{ extra = "serve" }, { extra = "mcp" }]]
