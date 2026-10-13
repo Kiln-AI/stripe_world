@@ -229,7 +229,9 @@ Detailed in `components/replay.md`; the contract is:
   idempotency_key=None)`, after `stripe_envelope.mint_request(ctx_at, None)` gives it a request id,
   as the tool and HTTP faces do. An engine step calls one of `advance_cycle`, `expire_incomplete`,
   `dunning.record_failed_attempt` or `ledger.settle_payout`, with `ctx.state["_request"]` set to
-  `{"id": None, "idempotency_key": None}`: Stripe's own automatic actions carry no request.
+  `{"id": None, "idempotency_key": None}`: Stripe's own automatic actions carry no request. The
+  one automatic action made through the dispatcher, finalizing a draft whose
+  `automatically_finalizes_at` has come, carries a null request the same way.
 - **Nothing else writes**, except `install_account` and the two finishing steps
   (`refresh_balance_statuses`, `trim_events`).
 - **Time order.** Steps run in instant order, ties in the order they were scheduled, so `x_seq`
@@ -321,6 +323,7 @@ ORDER BY d.id
 | `tests/replay/test_finish.py` | 2 | balance statuses refreshed; events before the cutoff deleted, none after |
 | `tests/replay/test_checks.py` | 2 | each invariant and guard catches a planted violation (in a throwaway instance, via `setup_sql`) |
 | `tests/test_small_co.py` | 3 | the account identity through the MCP tools in test mode; the exact cast counts; each named character's state; checks clean; "the tools carry on" (spec §6) |
+| `tests/test_population.py` | 4 | the population draw is pure and has the shape's proportions |
 | `tests/test_big_co.py` | 4 | identity; the expected ranges; all eight statuses; each loose end; checks clean; "the tools carry on"; file size |
 | `tests/test_fork_cost.py` | 4 | 30 forks of each company fixture, median and max recorded; asserted under ceilings set from the Phase 4 measurement |
 | `tests/test_guide.py` | 3, 4 | every landmark matches |

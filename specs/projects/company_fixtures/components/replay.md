@@ -78,10 +78,13 @@ class Timeline:
 ```python
 class Client:
     def call(self, ctx: seahaven.Ctx, method: str, path: str,
-             params: Mapping[str, Any] | None = None) -> dict[str, Any]:
+             params: Mapping[str, Any] | None = None, *, automatic: bool = False) -> dict[str, Any]:
         """mint_request(ctx, None), then dispatch(ctx, method, path, params, idempotency_key=None).
-        Returns the body on 200; anything else (a StripeApiError, a non-200 response) raises
-        FixtureBuildError with the status and the error body."""
+        With `automatic=True` the request context is null instead (engine.automatic): Stripe acting
+        on its own through the same handler, as when it finalizes a draft whose
+        automatically_finalizes_at has come. Returns the body on 200; anything else (a
+        StripeApiError, a non-200 response) raises FixtureBuildError with the status and the error
+        body."""
 
     def attempt(self, ctx: seahaven.Ctx, method: str, path: str,
                 params: Mapping[str, Any] | None = None) -> ApiResponse:
@@ -174,6 +177,7 @@ class Hooks(Protocol):
     def on_retry(self, ctx: seahaven.Ctx, sub_id: str, invoice_id: str, attempt: int) -> bool: ...
     # True: the hook made the payment possible (e.g. added a good card) and the driver pays;
     # False: the retry fails.
+    def on_status_change(self, ctx: seahaven.Ctx, sub_id: str, old: str, new: str) -> None: ...
 
 
 class Subscriptions:
@@ -190,6 +194,7 @@ class Subscriptions:
 | `incomplete` | an **expiry** at `created + 23 hours` |
 | `past_due` with an open latest invoice whose `next_payment_attempt` is set | also a **retry** at `next_payment_attempt` |
 | `canceled`, `incomplete_expired`, `paused` | nothing; the driver stops following |
+| any, with a `draft` latest invoice that has `auto_advance` and an `automatically_finalizes_at` | also a **finalization** at that instant |
 
 The steps:
 
@@ -201,6 +206,15 @@ The steps:
   subscription to `active`); else `engine.fail_retry(ctx, invoice, DECLINING_CODE)`, which may apply
   the end-of-schedule outcome. Then `follow` again.
 - **Expiry**: `engine.expire` if still `incomplete`.
+- **Finalization**: if still `draft`, `client.call(ctx, "POST", f"/v1/invoices/{id}/finalize",
+  automatic=True)`; then, if it is a `send_invoice` invoice now open, `hooks.on_open_invoice`.
+
+After every step the driver compares the subscription's status with the last one it saw and calls
+`hooks.on_status_change` when it moved.
+
+`finalize_when_due(timeline, client, invoice: dict, on_open: Callable[[Ctx, str], None])` schedules
+the same finalization for an invoice made outside a subscription (an onboarding invoice) and calls
+`on_open` once it is open.
 
 A retry and a boundary can coexist for a `past_due` subscription; whichever instant comes first runs
 first. The driver keeps `n` per subscription in a dict keyed by id, iterated only by key lookup.
