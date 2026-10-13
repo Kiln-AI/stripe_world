@@ -7,7 +7,8 @@ authoring.md, db_schema_and_fixtures.md, testing.md, state.md, reference/lints.m
 if this world adds other worlds.
 
 Commands: `uv run ruff format --check && uv run ruff check`, `uv run ty check`, `uv run pytest`,
-`uv run seahaven check` (run all before every commit), `uv run seahaven fixture list`,
+`uv run seahaven check` (run all before every commit), `uv run demo.py` (the README's one-command
+demo: a $20 test-card charge and the state rows it wrote), `uv run seahaven fixture list`,
 `uv run seahaven serve`, `uv run serve_http.py [--host H] [--port N] [--max-instances N]
 [--fixture NAME] [--seed N] [--now ISO] [--clock-mode MODE] [--reset-options JSON]` (Stripe's HTTP
 API; `seahaven.http.main`'s options, with the `SEAHAVEN_*` variables of `seahaven mcp`; see Code

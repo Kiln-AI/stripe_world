@@ -394,6 +394,14 @@ cd stripe_world
 uv sync
 ```
 
+See it work in one command. This charges $20 to Stripe's test Visa card in a private test-mode
+account, reads the charge back, and prints every row the charge wrote, the state an eval grades. No
+server, API key or network:
+
+```sh
+uv run demo.py
+```
+
 Then run any example above from the checkout. To work on the world itself, run the checks CI runs:
 
 ```sh
