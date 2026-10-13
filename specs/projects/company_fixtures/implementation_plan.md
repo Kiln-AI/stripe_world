@@ -17,7 +17,7 @@ status: complete
       over 12 months, its build time and file size, and the projection for `big_co` recorded in the
       phase plan. **If the projection breaks the `big_co` budget, stop and raise it with the user
       before Phase 4.**
-- [ ] **Phase 3: `small_co`.** `accounts.WRENFIELD`, the catalog, the 45-member cast and its story,
+- [x] **Phase 3: `small_co`.** `accounts.WRENFIELD`, the catalog, the 45-member cast and its story,
       the build and the frozen fixture, `tests/test_small_co.py`, the determinism test, the guide
       tooling (`fixtures_src/guide.py`, `tests/test_guide.py`) and the `small_co` half of
       `docs/fixtures.md`. A web check that "Wrenfield" and `wrenfield.app` name no real company.

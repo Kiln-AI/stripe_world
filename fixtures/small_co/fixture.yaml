@@ -1,0 +1,14 @@
+created_at: '2026-10-13T20:28:08.974Z'
+description: 'Wrenfield Labs, a two-person booking and payments tool for independent
+  tutors, music teachers and coaches, as a test-mode Stripe account: a hand-written
+  cast of about 45 customers from a private beta through a public launch, with renewals,
+  a failed payment in dunning, refunds and a dispute. Good for evals that need a small
+  account whose every customer has a story.'
+file_sha256: 9c749f297b00452516c5ed6ec10f679b809108e7478dd41cdd678794af7d5959
+format_version: 1
+id: small_co
+now: '2026-09-01T14:00:00.000Z'
+parent_id: null
+schema_hash: e2f582a5828e83c16e123cbf44d4e0344939ba17ee0942b3b338bf5a08eecf66
+world: seahaven_stripe_world
+world_version: 0.2.0

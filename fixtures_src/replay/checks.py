@@ -191,6 +191,14 @@ INVARIANTS: tuple[tuple[str, Check], ...] = (
             " WHERE a.billing_reason = 'subscription_cycle'"
             " AND b.billing_reason = 'subscription_cycle'"
             " AND a.status <> 'void' AND b.status <> 'void'"
+            # A trial-end invoice bills the NEW period while each later renewal is labelled
+            # with the period just ended, so a converted trial's first two cycle invoices
+            # share a span by the world's own rule (small_co Phase 3); the trial-end
+            # invoice is left out of the comparison.
+            " AND a.created IS NOT (SELECT trial_end FROM subscriptions WHERE id ="
+            " a.parent_subscription)"
+            " AND b.created IS NOT (SELECT trial_end FROM subscriptions WHERE id ="
+            " b.parent_subscription)"
             " AND a.period_start < b.period_end AND b.period_start < a.period_end ORDER BY a.id"
         ),
     ),

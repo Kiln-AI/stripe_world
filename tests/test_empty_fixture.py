@@ -23,7 +23,7 @@ pytestmark = pytest.mark.seahaven(fixture="empty")
 
 def test_the_empty_fixture_is_committed(world: seahaven.World) -> None:
     fixtures = {frozen.id: frozen for frozen in world.fixtures()}
-    assert set(fixtures) == {"empty"}
+    assert "empty" in fixtures  # the company fixtures sit beside it
     empty = fixtures["empty"]
     assert empty.now == FIXTURE_NOW
     assert empty.parent_id is None

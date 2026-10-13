@@ -58,11 +58,11 @@ def test_the_recipe_still_makes_the_committed_empty_bytes(
     assert fixture.description == generate.DESCRIPTIONS["empty"]
     assert fixture.dir == tmp_path / "fixtures" / "empty"
     assert [frozen.id for frozen in elsewhere.fixtures()] == ["empty"]
-    committed = world.fixtures()[0]
+    committed = next(frozen for frozen in world.fixtures() if frozen.id == "empty")
     assert _sha256(fixture.state_path) == _sha256(committed.state_path)
-    # The copy is what took the write: the imported world still holds exactly
-    # the committed fixture.
-    assert [frozen.id for frozen in world.fixtures()] == ["empty"]
+    # The copy is what took the write: the imported world holds only its
+    # committed fixtures (the company fixtures sit beside `empty`).
+    assert all(frozen.dir.parent == world.fixtures_dir for frozen in world.fixtures())
 
 
 def test_the_recipe_defaults_to_this_packages_world(generate: Any, world: seahaven.World) -> None:
