@@ -1,44 +1,49 @@
 r"""How every fixture in `fixtures/` is made. Commit it, because it is the recipe.
 
 A fixture is a binary artifact, and a binary artifact with no source is one
-nobody can change. This module is that source: one function per fixture, each
-taking a live instance and filling it, which is exactly the shape the CLI calls:
+nobody can change. This module is that source: one builder per fixture, each
+taking a blank instance and filling it.
 
-    uv run seahaven fixture freeze empty \
-        --now 2026-09-01T14:00:00.000Z \
-        --run fixtures_src.generate:empty \
-        --description "Schema only. Start here to write history, or to test setup flows."
+Rebuild one fixture by deleting its directory and re-running the recipe:
 
-    uv run seahaven fixture fork empty small \
-        --run fixtures_src.generate:small \
-        --description "..."
+    rm -rf fixtures/<id> && uv run python fixtures_src/generate.py <id>
 
-**Pass `--now` on every `freeze`, and the same one every time.** `freeze` starts
-from a blank instance, and a blank instance with no `--now` takes the wall clock,
-so leaving the flag off dates each fixture from the day it was built: a scenario
-written against one would then read differently from a scenario written against
-another, and `seahaven check` cannot tell you, because a wall-clock instant is a
-perfectly canonical timestamp. Choose the instant once, write it down here, and
-never move it -- it is baked into every sidecar. `fork` needs no `--now`: a fork
-inherits its parent's clock, which is the point of forking.
+With no arguments, every fixture is rebuilt in lineage order: `empty`,
+`small_co`, `big_co`. Do not use `seahaven fixture freeze --run` for the company
+fixtures: that path opens the instance without the test-mode startup and
+without a fixed clock, so it cannot reproduce them.
 
-`build` below is the same freeze without the flags: it carries `NOW` and the
-description for you, which is what makes it the thing a test calls. Hand it
-`world=` and the fixture is frozen into *that* world's fixtures directory, so a
-test that rebuilds a fixture to compare it with the committed bytes builds into a
-temporary directory instead of moving the imported world's.
+Every build starts from a blank instance at `NOW` on a `fixed` clock, opened
+with that fixture's `STARTUP` options (the companies are test-mode accounts).
+`build` carries `NOW`, the startup options and the description for you, which
+is what makes it the thing a test calls. Hand it `world=` and the fixture is
+frozen into *that* world's fixtures directory, so a test that rebuilds a fixture
+to compare it with the committed bytes builds into a temporary directory.
 
-Fill through the world's own tools, or through `inst.bulk()` for thousands of
-rows at a time. Nothing here reads the wall clock, and nothing here is random
-outside `ctx.ids`.
+The company builders replay history through the world's own code
+(`fixtures_src/replay/`). Nothing here reads the wall clock, and nothing here is
+random outside `ctx.ids`.
 """
+
+import importlib
+from collections.abc import Callable
 
 import seahaven
 
-__all__ = ["build", "empty", "main"]
+__all__ = [
+    "BUILDERS",
+    "DESCRIPTIONS",
+    "NOW",
+    "STARTUP",
+    "big_co",
+    "build",
+    "empty",
+    "main",
+    "small_co",
+]
 
-# The instant every fixture of this world is frozen at: the `--now` above, and
-# the one `build` passes. Chosen once and never moved. This same literal is
+# The instant every fixture of this world is frozen at: the one `build` passes,
+# chosen once and never moved. This same literal is
 # `BLANK_NOW` in `tests/conftest.py`, so a blank test instance and the frozen
 # fixtures share one instant by construction (`components/fixtures.md`).
 NOW = "2026-09-01T14:00:00.000Z"
@@ -53,12 +58,47 @@ def empty(inst: seahaven.Instance) -> None:
     """
 
 
-# Every fixture this module can build, by id, and what each one tells whoever is
-# choosing between them. `seahaven fixture freeze --run` names one of these
-# functions directly; `build` looks both tables up. `small` and `large` join in
-# the fixtures phase, after the last table exists.
-BUILDERS = {"empty": empty}
-DESCRIPTIONS = {"empty": "Schema only. Start here to write history, or to test setup flows."}
+def _company_builder(package: str) -> Callable[[seahaven.Instance], None]:
+    """A company package's `build`, imported only when that fixture is built: the companies
+    replay thousands of steps through the world, and `empty` should not pay for importing them."""
+    return importlib.import_module(package).build
+
+
+def small_co(inst: seahaven.Instance) -> None:
+    """`small_co`: Wrenfield Labs (components/small_co.md), imported when built."""
+    _company_builder("fixtures_src.small_co")(inst)
+
+
+def big_co(inst: seahaven.Instance) -> None:
+    """`big_co`: Ostrander Systems (components/big_co.md), imported when built."""
+    _company_builder("fixtures_src.big_co")(inst)
+
+
+# Every fixture this module can build, by id, in lineage order; the startup
+# options each blank instance is opened with; and what each one tells whoever is
+# choosing between them (functional spec §3.6).
+BUILDERS = {"empty": empty, "small_co": small_co, "big_co": big_co}
+STARTUP: dict[str, dict[str, object]] = {
+    "empty": {},
+    "small_co": {"livemode": False},
+    "big_co": {"livemode": False},
+}
+DESCRIPTIONS = {
+    "empty": "Schema only. Start here to write history, or to test setup flows.",
+    "small_co": (
+        "Wrenfield Labs, a two-person booking and payments tool for independent tutors, music "
+        "teachers and coaches, as a test-mode Stripe account: a hand-written cast of about 45 "
+        "customers from a private beta through a public launch, with renewals, a failed payment "
+        "in dunning, refunds and a dispute. Good for evals that need a small account whose every "
+        "customer has a story."
+    ),
+    "big_co": (
+        "Ostrander Systems, field-service scheduling software for trades businesses, as a "
+        "test-mode Stripe account: thousands of customers over 18 months of simulated "
+        "subscriptions, renewals, upgrades, churn, dunning, refunds, disputes and payouts, plus "
+        "scripted loose ends. Good for evals that need a realistic account at scale."
+    ),
+}
 
 
 def build(fixture_id: str, *, world: seahaven.World | None = None) -> seahaven.Fixture:
@@ -78,7 +118,7 @@ def build(fixture_id: str, *, world: seahaven.World | None = None) -> seahaven.F
     fixture template does the same).
     """
     into = world if world is not None else _package_world()
-    with into.instance(None, now=NOW, clock_mode="fixed") as inst:
+    with into.instance(None, now=NOW, clock_mode="fixed", startup=STARTUP[fixture_id]) as inst:
         BUILDERS[fixture_id](inst)
         return inst.freeze(fixture_id, DESCRIPTIONS[fixture_id])
 
@@ -119,4 +159,10 @@ def main(argv: list[str], *, world: seahaven.World | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main([]))
+    import sys
+    from pathlib import Path
+
+    # Run as a script, this file's directory is on the path rather than the
+    # repo root the company builders import `fixtures_src` from.
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    raise SystemExit(main(sys.argv[1:]))

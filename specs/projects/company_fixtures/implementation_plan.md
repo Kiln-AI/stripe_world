@@ -11,7 +11,7 @@ status: complete
       mode rule, the version bump with `uv lock`, `empty` rebuilt, `test_empty_fixture.py`'s
       inventory, `tests/test_account_table.py`, and the doc touches (the README's `empty` example,
       table counts). Nothing else under `src/` changes.
-- [ ] **Phase 2: The replay engine.** `fixtures_src/` becomes a package; `replay/` (clock,
+- [x] **Phase 2: The replay engine.** `fixtures_src/` becomes a package; `replay/` (clock,
       timeline, client, engine, cards, people, subscription and payout drivers, finish, checks) with
       `tests/replay/`; `generate.py`'s `STARTUP` plumbing. Ends with the benchmark: 200 customers
       over 12 months, its build time and file size, and the projection for `big_co` recorded in the
