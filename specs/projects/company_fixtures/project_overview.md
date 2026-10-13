@@ -118,9 +118,12 @@ Loose ends at `NOW`:
   becomes a row like any other data: a one-row account table that the startup hook reads into
   `ctx.state` instead of building it from a Python constant. This is what the `stripe_world`
   functional spec (§2.6) meant by "a fixture-defined default". Forks and `setup_sql` then inherit or
-  adjust the account, and a world that adds this one gets it automatically. `empty` holds today's
-  sandbox values, so nothing changes for anyone using it. The schema change rebuilds `empty` and
-  bumps the world version. **This is the first phase of the plan**, before any fixture is built.
+  adjust the account, and a world that adds this one gets it automatically. The schema change
+  rebuilds `empty` and bumps the world version. **This is the first phase of the plan**, before any
+  fixture is built.
+- **`empty` keeps working exactly as it does today**, and so does a blank instance made with no
+  fixture at all (the HTTP server's default). Both see today's sandbox account, the same id and every
+  field unchanged, and the existing suites pass unchanged.
 - **Fictional, and not a cliché.** No real people and no real companies. No sample-data names such as
   Acme, Contoso, Northwind or Initech, which are tells in their own right. Company and customer names
   get a collision check before they are committed. Email addresses use invented domains: each
