@@ -4,74 +4,75 @@ status: complete
 
 # Functional Spec: Company Fixtures
 
-Two committed fixtures, `small_co` (Wrenfield Labs) and `big_co` (Ostrander Systems), each the live
-Stripe account of one fictional company, frozen at `NOW = 2026-09-01T14:00:00.000Z` (a Tuesday).
-The overview (`project_overview.md`) is the brief; this document is the contract.
+Two committed fixtures, `small_co` (Wrenfield Labs) and `big_co` (Ostrander Systems), each the
+test-mode Stripe account of one fictional company, frozen at `NOW = 2026-09-01T14:00:00.000Z` (a
+Tuesday). The overview (`project_overview.md`) is the brief; this document is the contract.
 
 ## 1. What ships
 
 | Deliverable | Where | Kind |
 |---|---|---|
-| The account moves into the database, and `GET /v1/account` is routed | schema, `startup.py`, routes | **The only world change** (§2) |
+| The account moves into the database | `schema/`, `startup.py` | **The only world change** (§2) |
 | `small_co` builder and its hand-written cast | `fixtures_src/` | Generator code and data |
 | `big_co` builder (simulation plus scripted loose ends) | `fixtures_src/` | Generator code |
 | The two frozen fixtures, and `empty` rebuilt | `fixtures/` | Committed binaries |
 | The fixture guide | `docs/fixtures.md` | Documentation |
 | Tests for all of the above | `tests/` | Tests |
-| The fixture line in `AGENTS.md` and the README | root | Documentation |
+| Fixture lines and table counts in `AGENTS.md`, the README and `docs/technical.md`; the README's `empty` example | root, `docs/` | Documentation |
 
-Nothing else in the world changes. The generator produces each company's history by calling the
-world's own API dispatcher and the engine functions the world already provides for fixture
-generators (`advance_cycle`, `expire_incomplete`, the dunning walkers), at historical instants
-(§3.1). Twelve triggers in `005_search.sql` already keep the search index in step with every
-insert. A world bug found while building is raised with the user, not patched in passing.
-
-The `stripe_world` specs are not edited. They are point-in-time records and still say `small` and
-`large`.
+Nothing else in the world changes: no routes, no handlers, no billing, resource, dispatcher or
+middleware code. The generator uses the world as a client (§3.1). The `stripe_world` specs are not
+edited; they are point-in-time records and still say `small` and `large`.
 
 ## 2. The account in the database
 
-This is Phase 1 and lands before any fixture is built.
+Phase 1. It lands before any fixture is built.
 
 ### 2.1 Behavior
 
-- The account is one row in a new table. The row holds the full account object (what
-  `get_stripe_account_info` and `GET /v1/account` return) and the account's settings that the world
+- The account is one row in a new `account` table. The row holds the account's id, its **mode**, the
+  full account object (what `get_stripe_account_info` returns), and the account settings the world
   already reads from `ctx.state["account"]`: `ledger` (fees, settlement days, dispute fee) and
   `dunning` (retry count, window, end behavior).
-- **`GET /v1/account` is routed** (operation `GetAccount`). Stripe's HTTP API has it, so this
-  world's HTTP API answers it with the account object. Stripe's MCP server does not expose it
-  (`mcp_catalogue.jsonl` records `GetAccount` as absent), so over MCP it keeps answering
-  "Operation 'GetAccount' is not available", like every other routed operation the real MCP lacks.
-  The routed count goes from 155 to 156. `GET /v1/accounts/{account}` is Connect and stays
-  unrouted.
 - The instance startup hook reads the row and builds `ctx.state["account"]` from it, in the same
   shape it builds today. Every reader of that state (id minting's account fragment, `stripe_context`
-  validation, `list_available_accounts_or_orgs`, `get_stripe_account_info`, the ledger, dunning) is
-  unchanged.
-- `livemode` stays an instance option (the startup keyword and `--reset-options`), not a stored
-  value. The same fixture can be opened live or in test mode.
-- **The schema seeds today's sandbox account** as the row's initial value. A blank instance (no
-  fixture, the HTTP server's default) and `empty` therefore both see exactly today's account: the
-  same id, every field the same, in both modes. Existing tests pass, changed only where they
-  enumerate tables or count routes (`test_empty_fixture.py`'s table inventory gains `account`, with
-  its one seeded row).
-- No tool writes the row. Stripe's MCP surface has no account update, and
-  `manage_stripe_accounts` only answers with a reconsent URL. A harness can still change the account
-  for one episode with `setup_sql`.
-- A missing row, a second row, or a row whose id is not `acct_` plus 16 alphanumerics fails
-  instance creation with a `WorldBug` that says which.
-- The schema change rebuilds `empty` and bumps the world version from 0.1.0 to 0.2.0.
+  validation, `list_available_accounts_or_orgs`, `get_stripe_account_info`, serialization's
+  `livemode`, the invoice's account fields, the ledger, dunning) is unchanged.
+- **The mode is set when the account is created, and kept.** A fixture's data is coupled to the mode
+  it was made in: its cards, and the `livemode` stored inside invoice lines, credit note lines and
+  event snapshots.
+
+  | Account row's mode | `livemode` passed at startup | Result |
+  |---|---|---|
+  | none yet (a blank instance) | omitted | live; the row is stamped live |
+  | none yet | `true` / `false` | that mode; the row is stamped with it |
+  | set (any fixture) | omitted | the row's mode |
+  | set | the same | that mode |
+  | set | the other | `WorldBug` at instance creation, naming the account's mode and the one asked for |
+
+  The stamp is a startup write, so it is not in the change log, and freezing an instance saves it.
+- **The schema seeds today's sandbox account**, with no mode yet. A blank instance (no fixture, the
+  HTTP server's default) therefore sees exactly today's account, in whichever mode it is opened.
+  `empty` is rebuilt from a blank instance opened with the default, so it is a live account: the same
+  id and every field the same as today. Opening `empty` in test mode is refused; a blank instance is
+  the same empty account and opens in either mode. The README's `empty` example drops its
+  `startup={"livemode": False}`.
+- No tool writes the row. A harness can still change the account for one episode with `setup_sql`.
+- A missing row, a second row, a row whose id is not `acct_` plus 16 alphanumerics, or an object
+  whose `id` differs from the row's, fails instance creation with a `WorldBug` that says which.
+- The world version goes from 0.1.0 to 0.2.0. Existing tests pass, changed only where they
+  enumerate tables (`test_empty_fixture.py`'s inventory gains `account`, with its one row).
 - In a composed world, the added world's account is in its own store, like the rest of its data.
 
 ### 2.2 What a company fixture's account says
 
-Both companies are activated live accounts: `charges_enabled`, `payouts_enabled` and
+Both companies are activated accounts opened in test mode: `charges_enabled`, `payouts_enabled` and
 `details_submitted` all true, `requirements` with nothing due and `disabled_reason` null,
 `card_payments` and `transfers` capabilities active, `business_type: company`, country `US`, default
-currency `usd`, one external bank account for payouts, and a payout schedule of `daily` with
-`delay_days: 2`. Each has its own fixed `acct_` id. The exact field set follows `spec3.min.json`'s
-`account` schema, and what the real API returns for an account's own `GET /v1/account`.
+currency `usd`, one external bank account for payouts, and a **manual** payout schedule
+(`interval: manual`, `delay_days: 2`), because this world's payouts are made by API call. Each has its
+own fixed `acct_` id. The field set follows `spec3.min.json`'s `account` schema and the shape of
+today's sandbox object.
 
 | Field | `small_co` | `big_co` |
 |---|---|---|
@@ -87,90 +88,106 @@ currency `usd`, one external bank account for payouts, and a payout schedule of 
 | `settings.payments.statement_descriptor` | `WRENFIELD` | `OSTRANDER FIELDOPS` |
 | `settings.card_payments.statement_descriptor_prefix` | `WRENFIELD` | `OSTRANDER` |
 | `created` / `tos_acceptance.date` | 2025-08-25 | 2025-02-10 |
+| Mode | test | test |
 | Dunning | 8 tries within 2 weeks, then `cancel` (Stripe's default) | 8 tries within 3 weeks, then `mark_unpaid` |
-| Ledger | Stripe's standard US card pricing, 2-day settlement, $15 dispute fee | the same |
+| Ledger | the world's defaults: 2.9% + 30¢, 2-day settlement, $15 dispute fee | the same |
 
 ## 3. Rules for both fixtures
 
 ### 3.1 Build
 
-- Built by `fixtures_src/generate.py`, frozen from a blank instance at `NOW` on a `fixed` clock with
-  a fixed seed. Rebuilding produces byte-identical files. `python fixtures_src/generate.py` with no
+- Built by `fixtures_src/generate.py` from a blank instance opened in test mode at `NOW` on a `fixed`
+  clock. Rebuilding produces byte-identical files. `python fixtures_src/generate.py` with no
   arguments rebuilds `empty`, `small_co` and `big_co` in that order.
 - The builder writes the company's account row first, then reloads the account state, so every id
   minted afterwards carries the company's account fragment.
-- **History is replayed, not hand-written.** Inside `inst.bulk()`, the builder walks a timeline
-  from the company's first day to `NOW`. At each step it calls the world's own API dispatcher
-  (customers, payment methods, subscriptions, refunds, credit notes, …) or an engine function
-  (renewals, trial ends, failed retries, expiry), with the context's clock reading that step's
-  instant. Every row, id, invoice number, ledger entry and event is therefore written by the same
-  code an agent's calls run, at the right time. The instance's own clock never moves.
-- Where the API cannot express a live-account fact (an automatic payout, an ACH bank's name, a card's
-  funding type, a dispute decided by the card network), the builder amends the object at the moment
-  it is created, before anything else reads it, or composes the world's own ledger and event
-  functions. It never writes a row shape of its own.
-- After a fixture is built, the real tools carry on from it correctly: a new invoice for an existing
-  customer gets that customer's next invoice number, a new object's `x_seq` follows every existing
-  one, a payout draws only the balance that is actually available, and search finds bulk-written
-  objects.
+- **History is replayed, not hand-written.** Inside `inst.bulk()`, the builder walks a timeline from
+  the company's first day to `NOW`. At each step it calls one of two things, with the context's
+  clock reading that step's instant:
+  - the world's API dispatcher (`dispatch`), the same function the MCP tools and the HTTP API call:
+    customers, payment methods, subscriptions, invoices, refunds, disputes' evidence, credit notes,
+    payouts, coupons, tax rates;
+  - the engine functions the world already provides for transitions a frozen clock cannot fire
+    (`stripe_world` `billing_engine.md` §7): `advance_cycle` (renewals, trial ends, cancel at period
+    end), `expire_incomplete`, `dunning.record_failed_attempt` (which applies the end-of-schedule
+    outcome itself) and `ledger.settle_payout` (a payout's arrival).
+
+  Every row, id, invoice number, ledger entry and event is therefore written by world code, at the
+  right time. The instance's own clock never moves.
+- **The builder never edits a row the world wrote**, with two finishing steps as the only
+  exceptions, both applying the world's own rules at `NOW`:
+  - each balance transaction's stored `status` is refreshed with the ledger's `bt_status` rule, since
+    the world stores it at write time (`pending`) and a frozen clock never revisits it;
+  - events older than 30 days are deleted (§3.2).
+- Where the world cannot express something, the fixtures go without it (§3.3).
 
 ### 3.2 Realism
 
-- **A live account.** Card payment methods carry a realistic brand mix (roughly Visa 55%,
-  Mastercard 25%, Amex 15%, Discover 5%), random `last4`, plausible expiry dates, funding and
-  fingerprint. No Stripe test-card number (`4242`, `0077`, `4444`, …) appears anywhere. Bank
-  accounts use real US bank names with random `last4`.
+- **Test cards only.** Every card is one of Stripe's documented test cards that this world
+  recognizes (`billing/magic_cards.py`), created through the API. Good payments use the brand mix
+  Visa, Visa debit, Mastercard, Mastercard debit, Amex and Discover (`4242424242424242`,
+  `4000056655665556`, `5555555555554444`, `5200828282828210`, `378282246310005`,
+  `6011111111111117`), weighted roughly 45/10/20/5/15/5. A card that attaches and then declines
+  every charge is `4000000000000341`. Disputes come from the dispute cards (`4000000000000259`
+  fraudulent, `4000000000002685` product not received, `4000000000001976` inquiry). Required
+  authentication comes from `4000002760003184`. Expiry dates vary across plausible months and years.
+- **Dispute outcomes** come from Stripe's test evidence: `uncategorized_text` of `winning_evidence`
+  wins, `losing_evidence` loses, `escalate_inquiry_evidence` escalates an inquiry; any other evidence
+  leaves the dispute under review. Accepting a dispute (`/close`) loses it.
 - **Fictional people and companies.** No real person and no real company. No sample-data clichés
-  (Acme, Contoso, Northwind, Initech, Globex). Names are drawn for diversity. The two company names
-  and their domains get a collision check before they are committed.
+  (Acme, Contoso, Northwind, Initech, Globex, Hooli). Names are drawn for diversity. The two company
+  names and their domains get a collision check before they are committed.
 - **Contact details.** Email addresses use invented domains: a business customer at its own
   invented domain, an individual at an invented personal-site domain (`okaforpiano.com`). Never a
   real webmail domain and never `example.com`. Phone numbers, where present, use the reserved
   `555-0100`–`555-0199` range. Street addresses are invented, on real city, state and ZIP
   combinations.
-- **Events cover the last 30 days.** Stripe's API lists events only from the last 30 days, so each
-  fixture holds an event for every state change in `[NOW − 30 days, NOW]`, each with `data.object` as
-  the object stood at that moment and `previous_attributes` on updates. Older history has no
-  events.
-- **Only what the world supports.** USD, a US account, card and `us_bank_account`, the 24 existing
-  tables.
+- **Events cover the last 30 days.** Stripe's API lists events only from the last 30 days. The
+  replay emits every event as it happens, and the finishing step deletes those older than
+  `NOW − 30 days`.
 
 ### 3.3 Declared gaps
 
-These are known differences from a real account, accepted by decision rather than fixed:
+Known differences from a real account, accepted rather than worked around:
 
-- **ACH fees use card pricing.** The world has one fee schedule for every payment method, so
-  `big_co`'s ACH payments carry 2.9% + 30¢ rather than ACH Direct Debit's 0.8% capped at $5.
-- **Retries never fire.** The clock is frozen, so `next_payment_attempt` is an honest future
-  timestamp that never arrives (the world's existing contract).
-- **The `555-01xx` phone range** is reserved for fiction, and an attentive reader could notice it.
-- **A test-mode instance** of either fixture reads as a live account's data. Invoice lines, credit
-  note lines and event snapshots store `livemode: true` inside their JSON, so opened in test mode
-  those inner values disagree with the outer objects.
-- **Renewals finalize and charge at the boundary.** The world's renewal finalizes and pays at the
-  period boundary rather than an hour later, so a renewal's `finalized_at` equals its `created`.
+- **Payouts are manual.** The world creates payouts only by API call (`automatic: false`), so both
+  accounts use a manual payout schedule.
+- **No ACH.** The world's `us_bank_account` payment methods always name "STRIPE TEST BANK" and are
+  priced as cards, so neither company uses ACH. Enterprise invoices are paid by card or outside
+  Stripe.
+- **Disputes open with their charge.** Stripe's dispute test cards open the dispute at the charge's
+  instant, as they do in real test mode.
+- **No `warning_closed` disputes.** No test evidence reaches it.
+- **Subscription schedules never advance.** The world has no phase-transition walker, so every
+  schedule in the fixtures is still in its first phase at `NOW`: recent ramp deals, and downgrades
+  set for the next renewal.
+- **Renewals finalize and charge at the boundary.** A renewal's `finalized_at` equals its `created`,
+  not an hour later.
 - **Retries write no charge.** The world's dunning walker records a failed automatic retry on the
   invoice without a failed charge row.
+- **Test mode only.** Opening either fixture live is refused (§2.1).
 
 ### 3.4 Consistency
 
 Both fixtures satisfy these at build time; the build fails on the first violation:
 
-- Every balance transaction's `net` is `amount − fee`. `/v1/balance` equals the sum of the ledger.
-  No payout ever drew more than was available at its own moment.
-- No charge is refunded past its amount, across refunds and credit notes combined.
-- Every invoice's lines sum to its subtotal, and its totals follow from discounts and tax.
-- No two invoices on one subscription have overlapping periods.
+- Every balance transaction's `net` is `amount − fee`, and its `status` agrees with `bt_status` at
+  `NOW`. No payout ever drew more than was available at its own moment.
+- No charge is refunded past its captured amount.
+- Every invoice's lines sum to its subtotal.
+- No two cycle invoices on one subscription have overlapping periods.
 - Causality: no object is older than what it depends on (a charge after its payment intent, a
-  dispute after its charge, a balance transaction after what it settles).
-- Each customer's `balance` equals the sum of their customer balance transactions, and
-  `next_invoice_sequence` is one past their highest invoice number.
-- Every subscription's status, `latest_invoice`, period and `cancel_at_period_end` agree with its
-  invoices.
+  dispute or refund after its charge, a balance transaction after what it settles).
+- Each customer's `balance` equals the ending balance of their latest customer balance transaction
+  (zero if none), and `next_invoice_sequence` is one past their highest invoice number.
+- Every subscription's status agrees with its latest invoice: `past_due` and `unpaid` have an unpaid
+  latest invoice, `trialing` has a `trial_end` after `NOW`, `canceled` and `incomplete_expired` have
+  `ended_at`.
 - Every timestamp is at or before `NOW`, except the fields that point forward by design
   (`current_period_end`, `trial_end`, `due_date`, `next_payment_attempt`,
   `automatically_finalizes_at`, `available_on`, `arrival_date`, `evidence_details.due_by`, a schedule's
   future phase dates, a coupon's `redeem_by`).
+- No event is older than `NOW − 30 days`.
 
 ### 3.5 Budgets
 
@@ -180,19 +197,19 @@ Both fixtures satisfy these at build time; the build fails on the first violatio
 | Build time | Seconds | Under 3 minutes |
 | Fork cost | Measured and recorded | Measured and recorded; the test sets its ceiling from the measurement |
 
-If `big_co` is over 25 MB with 30 days of events, the customer count comes down before anything
-else. Plain git, no LFS.
+If `big_co` is over 25 MB, the customer count comes down. Plain git, no LFS. If it cannot build in
+under 3 minutes, the population comes down or the user decides otherwise.
 
 ### 3.6 The fixture guide
 
-`docs/fixtures.md` describes every fixture for whoever writes evals against it: the company's
-story, its account identity, its catalog, its counts, and every loose end from §4.6 and §5.7, each
-with the query that finds it and the id it has in the committed build. For `small_co` the guide also
-lists the whole cast. A test runs every query in the guide against the built fixtures and checks the
-documented results, so the guide cannot drift from the data.
+`docs/fixtures.md` describes every fixture for whoever writes evals against it: the company's story,
+its account identity, its catalog, its counts, how to open it (test mode), and every loose end from
+§4.6 and §5.7, each with the query that finds it and the rows it returns in the committed build. For
+`small_co` the guide also lists the whole cast. A test runs every query in the guide against the
+committed fixtures and compares the documented rows, so the guide cannot drift from the data.
 
-Each fixture's `description` in `fixture.yaml` is a short paragraph of the same kind: who the
-company is, what the data holds, and what it is good for.
+Each fixture's `description` in `fixture.yaml` is a short paragraph of the same kind: who the company
+is, that it is a test-mode account, what the data holds, and what it is good for.
 
 ## 4. `small_co`: Wrenfield Labs
 
@@ -207,14 +224,10 @@ and every loose end is exactly as specified.
 |---|---|
 | 2025-08-25 | Stripe account opened for a private beta. |
 | 2025-09-03 to 09-08 | Six founding members buy an annual plan at a founding price of $96/year. |
-| 2026-03-02 | Public launch. The first live charge is a $1.00 test by the founder, refunded the same day. |
+| 2026-03-02 | Public launch. The first charge is a $1.00 test by the founder, refunded the same day. |
 | 2026-03 | The `LAUNCH` coupon (50% off for 3 months) brings in the first wave of customers. |
 | 2026-07-14 | A teaching newsletter features Wrenfield, with promotion code `TEACHWELL25`. |
 | 2026-09-01 | `NOW`. The founding members' first annual renewals fall due over the next week. |
-
-The beta is one change from the overview's "about six months of history". Without it no annual plan
-could renew near `NOW`, and "which renewals are due this week?" is a loose end worth having. Almost
-all activity still falls in the six months since launch.
 
 ### 4.2 Catalog
 
@@ -222,9 +235,9 @@ all activity still falls in the six months since launch.
 |---|---|---|---|
 | Wrenfield Solo | Solo monthly | $12/month | `lookup_key: solo_monthly` |
 | | Solo annual | $120/year | `lookup_key: solo_annual` |
-| | Founding member | $96/year | Archived (`active: false`) after the beta; the founding members keep it |
-| Wrenfield Studio | Studio monthly | $29/month | Up to five teachers; quantity 1 |
-| | Studio annual | $290/year | |
+| | Founding member | $96/year | Archived (`active: false`) at launch; the founding members keep it |
+| Wrenfield Studio | Studio monthly | $29/month | `lookup_key: studio_monthly`; up to five teachers, quantity 1 |
+| | Studio annual | $290/year | `lookup_key: studio_annual` |
 | Done-for-you setup | Setup | $49 one-time | Added as an invoice item |
 
 Coupons: `LAUNCH`, 50% off repeating for 3 months, `redeem_by` 2026-03-31, redeemed by the ten
@@ -232,8 +245,8 @@ earliest launch customers, whose discounts have all ended. `TEACHWELL25`, a prom
 coupon of 25% off once, redeemed by about five customers since 2026-07-14.
 
 Trials are 14 days on every plan. A trial without a card on file pauses at its end
-(`trial_settings.end_behavior.missing_payment_method: pause`). Cards only, charged automatically. No
-tax rates. Daily payouts.
+(`trial_settings.end_behavior.missing_payment_method: pause`). Cards, charged automatically. No tax
+rates. A manual payout every Monday of whatever balance is available.
 
 ### 4.3 The cast at `NOW`
 
@@ -254,10 +267,10 @@ About 45 customers. The composition is fixed:
 | Incomplete, expired | 1 | |
 | No subscription | 3 | The founder's test customer, and two abandoned checkouts |
 
-Each cast entry gives a name, an email on an invented domain, what they teach, their plan, their
-signup date, and the events of their history (trial, conversion, plan change, failed payment,
-refund, dispute, cancellation). Individuals make up most of the cast; a few are small studios
-("Brightside Music Studio").
+Each cast entry gives a stable key, a name, an email on an invented domain, what they teach, their
+plan, their signup instant, their card, and the beats of their history (trial, conversion, plan
+change, card change, refund, dispute, cancellation). Individuals make up most of the cast; a few are
+small studios ("Brightside Music Studio").
 
 ### 4.4 Named characters
 
@@ -266,28 +279,27 @@ composition above.
 
 | Character | Story | State at `NOW` |
 |---|---|---|
-| **Test (do not bill)** | The founder's own record, created launch morning; $1.00 charge, refunded in full | No subscription |
+| **Test (do not bill)** | The founder's own record, created launch morning; a $1.00 payment with `4242`, refunded in full | No subscription |
 | **Daniela Ruiz**, violin | Founding member | Renews 2026-09-03 at $96 |
 | **Marcus Bell**, SAT tutor | Founding member | Renews 2026-09-04 |
 | **Priya Natarajan**, piano | Founding member, retiring from teaching | `cancel_at_period_end`, ends 2026-09-05 |
-| **Owen Fitzgerald**, running coach | Founding member; his card expired 08/2026 | Renews 2026-09-06; the renewal will fail |
+| **Owen Fitzgerald**, running coach | Founding member; replaced his card on 2026-08-18 with one that declines (`…0341`) | Renews 2026-09-06; the renewal will decline |
 | **Hana Kobayashi**, math tutor | Founding member | Renews 2026-09-07 |
 | **Tomasz Wójcik**, guitar | Founding member | Renews 2026-09-08 |
-| **Grace Adeyemi**, Brightside Music Studio | Studio annual, $290 paid 2026-08-20; her bank's customer did not recognize the charge | Dispute `needs_response`, reason `unrecognized`, evidence due 2026-09-07 |
-| **Leo Marchetti**, chemistry tutor | Solo monthly; renewal of 2026-08-27 declined `expired_card`, the retry of 2026-08-29 too | `past_due`, `attempt_count` 2, next attempt per the dunning policy |
+| **Grace Adeyemi**, Brightside Music Studio | Bought Studio annual on 2026-08-30 with a dispute test card (`…0259`) | Dispute `needs_response`, reason `fraudulent`, evidence due end of day 2026-09-07 UTC |
+| **Leo Marchetti**, chemistry tutor | Solo monthly since 2026-04-30; replaced his card on 2026-08-20 with `…0341`; the renewal of 2026-08-30 declined and one automatic retry failed | `past_due`, `attempt_count` 2, next attempt after `NOW` |
 | **Sofia Lindqvist**, voice coach | Trial started 2026-08-20, no card | `trialing`, ends 2026-09-03, will pause |
-| **Adaeze Okafor**, piano | Trial ended 2026-08-15 with no card | `paused` |
-| **Nadia Haddad**, French tutor | Downgraded Studio to Solo monthly on 2026-08-12, invoiced at once | A credit balance, to be used by her next renewal |
+| **Adaeze Okafor**, piano | Trial started 2026-08-01, ended 2026-08-15 with no card | `paused` |
+| **Nadia Haddad**, French tutor | Studio monthly since 2026-05-12; downgraded to Solo monthly on 2026-08-20, invoiced at once | A credit balance, to be used by her next renewal |
 | **Jamal Carter**, drum teacher | Bought Studio annual 2026-07-10, needed only Solo; moved to Solo annual and refunded $170 on 2026-07-17 | Solo annual, active; one partially refunded charge |
-| **Elena Petrova**, dance studio | Studio monthly; ordered setup for a second location on 2026-08-28 | A pending $49 invoice item for her 2026-09-10 renewal |
+| **Elena Petrova**, dance studio | Studio monthly since 2026-04-10; ordered setup for a second location on 2026-08-28 | A pending $49 invoice item for her 2026-09-10 renewal |
 | **Chris Nguyen**, tutoring | Signed up twice with two addresses; the second trial was canceled on day three | Two customer records, one active Solo monthly |
-| **Victor Alves**, swim coach | First payment declined `insufficient_funds`; never completed | `incomplete_expired` |
+| **Victor Alves**, swim coach | Signed up 2026-06-22 with `…0341`; the first payment declined and was never completed | `incomplete_expired` |
 
 ### 4.5 Money
 
-About 250 charges in all. Daily payouts on a 2-day rolling schedule whenever there is an available
-balance; payouts whose arrival date is still ahead of `NOW` are `pending`, every earlier one
-`paid`. One dispute, two refunds
+About 250 charges in all. A manual payout each Monday of the available balance; payouts whose
+arrival date is still ahead of `NOW` are `pending`, every earlier one `paid`. One dispute, two refunds
 (the founder's test and Jamal's partial refund), one credit balance.
 
 ### 4.6 Loose ends at `NOW`
@@ -296,7 +308,7 @@ balance; payouts whose arrival date is still ahead of `NOW` are `pending`, every
 2. A `past_due` subscription mid-dunning (Leo Marchetti).
 3. A trial that will pause in two days for lack of a card (Sofia Lindqvist), and one already
    `paused` (Adaeze Okafor).
-4. Five founding renewals due within a week at $96, one of them on an expired card (Owen
+4. Five founding renewals due within a week at $96, one on a card that will decline (Owen
    Fitzgerald), and one founding member cancelling at period end (Priya Natarajan).
 5. A customer credit balance (Nadia Haddad).
 6. A partially refunded charge (Jamal Carter).
@@ -341,7 +353,7 @@ interval.
 | FieldOps Enterprise | — | Per deal | 40–400 techs; a price made per contract, $70–$95/tech/month equivalent, billed annually |
 | Fleet Tracking | $12/vehicle | $120/vehicle | Pro and above |
 | SMS Reminders | $29 flat | $290 flat | |
-| Onboarding | $499, $1,499, $4,999 one-time | | Invoice items at signup: Pro (optional), Business, Enterprise |
+| Onboarding | $499, $1,499, $4,999 one-time | | Invoiced at signup: Pro (optional), Business, Enterprise |
 | Legacy Starter, Legacy Pro | $29/tech, $59/tech | | Archived prices that part of the migration cohort still pays |
 
 About 7 active products, 13 standard prices, 2 archived legacy prices, and about 100 per-deal
@@ -362,12 +374,11 @@ migration cohort is on a legacy price.
 
 ### 5.4 How they pay
 
-- Monthly plans: card, charged automatically. New self-serve signups on Starter and Pro start a
-  14-day trial with a card. Business trials set up by sales have no card, and pause if none is added.
-- Annual Pro and Business: about 60% ACH debit (`us_bank_account`), the rest card, charged
-  automatically.
-- Enterprise: `send_invoice` with 30 days to pay. About 60% of those invoices are paid by ACH, about
-  40% are marked paid outside Stripe (check or wire).
+- Self-serve plans, monthly and annual: card, charged automatically. New self-serve signups on
+  Starter and Pro start a 14-day trial with a card. Business trials set up by sales have no card, and
+  pause if none is added.
+- Enterprise: `send_invoice` with 30 days to pay. About 60% of those invoices are paid by card on the
+  invoice, about 40% are marked paid outside Stripe (check or wire).
 - Sales tax: manual tax rates for six states where this kind of SaaS is taxed (Texas 6.25%,
   Washington 6.5%, New York 4%, Pennsylvania 6%, Ohio 5.75%, Tennessee 7%), applied by the
   customer's state as the subscription's default tax rate; state rates only, no local rates.
@@ -375,26 +386,26 @@ migration cohort is on a legacy price.
 
 ### 5.5 What happens over time
 
-The simulation steps through the 547 days and applies these rates. The statuses at `NOW` come out
-of the rates rather than being assigned.
+The simulation draws each customer's life from these rates. The statuses at `NOW` come out of the
+rates rather than being assigned.
 
-| Behavior | Rate |
-|---|---|
-| Trial to paid | ~65% |
-| Monthly churn | Starter 2.5%, Pro 1.5%, Business 1% per month |
-| Annual non-renewal | ~15%; Enterprise ~8% |
-| Seat change | ~6% of subscriptions per month, 70% up and 30% down, prorated onto the next invoice |
-| Plan upgrade | ~1% per month; immediate downgrades rare, and credited to the customer balance |
-| First renewal attempt declines | ~8% of card renewals, ~2% of ACH; most recover inside the dunning window, the rest end `unpaid` |
-| Refunds | ~3% of charges, partial or full |
-| Disputes | ~0.3% of card charges, at every stage by age: recent ones `needs_response` or `under_review`, older ones `won`, `lost`, `warning_closed` or `warning_needs_response` |
-| `SWITCH25` | Promotion code for 25% off for 3 months; about 8% of organic signups |
-| Trade-association discount | 10% off forever, through one promotion code per association (`MSPG10` for the Mountain States Plumbing Guild, `FRHA10` for the Front Range HVAC Alliance, `RMEC10` for the Rocky Mountain Electrical Contractors network); about 5% of customers |
-| Sales concessions | A scattering of one-off amount-off coupons |
-| Enterprise ramps | About 25 subscription schedules whose seats step up quarterly |
-| Scheduled downgrades | About 15 schedules that move to a lower plan at renewal |
-| Credit notes | The SLA batch: every Business and Enterprise customer active on 2026-04-14 gets a credit of 10% of their latest paid subscription invoice, to customer balance, memo "Service credit: April 14 outage". Plus routine corrections on ~0.5% of invoices |
-| Payouts | Daily, 2-day rolling, about 380 over the period |
+| Behavior | Rate | How it is made |
+|---|---|---|
+| Trial to paid | ~65% | Unconverted trials are canceled before their end |
+| Monthly churn | Starter 2.5%, Pro 1.5%, Business 1% per month | Cancel at period end, or cancel at once with a reason |
+| Annual non-renewal | ~15%; Enterprise ~8% | Cancel at period end |
+| Seat change | ~6% of subscriptions per month, 70% up and 30% down | Item quantity update, prorated onto the next invoice |
+| Plan upgrade | ~1% per month | Price change; rare immediate downgrades are invoiced at once and credit the balance |
+| A renewal declines | ~8% of card renewals | The customer's card is swapped for `…0341` beforehand; most customers swap in a good card and the invoice is paid inside the dunning window; the rest end `unpaid` |
+| Refunds | ~3% of charges, partial or full | Refund through the API |
+| Disputes | ~0.3% of card charges | The customer's card is swapped for a dispute card for one renewal, then back. By age at `NOW`: within 21 days left in `needs_response` (or `warning_needs_response` for inquiries), some with plain evidence submitted (`under_review`, `warning_under_review`); older ones settled with test evidence, about 45% won and 55% lost (accepted or losing evidence) |
+| `SWITCH25` | ~8% of organic signups | Promotion code for 25% off for 3 months |
+| Trade-association discount | ~5% of customers | 10% off forever, through one promotion code per association (`MSPG10` for the Mountain States Plumbing Guild, `FRHA10` for the Front Range HVAC Alliance, `RMEC10` for the Rocky Mountain Electrical Contractors network) |
+| Sales concessions | a scattering | One-off amount-off coupons |
+| Enterprise ramps | the Enterprise deals signed in the last 90 days | Subscription schedules with quarterly seat steps, still in their first phase |
+| Scheduled downgrades | ~10 | Schedules created during the current period that move to a lower plan at renewal |
+| Credit notes | The SLA batch, plus ~0.5% of invoices | SLA: every Business and Enterprise customer active on 2026-04-14 gets a credit of 10% of their latest paid subscription invoice, to customer balance, memo "Service credit: April 14 outage" |
+| Payouts | every business day | A manual payout of the available balance |
 
 ### 5.6 Real-account mess
 
@@ -438,26 +449,25 @@ The build asserts these, so a change in the simulation that moves them is notice
 ## 6. Tests
 
 - **Determinism.** One fresh build of each fixture into a temporary directory is byte-identical to
-  the committed file. One build is enough: matching the committed bytes is the proof.
-- **`empty` and blank are unchanged.** The account object from `get_stripe_account_info` is
-  identical to today's in both modes, and the existing suites pass with only the inventory changes
-  §2.1 names.
-- **`GET /v1/account`.** Over HTTP it answers the instance's account object, valid against
-  `spec3.min.json`'s `account` schema. Over MCP, `stripe_api_read` with `GetAccount` still answers
-  "not available".
-- **Account identity.** For each company, `get_stripe_account_info`, `list_available_accounts_or_orgs`
-  and `GET /v1/account` return its account, and a newly minted id carries its account fragment.
-- **Account row validation.** A missing row, two rows, or a malformed id each fail instance
-  creation with a `WorldBug`.
+  the committed file.
+- **`empty` and blank.** A blank instance serves today's account object in either mode, and stamps
+  its mode. `empty` opens live by default and refuses test mode. The existing suites pass with only
+  the inventory change §2.1 names.
+- **The account row.** Each row of the mode table in §2.1, through real instances. A missing row,
+  two rows, a malformed id and a mismatched object id each fail instance creation with a
+  `WorldBug`. Settings in the row reach the ledger and dunning. A test-mode instance frozen and
+  reopened comes back in test mode.
+- **Account identity.** For each company, `get_stripe_account_info` and
+  `list_available_accounts_or_orgs` return its account, in test mode, and a newly minted id carries
+  its account fragment.
 - **Consistency.** The §3.4 checks pass on `empty`, `small_co` and `big_co`.
-- **Realism guards.** No Stripe test-card number, no real webmail domain, no `example.com`, no
-  sample-data cliché name, and no timestamp past `NOW` outside the forward-pointing fields.
-- **The guide is true.** Every query in `docs/fixtures.md` returns its documented result.
-- **The tools carry on.** On each company fixture, through the real tools: a new invoice for an
-  existing customer gets the next number; a new object's `x_seq` follows every existing one; a
-  payout draws only the available balance; search finds a bulk-written customer.
-- **Budgets.** `big_co`'s size, build time and expected ranges (§3.5, §5.8); fork cost measured
-  for both.
+- **Realism guards.** Every card is a known test card; no real webmail domain, no `example.com`, no
+  sample-data cliché name.
+- **The guide is true.** Every query in `docs/fixtures.md` returns its documented rows.
+- **The tools carry on.** On each company fixture, through the real MCP tools: a new invoice for an
+  existing customer gets that customer's next number; a new object's `x_seq` follows every existing
+  one; a payout draws only the available balance; search finds a customer the build created.
+- **Budgets.** `big_co`'s size and expected ranges (§3.5, §5.8); fork cost measured for both.
 - **`seahaven check`** is clean, with no `SH4xx` findings.
 
 ## 7. Decisions taken
@@ -465,20 +475,22 @@ The build asserts these, so a change in the simulation that moves them is notice
 | Decision | Choice |
 |---|---|
 | Business models | Two different models |
-| Where the account lives | A one-row table, read at startup; seeded with today's sandbox account |
-| Mode depicted | Live |
+| World changes | The account table only; no `GET /v1/account` |
+| Where the account lives | A one-row table, read at startup, holding the mode the account was created in |
+| Mode | Test, with Stripe's test cards; a fixture refuses the other mode |
+| `empty` | A live account; the README example drops its test-mode option |
 | Email domains | Invented |
-| Events | The last 30 days only (recommended default; not answered explicitly) |
-| `big_co` size | 25 MB or less, in plain git (recommended default; not answered explicitly) |
-| ACH fees | Left on card pricing; a declared gap |
+| Events | The last 30 days only |
+| `big_co` size | 25 MB or less, in plain git |
+| Where the world can't express something | Go without it (§3.3) |
 | How `small_co` is made | A hand-written cast |
-| `small_co` history | A private beta from 2025-08-25 added to the six months since launch (§4.1) |
+| `small_co` history | A private beta from 2025-08-25, then six months since launch |
 | Phone numbers | The reserved `555-01xx` range |
 | `stripe_world` specs | Not edited |
 
 ## 8. Out of scope
 
 - Writing eval tasks.
-- Any world change beyond §2, including per-payment-method fees.
+- Any world change beyond §2.
 - A company outside the US, or a currency other than USD.
 - Events older than 30 days.

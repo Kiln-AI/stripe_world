@@ -10,21 +10,26 @@ Tuesday). They take over the role of the deferred `small` and `large` fixtures
 (`specs/projects/stripe_world/implementation_plan.md` Phase 19), with one change of intent: each is
 a specific company rather than an anonymous shape. `empty` stays as it is.
 
+**This project builds fixtures and nothing else.** The one world change is the account table the
+fixtures need (below). Everything else is fixture generation code that uses the world as a client.
+
 ## Why
 
 Evals and RL rollouts need starting states that look like a real business's Stripe account. An agent
 asked "which customers are past due?" or "refund the duplicate charge for Maria" should be working
-in an account with history, names, loose ends and a little mess, not in a blank sandbox or in rows
-that are obviously generated. Two companies give two kinds of eval:
+in an account with history, names, loose ends and a little mess, not in a blank sandbox. Two
+companies give two kinds of eval:
 
 - **`small_co`**: readable end to end by a person in one sitting. The default base fixture for eval
   tasks, because whoever reviews a failing run has to be able to read the whole account.
 - **`big_co`**: scale. Pagination, search, aggregation ("what was net revenue last quarter?"),
   needle-in-a-haystack lookups, and realistic distributions of churn, dunning and disputes.
 
-The two companies use Stripe differently on purpose: a small prosumer SaaS paid by card, and a B2B
-SaaS with seats, annual contracts, ACH, invoices on terms and sales tax. Between them they cover far
-more of the world's 155 operations than one business model at two sizes would.
+The two companies use Stripe differently on purpose: a small prosumer SaaS, and a B2B SaaS with
+seats, annual contracts, invoices on terms and sales tax.
+
+Both are **test-mode accounts**, built with Stripe's test cards. Declines, disputes and their
+outcomes all come from the test cards and test evidence that Stripe documents, through the API.
 
 ## The two companies
 
@@ -36,23 +41,21 @@ reminders and a simple record of who has paid for lessons.
 
 | | |
 |---|---|
-| On Stripe since | 2026-03-02, launch day. About six months of history (183 days). |
+| On Stripe since | 2025-08-25, for a private beta with six founding members on an annual plan. Public launch 2026-03-02. Almost all activity is in the six months since launch. |
 | Customers | About 45 ever, nearly all individuals (a piano teacher, an SAT tutor, a running coach) plus a few small studios. Everything is in one table that fits on a screen. |
-| Catalog | Two plans, each monthly or annual: **Solo** ($12/mo, $120/yr) and **Studio**, up to five teachers ($29/mo, $290/yr). One one-time product: **Done-for-you setup**, $49. |
-| How they pay | Cards only, charged automatically. A 14-day free trial; a trial that ends with no card on file pauses rather than cancels. |
-| Discounts | A `LAUNCH` coupon (50% off for 3 months) used by the founding customers, now past its `redeem_by`. A newsletter promotion code, `TEACHWELL25` (25% off the first month). |
+| Catalog | Two plans, each monthly or annual: **Solo** ($12/mo, $120/yr) and **Studio**, up to five teachers ($29/mo, $290/yr). An archived founding-member price ($96/yr). One one-time product: **Done-for-you setup**, $49. |
+| How they pay | Cards, charged automatically. A 14-day free trial; a trial that ends with no card on file pauses rather than cancels. |
+| Discounts | A `LAUNCH` coupon (50% off for 3 months) used by the first launch customers, now past its `redeem_by`. A newsletter promotion code, `TEACHWELL25` (25% off the first month). |
 | Tax | None collected. A company this size often doesn't collect sales tax yet, and the contrast with `big_co` is useful. |
-| Money movement | Daily automatic payouts on a 2-day rolling schedule; a handful of refunds; one dispute. |
+| Money movement | Manual payouts, once a week; a handful of refunds; one dispute. |
 
 Loose ends at `NOW`, each one a ready-made eval scenario:
 
-- One dispute in `needs_response` (reason `unrecognized`, on a Studio annual charge), with evidence
-  due in about six days.
-- One `past_due` subscription on its second retry after an expired card, with the next attempt in
-  three days.
+- One dispute in `needs_response`, with evidence due in about six days.
+- One `past_due` subscription on its second failed attempt.
 - One trial ending in two days with no payment method, and one subscription already `paused` for the
   same reason.
-- One annual renewal due within a week.
+- Five founding-member renewals due within a week, one on a card that will decline.
 - One subscription set to cancel at period end.
 - A partially refunded charge, and a customer carrying a credit balance from a downgrade.
 - A pending one-time setup invoice item that will go on the customer's next invoice.
@@ -70,12 +73,12 @@ contractors: HVAC, plumbing and electrical businesses.
 | On Stripe since | 2025-03-03, when Ostrander moved billing to Stripe from a legacy system. About eighteen months of history (547 days). Roughly half the customers arrived in that migration week, carrying `metadata.legacy_account_id` and `metadata.customer_since`; the rest signed up afterwards. |
 | Customers | About 3,000 ever and about 2,100 active at `NOW`. All are businesses ("Rivera Heating & Air", "Summit Plumbing Co."), with a billing contact, a US address and a phone number. A few are tax-exempt (school districts, municipal facilities departments). |
 | Catalog | Per-technician seat plans, each monthly or annual (annual = 10 × monthly): **Starter** $39, **Pro** $69 and **Business** $99 per tech per month. **Enterprise** is a negotiated annual contract with a price created per deal. Add-ons: **Fleet Tracking** ($12 per vehicle per month) and **SMS Reminders** ($29 per month, flat). One-time onboarding packages at $499, $1,499 and $4,999. |
-| How they pay | Self-serve monthly plans by card, charged automatically. Annual Pro and Business plans are mostly paid by ACH debit (`us_bank_account`). Enterprise is invoiced on net-30 terms (`send_invoice`), and some of those invoices are paid by check or wire, so they are marked paid outside Stripe. |
-| Seats over time | Seat counts change mid-cycle, which produces proration lines, upgrades, downgrades and customer-balance credits. Enterprise ramp deals are subscription schedules whose seat counts step up quarter by quarter. |
+| How they pay | Self-serve plans by card, charged automatically. Enterprise is invoiced on net-30 terms (`send_invoice`); those invoices are paid by card or by check or wire, marked paid outside Stripe. |
+| Seats over time | Seat counts change mid-cycle, which produces proration lines, upgrades, downgrades and customer-balance credits. Recent Enterprise deals carry ramp schedules whose seat counts step up quarter by quarter, and some customers have a downgrade scheduled for their next renewal. |
 | Discounts | `SWITCH25` (25% off for 3 months, for customers moving from a competitor); a trade-association member discount (10% forever) issued through one promotion code per association; a scattering of one-off amount-off concessions from sales. |
 | Tax | Manual `tax_rates` for the handful of states where this kind of SaaS is taxable, applied by the customer's state. Tax-exempt customers are marked as such. |
 | Credit notes | Routine corrections, plus a batch of SLA credits issued to Business and Enterprise customers after an outage in April 2026. |
-| Money movement | Daily automatic payouts on a 2-day rolling schedule. About 3% of charges partly or fully refunded. Disputes at about 0.3% of card charges, at every stage: `needs_response`, `under_review`, `won`, `lost` and the warning states. |
+| Money movement | Manual payouts every business day. About 3% of charges partly or fully refunded. Disputes at about 0.3% of card charges, at the stages Stripe's test cards and test evidence reach: `needs_response`, `under_review`, `won`, `lost`, `warning_needs_response` and `warning_under_review`. |
 
 Loose ends at `NOW`:
 
@@ -83,9 +86,8 @@ Loose ends at `NOW`:
 - An Enterprise invoice 45 days overdue for a large amount.
 - A ramp schedule that steps up on its next phase within days.
 - A large Business customer with cancel-at-period-end set: a churn risk.
-- All eight subscription statuses present, arising from the simulation rather than planted as single
-  rows.
-- Draft invoices waiting on `automatically_finalizes_at`, and one payout still in transit.
+- All eight subscription statuses present.
+- Draft invoices waiting on `automatically_finalizes_at`, and payouts not yet arrived.
 - Real-account mess: duplicate customer records for the same company under slightly different names,
   customers with no email, and metadata keys spelled inconsistently between the migration cohort and
   later signups.
@@ -95,65 +97,60 @@ Loose ends at `NOW`:
 | | `small_co` (Wrenfield Labs) | `big_co` (Ostrander Systems) |
 |---|---|---|
 | Customers | ~45, individuals | ~3,000, businesses |
-| History | 6 months | 18 months, plus the migration cohort |
-| Products / prices | 3 / 5 | ~7 / ~15, plus per-deal Enterprise prices |
-| Payment methods | Card | Card, ACH debit, paid outside Stripe |
+| History | A small beta, then 6 months | 18 months, plus the migration cohort |
+| Products / prices | 3 / 6 | ~7 / ~15, plus per-deal Enterprise prices |
+| Payment methods | Test cards | Test cards, and invoices paid outside Stripe |
 | Collection | Charge automatically | Charge automatically and send invoice (net 30) |
 | Tax | None | Manual tax rates, some exempt customers |
-| Subscription schedules | None | Enterprise ramps, scheduled downgrades |
-| Credit notes | None or one | Routine plus the SLA batch |
-| Disputes | 1 | ~80, at every stage |
+| Subscription schedules | None | Recent Enterprise ramps, scheduled downgrades |
+| Credit notes | None | Routine plus the SLA batch |
+| Disputes | 1 | ~80, at six stages |
 | Role | Default base for eval tasks; human-readable | Scale, search, analytics, distributions |
 
 ## Requirements and constraints
 
-- **No tells.** The account has to read like a real, operating business. Today the account object is
-  a hard-coded fresh-sandbox constant in `startup.py`: charges and payouts disabled, an empty
-  `business_profile`, and the same `acct_` id in every instance. Every minted id embeds a fragment of
-  that account id. Each company therefore needs its own account identity carried in its fixture:
-  business name, URL, support email and phone, statement descriptor, charges and payouts enabled,
-  details submitted, a `created` date before its history, and a payout schedule of daily with a
-  2-day delay.
-- **The account lives in the database.** A fixture carries rows and nothing else, so the account
-  becomes a row like any other data: a one-row account table that the startup hook reads into
-  `ctx.state` instead of building it from a Python constant. This is what the `stripe_world`
-  functional spec (§2.6) meant by "a fixture-defined default". Forks and `setup_sql` then inherit or
-  adjust the account, and a world that adds this one gets it automatically. The schema change
-  rebuilds `empty` and bumps the world version. **This is the first phase of the plan**, before any
-  fixture is built.
-- **`empty` keeps working exactly as it does today**, and so does a blank instance made with no
-  fixture at all (the HTTP server's default). Both see today's sandbox account, the same id and every
-  field unchanged, and the existing suites pass unchanged.
+- **The account lives in the database; the only world change.** Today the account is a hard-coded
+  sandbox constant in `startup.py`, and every minted id embeds a fragment of its id. A fixture
+  carries rows and nothing else, so the account becomes a one-row table that the startup hook reads
+  into `ctx.state`. The row also stores the account's **mode**, set when the account is created,
+  because a fixture's data (its cards, and the `livemode` inside stored JSON) is coupled to the mode
+  it was made in. Opening a fixture in the other mode is refused. Nothing else in the world changes:
+  no new routes, no billing, resource or dispatcher changes. **This is the first phase of the plan.**
+- **`empty` keeps working.** It holds today's sandbox account, created live. A blank instance (no
+  fixture, the HTTP server's default) still opens in either mode. The README's `empty` example drops
+  its test-mode option.
+- **A real business identity.** Each company's account carries its name, URL, support email and
+  phone, statement descriptor, charges and payouts enabled, details submitted, and a `created` date
+  before its history.
 - **Fictional, and not a cliché.** No real people and no real companies. No sample-data names such as
-  Acme, Contoso, Northwind or Initech, which are tells in their own right. Company and customer names
-  get a collision check before they are committed. Email addresses use invented domains: each
-  business customer at its own invented company domain, and each individual at an invented
-  personal-site domain (a tutor's own `okaforpiano.com`). Never a real webmail domain such as
-  `gmail.com`, because these fixtures are published, and never `example.com`, which is a tell.
-- **A live account.** The world defaults to live mode and rows carry no `livemode` column, so the
-  fixtures depict live accounts: realistic card brands and `last4` values, not `4242`. An instance
-  started in test mode still works, but will read as a live account's data.
-- **Only what the world supports.** USD and a US account. Card and `us_bank_account` payment methods.
-  No metered prices (they need Billing Meters, which this world doesn't have, and the pinned API
-  version refuses them). No Stripe Tax, Connect, Checkout Sessions or Payment Links objects. The
-  stories above are written to fit inside the 24 existing tables. A gap found while building is
-  reported, not filled with new world features.
+  Acme, Contoso, Northwind or Initech. Company and customer names get a collision check before they
+  are committed. Email addresses use invented domains: each business customer at its own invented
+  company domain, and each individual at an invented personal-site domain (a tutor's own
+  `okaforpiano.com`). Never a real webmail domain such as `gmail.com`, because these fixtures are
+  published, and never `example.com`.
+- **Test mode, test cards.** Every card is one of Stripe's documented test cards that this world
+  recognizes. Declines, disputes and dispute outcomes come from those cards and Stripe's test
+  evidence strings.
+- **Only what the world already does.** USD, a US account, cards, the existing tables. Where the
+  world can't express something (automatic payouts, ACH bank names, a card network's dispute ruling,
+  a schedule moving to its next phase), the fixtures do without it rather than work around it. No
+  metered prices, Stripe Tax, Connect, Checkout Sessions or Payment Links.
 - **Deterministic and committed.** Both fixtures are built by `fixtures_src/generate.py` from a fixed
   clock and the instance seed, and a rebuild produces byte-identical files. History is replayed
-  through the world's own API and billing engine at historical instants, so every row is written by
-  the code an agent's calls run, and nothing re-derives billing math. Invariant checks run at the end
-  of every build. This revises the design in `specs/projects/stripe_world/components/fixtures.md`,
-  which planned to hand-write the rows.
+  through the world's own API and the engine functions the world provides for fixture generators,
+  at historical instants, so every row is written by world code. Invariant checks run at the end of
+  every build. This revises the design in `specs/projects/stripe_world/components/fixtures.md`, which
+  planned to hand-write the rows.
 - **Fast to fork.** `big_co` must fork in milliseconds. Events dominate its row count, so only the
   last 30 days of events are kept, and the build measures fork cost.
 - **Coherent standalone and composed.** Each fixture is a whole account, whether used on its own or as
   the billing subsystem of a world that adds this one.
-- **Documented for eval writers.** Each fixture's `description` says what it contains. A short
-  fixture guide lists every loose end above, with how to find it by query rather than by an id that
-  changes on regeneration.
+- **Documented for eval writers.** Each fixture's `description` says what it contains. A fixture guide
+  lists every loose end above, with the query that finds it.
 
 ## Out of scope
 
+- Any world change beyond the account table, including `GET /v1/account`.
 - Writing the eval tasks themselves (`stripe_world` Phase 20).
 - Editing the `stripe_world` specs. They are point-in-time records, and they still say `small` and
   `large`.
