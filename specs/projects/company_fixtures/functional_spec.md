@@ -12,7 +12,7 @@ The overview (`project_overview.md`) is the brief; this document is the contract
 
 | Deliverable | Where | Kind |
 |---|---|---|
-| The account moves into the database | schema, `startup.py` | **The only world change** (§2) |
+| The account moves into the database, and `GET /v1/account` is routed | schema, `startup.py`, routes | **The only world change** (§2) |
 | `small_co` builder and its hand-written cast | `fixtures_src/` | Generator code and data |
 | `big_co` builder (simulation plus scripted loose ends) | `fixtures_src/` | Generator code |
 | The two frozen fixtures, and `empty` rebuilt | `fixtures/` | Committed binaries |
@@ -20,13 +20,11 @@ The overview (`project_overview.md`) is the brief; this document is the contract
 | Tests for all of the above | `tests/` | Tests |
 | The fixture line in `AGENTS.md` and the README | root | Documentation |
 
-Nothing else in the world changes. The billing helpers the generator reuses (`add_interval`,
-`compute_totals`, `build_item_lines`, `proration_lines`, `compute_automatically_finalizes_at`,
-`next_payment_attempt_at`, the ledger's `available_on` and `stripe_fee`, dunning's `next_attempt_at`)
-already take an explicit timestamp rather than reading the clock. Twelve triggers in
-`005_search.sql` already keep the search index in step with every insert, so bulk-written rows are
-searchable without extra work. A world bug found while building is raised with the user, not
-patched in passing.
+Nothing else in the world changes. The generator produces each company's history by calling the
+world's own API dispatcher and the engine functions the world already provides for fixture
+generators (`advance_cycle`, `expire_incomplete`, the dunning walkers), at historical instants
+(§3.1). Twelve triggers in `005_search.sql` already keep the search index in step with every
+insert. A world bug found while building is raised with the user, not patched in passing.
 
 The `stripe_world` specs are not edited. They are point-in-time records and still say `small` and
 `large`.
@@ -38,9 +36,15 @@ This is Phase 1 and lands before any fixture is built.
 ### 2.1 Behavior
 
 - The account is one row in a new table. The row holds the full account object (what
-  `GET /v1/account` and `get_stripe_account_info` return) and the account's settings that the world
+  `get_stripe_account_info` and `GET /v1/account` return) and the account's settings that the world
   already reads from `ctx.state["account"]`: `ledger` (fees, settlement days, dispute fee) and
   `dunning` (retry count, window, end behavior).
+- **`GET /v1/account` is routed** (operation `GetAccount`). Stripe's HTTP API has it, so this
+  world's HTTP API answers it with the account object. Stripe's MCP server does not expose it
+  (`mcp_catalogue.jsonl` records `GetAccount` as absent), so over MCP it keeps answering
+  "Operation 'GetAccount' is not available", like every other routed operation the real MCP lacks.
+  The routed count goes from 155 to 156. `GET /v1/accounts/{account}` is Connect and stays
+  unrouted.
 - The instance startup hook reads the row and builds `ctx.state["account"]` from it, in the same
   shape it builds today. Every reader of that state (id minting's account fragment, `stripe_context`
   validation, `list_available_accounts_or_orgs`, `get_stripe_account_info`, the ledger, dunning) is
@@ -49,7 +53,9 @@ This is Phase 1 and lands before any fixture is built.
   value. The same fixture can be opened live or in test mode.
 - **The schema seeds today's sandbox account** as the row's initial value. A blank instance (no
   fixture, the HTTP server's default) and `empty` therefore both see exactly today's account: the
-  same id, every field the same, in both modes. Every existing test passes unchanged.
+  same id, every field the same, in both modes. Existing tests pass, changed only where they
+  enumerate tables or count routes (`test_empty_fixture.py`'s table inventory gains `account`, with
+  its one seeded row).
 - No tool writes the row. Stripe's MCP surface has no account update, and
   `manage_stripe_accounts` only answers with a reconsent URL. A harness can still change the account
   for one episode with `setup_sql`.
@@ -93,11 +99,16 @@ currency `usd`, one external bank account for payouts, and a payout schedule of 
   arguments rebuilds `empty`, `small_co` and `big_co` in that order.
 - The builder writes the company's account row first, then reloads the account state, so every id
   minted afterwards carries the company's account fragment.
-- History is computed from `NOW` (timestamps are `NOW` minus an offset); the clock never moves.
-  Billing arithmetic comes from the world's own helpers (§1), never a second formula.
-- Bulk history is written through `inst.bulk()`. What happens at `NOW` itself, and a short tail of
-  ordinary operations, goes through the real tools, so the route table, validation and
-  serialization are exercised.
+- **History is replayed, not hand-written.** Inside `inst.bulk()`, the builder walks a timeline
+  from the company's first day to `NOW`. At each step it calls the world's own API dispatcher
+  (customers, payment methods, subscriptions, refunds, credit notes, …) or an engine function
+  (renewals, trial ends, failed retries, expiry), with the context's clock reading that step's
+  instant. Every row, id, invoice number, ledger entry and event is therefore written by the same
+  code an agent's calls run, at the right time. The instance's own clock never moves.
+- Where the API cannot express a live-account fact (an automatic payout, an ACH bank's name, a card's
+  funding type, a dispute decided by the card network), the builder amends the object at the moment
+  it is created, before anything else reads it, or composes the world's own ledger and event
+  functions. It never writes a row shape of its own.
 - After a fixture is built, the real tools carry on from it correctly: a new invoice for an existing
   customer gets that customer's next invoice number, a new object's `x_seq` follows every existing
   one, a payout draws only the balance that is actually available, and search finds bulk-written
@@ -133,7 +144,13 @@ These are known differences from a real account, accepted by decision rather tha
 - **Retries never fire.** The clock is frozen, so `next_payment_attempt` is an honest future
   timestamp that never arrives (the world's existing contract).
 - **The `555-01xx` phone range** is reserved for fiction, and an attentive reader could notice it.
-- **A test-mode instance** of either fixture reads as a live account's data.
+- **A test-mode instance** of either fixture reads as a live account's data. Invoice lines, credit
+  note lines and event snapshots store `livemode: true` inside their JSON, so opened in test mode
+  those inner values disagree with the outer objects.
+- **Renewals finalize and charge at the boundary.** The world's renewal finalizes and pays at the
+  period boundary rather than an hour later, so a renewal's `finalized_at` equals its `created`.
+- **Retries write no charge.** The world's dunning walker records a failed automatic retry on the
+  invoice without a failed charge row.
 
 ### 3.4 Consistency
 
@@ -269,7 +286,8 @@ composition above.
 ### 4.5 Money
 
 About 250 charges in all. Daily payouts on a 2-day rolling schedule whenever there is an available
-balance; the most recent payout is `in_transit`, every earlier one `paid`. One dispute, two refunds
+balance; payouts whose arrival date is still ahead of `NOW` are `pending`, every earlier one
+`paid`. One dispute, two refunds
 (the founder's test and Jamal's partial refund), one credit balance.
 
 ### 4.6 Loose ends at `NOW`
@@ -305,8 +323,9 @@ ends of §5.7 scripted on top so they are guaranteed.
 
 Migrated customers carry `metadata.legacy_account_id` (`OS-` plus six digits) and
 `metadata.customer_since` (a date between 2019 and 2025). Their subscriptions keep their old renewal
-day: each was created in migration week with its `billing_cycle_anchor` on the next old renewal date
-and no proration for the gap.
+day: each was created in migration week with `trial_end` set to the next old renewal date, the
+method Stripe's migration guidance gives for carrying a billing date over, so nothing is billed
+twice for the period the legacy system already charged.
 
 ### 5.2 Catalog
 
@@ -400,9 +419,9 @@ Scripted on top of the simulation, so each is present on every build:
    `NOW` whose first payment needs authentication. `paused` comes from a card-less sales-led trial.
    `unpaid` comes from dunning that ran out. Each status has at least three subscriptions, except
    `incomplete`, which has at least one.
-6. At least five draft renewal invoices created in the last hour, waiting on
-   `automatically_finalizes_at`.
-7. The most recent payout `in_transit`.
+6. At least five draft invoices created in the last hour, waiting on `automatically_finalizes_at`:
+   onboarding packages that sales invoiced this morning.
+7. The most recent payouts not yet arrived (`pending`).
 
 ### 5.8 Expected ranges
 
@@ -420,12 +439,14 @@ The build asserts these, so a change in the simulation that moves them is notice
 
 - **Determinism.** One fresh build of each fixture into a temporary directory is byte-identical to
   the committed file. One build is enough: matching the committed bytes is the proof.
-- **`empty` and blank are unchanged.** The account object from `get_stripe_account_info` and
-  `GET /v1/account` is identical to today's in both modes, and every existing suite passes
-  unchanged.
-- **Account identity.** For each company, `get_stripe_account_info`, `GET /v1/account` and
-  `list_available_accounts_or_orgs` return its account, and a newly minted id carries its account
-  fragment.
+- **`empty` and blank are unchanged.** The account object from `get_stripe_account_info` is
+  identical to today's in both modes, and the existing suites pass with only the inventory changes
+  §2.1 names.
+- **`GET /v1/account`.** Over HTTP it answers the instance's account object, valid against
+  `spec3.min.json`'s `account` schema. Over MCP, `stripe_api_read` with `GetAccount` still answers
+  "not available".
+- **Account identity.** For each company, `get_stripe_account_info`, `list_available_accounts_or_orgs`
+  and `GET /v1/account` return its account, and a newly minted id carries its account fragment.
 - **Account row validation.** A missing row, two rows, or a malformed id each fail instance
   creation with a `WorldBug`.
 - **Consistency.** The §3.4 checks pass on `empty`, `small_co` and `big_co`.

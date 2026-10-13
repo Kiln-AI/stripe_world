@@ -139,14 +139,13 @@ Loose ends at `NOW`:
   stories above are written to fit inside the 24 existing tables. A gap found while building is
   reported, not filled with new world features.
 - **Deterministic and committed.** Both fixtures are built by `fixtures_src/generate.py` from a fixed
-  clock and the instance seed, and a rebuild produces byte-identical files. History is computed from
-  `NOW` rather than by moving the clock. Billing math (period boundaries, proration, fees, ledger
-  `available_on`) is reused from `billing/`, never re-derived. A deliberate tail goes through the
-  real tools, and invariant checks run at the end of every build. This is the design already written
-  in `specs/projects/stripe_world/components/fixtures.md`, and it is revised here rather than
-  restarted.
-- **Fast to fork.** `big_co` must fork in milliseconds. Events dominate its row count, so the build
-  measures fork cost and trims backfilled events first if it is over budget.
+  clock and the instance seed, and a rebuild produces byte-identical files. History is replayed
+  through the world's own API and billing engine at historical instants, so every row is written by
+  the code an agent's calls run, and nothing re-derives billing math. Invariant checks run at the end
+  of every build. This revises the design in `specs/projects/stripe_world/components/fixtures.md`,
+  which planned to hand-write the rows.
+- **Fast to fork.** `big_co` must fork in milliseconds. Events dominate its row count, so only the
+  last 30 days of events are kept, and the build measures fork cost.
 - **Coherent standalone and composed.** Each fixture is a whole account, whether used on its own or as
   the billing subsystem of a world that adds this one.
 - **Documented for eval writers.** Each fixture's `description` says what it contains. A short
