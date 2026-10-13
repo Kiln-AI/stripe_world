@@ -158,6 +158,9 @@ Known differences from a real account, accepted rather than worked around:
 - **Disputes open with their charge.** Stripe's dispute test cards open the dispute at the charge's
   instant, as they do in real test mode.
 - **No `warning_closed` disputes.** No test evidence reaches it.
+- **No promotion codes.** This world's subscriptions take a coupon, not a promotion code, so a
+  promotion code could never show a redemption. Discount codes are coupons whose ids are the codes
+  (`LAUNCH`, `TEACHWELL25`, `SWITCH25`, `MSPG10`, …).
 - **Subscription schedules never advance.** The world has no phase-transition walker, so every
   schedule in the fixtures is still in its first phase at `NOW`: recent ramp deals, and downgrades
   set for the next renewal.
@@ -226,7 +229,7 @@ and every loose end is exactly as specified.
 | 2025-09-03 to 09-08 | Six founding members buy an annual plan at a founding price of $96/year. |
 | 2026-03-02 | Public launch. The first charge is a $1.00 test by the founder, refunded the same day. |
 | 2026-03 | The `LAUNCH` coupon (50% off for 3 months) brings in the first wave of customers. |
-| 2026-07-14 | A teaching newsletter features Wrenfield, with promotion code `TEACHWELL25`. |
+| 2026-07-14 | A teaching newsletter features Wrenfield, with the code `TEACHWELL25`. |
 | 2026-09-01 | `NOW`. The founding members' first annual renewals fall due over the next week. |
 
 ### 4.2 Catalog
@@ -241,8 +244,8 @@ and every loose end is exactly as specified.
 | Done-for-you setup | Setup | $49 one-time | Added as an invoice item |
 
 Coupons: `LAUNCH`, 50% off repeating for 3 months, `redeem_by` 2026-03-31, redeemed by the ten
-earliest launch customers, whose discounts have all ended. `TEACHWELL25`, a promotion code for a
-coupon of 25% off once, redeemed by about five customers since 2026-07-14.
+earliest launch customers, whose discounts have all ended. `TEACHWELL25`, 25% off once, redeemed
+by about five customers since 2026-07-14. Both are coupons whose ids are the codes (§3.3).
 
 Trials are 14 days on every plan. A trial without a card on file pauses at its end
 (`trial_settings.end_behavior.missing_payment_method: pause`). Cards, charged automatically. No tax
@@ -298,7 +301,7 @@ composition above.
 
 ### 4.5 Money
 
-About 250 charges in all. A manual payout each Monday of the available balance; payouts whose
+About 100 charges in all. A manual payout each Monday of the available balance; payouts whose
 arrival date is still ahead of `NOW` are `pending`, every earlier one `paid`. One dispute, two refunds
 (the founder's test and Jamal's partial refund), one credit balance.
 
@@ -399,8 +402,8 @@ rates rather than being assigned.
 | A renewal declines | ~8% of card renewals | The customer's card is swapped for `…0341` beforehand; most customers swap in a good card and the invoice is paid inside the dunning window; the rest end `unpaid` |
 | Refunds | ~3% of charges, partial or full | Refund through the API |
 | Disputes | ~0.3% of card charges | The customer's card is swapped for a dispute card for one renewal, then back. By age at `NOW`: within 21 days left in `needs_response` (or `warning_needs_response` for inquiries), some with plain evidence submitted (`under_review`, `warning_under_review`); older ones settled with test evidence, about 45% won and 55% lost (accepted or losing evidence) |
-| `SWITCH25` | ~8% of organic signups | Promotion code for 25% off for 3 months |
-| Trade-association discount | ~5% of customers | 10% off forever, through one promotion code per association (`MSPG10` for the Mountain States Plumbing Guild, `FRHA10` for the Front Range HVAC Alliance, `RMEC10` for the Rocky Mountain Electrical Contractors network) |
+| `SWITCH25` | ~8% of organic signups | Coupon for 25% off for 3 months |
+| Trade-association discount | ~5% of customers | 10% off forever, through one coupon per association (`MSPG10` for the Mountain States Plumbing Guild, `FRHA10` for the Front Range HVAC Alliance, `RMEC10` for the Rocky Mountain Electrical Contractors network) |
 | Sales concessions | a scattering | One-off amount-off coupons |
 | Enterprise ramps | the Enterprise deals signed in the last 90 days | Subscription schedules with quarterly seat steps, still in their first phase |
 | Scheduled downgrades | ~10 | Schedules created during the current period that move to a lower plan at renewal |

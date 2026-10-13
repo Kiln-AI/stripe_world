@@ -45,7 +45,7 @@ reminders and a simple record of who has paid for lessons.
 | Customers | About 45 ever, nearly all individuals (a piano teacher, an SAT tutor, a running coach) plus a few small studios. Everything is in one table that fits on a screen. |
 | Catalog | Two plans, each monthly or annual: **Solo** ($12/mo, $120/yr) and **Studio**, up to five teachers ($29/mo, $290/yr). An archived founding-member price ($96/yr). One one-time product: **Done-for-you setup**, $49. |
 | How they pay | Cards, charged automatically. A 14-day free trial; a trial that ends with no card on file pauses rather than cancels. |
-| Discounts | A `LAUNCH` coupon (50% off for 3 months) used by the first launch customers, now past its `redeem_by`. A newsletter promotion code, `TEACHWELL25` (25% off the first month). |
+| Discounts | A `LAUNCH` coupon (50% off for 3 months) used by the first launch customers, now past its `redeem_by`. A newsletter code, `TEACHWELL25` (25% off the first month). |
 | Tax | None collected. A company this size often doesn't collect sales tax yet, and the contrast with `big_co` is useful. |
 | Money movement | Manual payouts, once a week; a handful of refunds; one dispute. |
 
@@ -75,7 +75,7 @@ contractors: HVAC, plumbing and electrical businesses.
 | Catalog | Per-technician seat plans, each monthly or annual (annual = 10 × monthly): **Starter** $39, **Pro** $69 and **Business** $99 per tech per month. **Enterprise** is a negotiated annual contract with a price created per deal. Add-ons: **Fleet Tracking** ($12 per vehicle per month) and **SMS Reminders** ($29 per month, flat). One-time onboarding packages at $499, $1,499 and $4,999. |
 | How they pay | Self-serve plans by card, charged automatically. Enterprise is invoiced on net-30 terms (`send_invoice`); those invoices are paid by card or by check or wire, marked paid outside Stripe. |
 | Seats over time | Seat counts change mid-cycle, which produces proration lines, upgrades, downgrades and customer-balance credits. Recent Enterprise deals carry ramp schedules whose seat counts step up quarter by quarter, and some customers have a downgrade scheduled for their next renewal. |
-| Discounts | `SWITCH25` (25% off for 3 months, for customers moving from a competitor); a trade-association member discount (10% forever) issued through one promotion code per association; a scattering of one-off amount-off concessions from sales. |
+| Discounts | `SWITCH25` (25% off for 3 months, for customers moving from a competitor); a trade-association member discount (10% forever) issued as one coupon code per association; a scattering of one-off amount-off concessions from sales. |
 | Tax | Manual `tax_rates` for the handful of states where this kind of SaaS is taxable, applied by the customer's state. Tax-exempt customers are marked as such. |
 | Credit notes | Routine corrections, plus a batch of SLA credits issued to Business and Enterprise customers after an outage in April 2026. |
 | Money movement | Manual payouts every business day. About 3% of charges partly or fully refunded. Disputes at about 0.3% of card charges, at the stages Stripe's test cards and test evidence reach: `needs_response`, `under_review`, `won`, `lost`, `warning_needs_response` and `warning_under_review`. |
