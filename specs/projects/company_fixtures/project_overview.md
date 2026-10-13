@@ -1,5 +1,5 @@
 ---
-status: draft
+status: complete
 ---
 
 # Company Fixtures: `small_co` and `big_co`
@@ -113,8 +113,14 @@ Loose ends at `NOW`:
   that account id. Each company therefore needs its own account identity carried in its fixture:
   business name, URL, support email and phone, statement descriptor, charges and payouts enabled,
   details submitted, a `created` date before its history, and a payout schedule of daily with a
-  2-day delay. `empty` keeps today's sandbox account. How the identity is stored (most likely a small
-  account table, which changes the schema and so rebuilds `empty`) is an architecture decision.
+  2-day delay.
+- **The account lives in the database.** A fixture carries rows and nothing else, so the account
+  becomes a row like any other data: a one-row account table that the startup hook reads into
+  `ctx.state` instead of building it from a Python constant. This is what the `stripe_world`
+  functional spec (§2.6) meant by "a fixture-defined default". Forks and `setup_sql` then inherit or
+  adjust the account, and a world that adds this one gets it automatically. `empty` holds today's
+  sandbox values, so nothing changes for anyone using it. The schema change rebuilds `empty` and
+  bumps the world version. **This is the first phase of the plan**, before any fixture is built.
 - **Fictional, and not a cliché.** No real people and no real companies. No sample-data names such as
   Acme, Contoso, Northwind or Initech, which are tells in their own right. Company and customer names
   get a collision check before they are committed. Email addresses use invented domains: each
