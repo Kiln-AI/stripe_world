@@ -34,7 +34,7 @@ Errors are ToolError subclasses in errors.py; the error handler is the only plac
 ## About this world
 
 StripeAPI is a faithful, stateful, forkable replica of Stripe's Billing and Payments core: 155
-routed operations across 24 SQLite tables behind Stripe's own eight-tool MCP surface
+routed operations across 25 SQLite tables behind Stripe's own eight-tool MCP surface
 (`list_available_accounts_or_orgs`, `stripe_api_search`, `stripe_api_details`, `stripe_api_read`,
 `stripe_api_write`, `get_stripe_account_info`, `manage_stripe_accounts`, `stripe_analytics`).
 Tools are addressed by `operationId` with `stripe_context` and `livemode` context parameters; on

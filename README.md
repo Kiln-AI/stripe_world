@@ -29,7 +29,7 @@ logged for you to check.
 
 ## How real is it?
 
-- **155 Stripe API operations across 24 tables**, pinned to API version `2026-08-26.dahlia`. Every
+- **155 Stripe API operations across 25 tables**, pinned to API version `2026-08-26.dahlia`. Every
   object shape aligned to Stripe's OpenAPI spec.
 - **A billing engine, not just CRUD.** Subscriptions move through all eight statuses. Invoices go
   from draft to open to paid, void or uncollectible. Proration, dunning, credit notes and a balance
@@ -132,8 +132,8 @@ def grade(state) -> float:
 
 async def episode(seed: int) -> float:
     async with SeahavenClient(base_url="http://127.0.0.1:8000") as env:
-        # A private Stripe test-mode account, copied from the `empty` fixture.
-        await env.reset(fixture="empty", seed=seed, startup={"livemode": False})
+        # A private Stripe account, copied from the `empty` fixture.
+        await env.reset(fixture="empty", seed=seed)
         tools = await env.list_tools()  # the eight Stripe MCP tools, as JSON schemas
         await run_agent(env, tools, TASK)
         return grade(await env.state())

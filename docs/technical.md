@@ -74,7 +74,7 @@ and no world default.
 
 ## What it covers
 
-**155 routed operations** across 24 SQLite tables, pinned to Stripe API version
+**155 routed operations** across 25 SQLite tables, pinned to Stripe API version
 `2026-08-26.dahlia`. The operation count is asserted by a test and cannot drift silently.
 Discovery covers the 123 operations the real Stripe MCP catalogues (72 routed, 51 catalogued but
 unrouted, which answer a product-activation or permission refusal when called); the remaining 471
@@ -251,7 +251,7 @@ src/seahaven_stripe_world/
   openenv_app.py                        # the ASGI app `seahaven serve` builds
   errors.py  stripe_errors.py           # the two error systems
   _ids.py  _time.py  _json.py  _seq.py  # shared helpers
-  schema/                               # 001-005, DDL for 24 tables + FTS5
+  schema/                               # 001-006, DDL for 25 tables + FTS5
   dispatch/                             # router, ResourceSpec engine, params, response
   resources/                            # one module per resource + hand-written actions
   billing/                              # proration, invoicing, dunning, ledger, lifecycle, magic cards

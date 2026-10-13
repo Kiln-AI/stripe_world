@@ -6,7 +6,7 @@ status: complete
 
 ## Phases
 
-- [ ] **Phase 1: The account table.** The only world change (architecture §1): `006_account.sql`
+- [x] **Phase 1: The account table.** The only world change (architecture §1): `006_account.sql`
       with the sandbox seed and `tests/golden/sandbox_account.json`, `startup.open_account` and the
       mode rule, the version bump with `uv lock`, `empty` rebuilt, `test_empty_fixture.py`'s
       inventory, `tests/test_account_table.py`, and the doc touches (the README's `empty` example,
