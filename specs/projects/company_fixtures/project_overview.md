@@ -117,7 +117,10 @@ Loose ends at `NOW`:
   account table, which changes the schema and so rebuilds `empty`) is an architecture decision.
 - **Fictional, and not a cliché.** No real people and no real companies. No sample-data names such as
   Acme, Contoso, Northwind or Initech, which are tells in their own right. Company and customer names
-  get a collision check before they are committed.
+  get a collision check before they are committed. Email addresses use invented domains: each
+  business customer at its own invented company domain, and each individual at an invented
+  personal-site domain (a tutor's own `okaforpiano.com`). Never a real webmail domain such as
+  `gmail.com`, because these fixtures are published, and never `example.com`, which is a tell.
 - **A live account.** The world defaults to live mode and rows carry no `livemode` column, so the
   fixtures depict live accounts: realistic card brands and `last4` values, not `4242`. An instance
   started in test mode still works, but will read as a live account's data.
@@ -143,7 +146,8 @@ Loose ends at `NOW`:
 
 ## Out of scope
 
-- Writing the eval tasks themselves (`stripe_world` Phase 20). This project only repoints existing
-  spec references from `small`/`large` to `small_co`/`big_co`.
+- Writing the eval tasks themselves (`stripe_world` Phase 20).
+- Editing the `stripe_world` specs. They are point-in-time records, and they still say `small` and
+  `large`.
 - New Stripe features or tables added for realism's sake.
 - Any company outside the US, or any currency other than USD.
