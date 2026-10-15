@@ -29,7 +29,7 @@ logged for you to check.
 
 ## How real is it?
 
-- **155 Stripe API operations across 24 tables**, pinned to API version `2026-08-26.dahlia`. Every
+- **155 Stripe API operations across 25 tables**, pinned to API version `2026-08-26.dahlia`. Every
   object shape aligned to Stripe's OpenAPI spec.
 - **A billing engine, not just CRUD.** Subscriptions move through all eight statuses. Invoices go
   from draft to open to paid, void or uncollectible. Proration, dunning, credit notes and a balance
@@ -132,8 +132,8 @@ def grade(state) -> float:
 
 async def episode(seed: int) -> float:
     async with SeahavenClient(base_url="http://127.0.0.1:8000") as env:
-        # A private Stripe test-mode account, copied from the `empty` fixture.
-        await env.reset(fixture="empty", seed=seed, startup={"livemode": False})
+        # A private Stripe account, copied from the `empty` fixture.
+        await env.reset(fixture="empty", seed=seed)
         tools = await env.list_tools()  # the eight Stripe MCP tools, as JSON schemas
         await run_agent(env, tools, TASK)
         return grade(await env.state())
@@ -361,7 +361,10 @@ for seed in range(100):
 The servers take it too: `env.reset(fixture="pro_plan", ...)` over OpenEnv, and
 `uv run serve_http.py --reset-options '{"fixture": "pro_plan", "startup": {"livemode": false}}'`
 for the HTTP API. Commit the script that builds a fixture alongside it, so it can be rebuilt.
-Ready-made fixtures with richer histories are on the way.
+Two ready-made fixtures with real history ship beside `empty`, both test-mode accounts:
+`small_co` (Wrenfield Labs, 45 hand-written customers) and `big_co` (Ostrander Systems, about 380
+simulated business customers over 18 months). [docs/fixtures.md](docs/fixtures.md) describes each
+company and its loose ends.
 
 ## What's modelled
 

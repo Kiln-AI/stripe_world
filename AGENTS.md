@@ -34,7 +34,7 @@ Errors are ToolError subclasses in errors.py; the error handler is the only plac
 ## About this world
 
 StripeAPI is a faithful, stateful, forkable replica of Stripe's Billing and Payments core: 155
-routed operations across 24 SQLite tables behind Stripe's own eight-tool MCP surface
+routed operations across 25 SQLite tables behind Stripe's own eight-tool MCP surface
 (`list_available_accounts_or_orgs`, `stripe_api_search`, `stripe_api_details`, `stripe_api_read`,
 `stripe_api_write`, `get_stripe_account_info`, `manage_stripe_accounts`, `stripe_analytics`).
 Tools are addressed by `operationId` with `stripe_context` and `livemode` context parameters; on
@@ -74,8 +74,12 @@ the code carries a comment linking to its entry there.
 - **Conformance** is validated by replaying 19 cassettes (committed, redacted) recorded against the
   real Stripe API, plus schema conformance of every returned object against `spec3.min.json`. CI
   replays only; re-recording needs a test-mode key and `api.stripe.com` egress.
-- **Fixtures.** Only `empty` ships today (schema, no rows). The `small` and `large` fixtures are
-  deferred, as is the eval suite.
+- **Fixtures.** Three ship, all frozen at `2026-09-01T14:00:00.000Z`: `empty` (the schema and the
+  sandbox account, live mode), `small_co` (Wrenfield Labs, a hand-written 45-customer test-mode
+  account) and `big_co` (Ostrander Systems, a simulated test-mode account of about 380 business
+  customers, 25 MB or less). The company fixtures are replayed through the world's own code by
+  `fixtures_src/` and described, with checked queries, in `docs/fixtures.md`. The eval suite is
+  deferred.
 - **This repo is the world checkout**: `pyproject.toml` and `src/seahaven_stripe_world/` at the root, beside
   `specs/` and `research/`. The framework is not vendored here: `seahaven~=0.6` resolves to the
   PyPI release, and `uv.lock` pins the exact version, so `uv sync` installs the same core every time

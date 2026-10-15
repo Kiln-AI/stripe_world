@@ -6,7 +6,9 @@ tracked tables hold no rows; `counters` carries its seeded rows by design (a
 static reference seed from the schema file, `components/data_model.md` §5) and
 is untracked, so it never appears in a graded change log — as is
 `idempotency_keys`, whose rows are middleware bookkeeping a graded episode
-must not see (`components/cross_cutting.md` §3.1.8).
+must not see (`components/cross_cutting.md` §3.1.8). The one tracked table
+with a row is `account`: the sandbox account the schema seeds, stamped live
+when `empty` was built (company_fixtures functional spec §2.1).
 """
 
 import pytest
@@ -14,21 +16,23 @@ import seahaven
 from seahaven.db import world_tables
 
 from conftest import FIXTURE_NOW
+from seahaven_stripe_world.startup import ACCOUNT_ID
 
 pytestmark = pytest.mark.seahaven(fixture="empty")
 
 
 def test_the_empty_fixture_is_committed(world: seahaven.World) -> None:
     fixtures = {frozen.id: frozen for frozen in world.fixtures()}
-    assert set(fixtures) == {"empty"}
+    assert "empty" in fixtures  # the company fixtures sit beside it
     empty = fixtures["empty"]
     assert empty.now == FIXTURE_NOW
     assert empty.parent_id is None
-    assert empty.description.startswith("Schema only.")
+    assert empty.description.startswith("The schema and the sandbox account, in live mode")
 
 
 def test_an_instance_of_empty_has_the_schema_and_no_rows(instance: seahaven.Instance) -> None:
     assert world_tables(instance.inspect().conn) == [
+        "account",
         "balance_transactions",
         "charges",
         "counters",
@@ -58,8 +62,8 @@ def test_an_instance_of_empty_has_the_schema_and_no_rows(instance: seahaven.Inst
         "subscriptions",
         "tax_rates",
     ]
-    # No tracked table carries a row: no customer, no event, no payment
-    # method, no catalog object, nothing on the money path, nothing billed.
+    # No tracked table but `account` carries a row: no customer, no event, no
+    # payment method, no catalog object, nothing on the money path, nothing billed.
     for table in (
         "customers",
         "events",
@@ -82,6 +86,13 @@ def test_an_instance_of_empty_has_the_schema_and_no_rows(instance: seahaven.Inst
         "customer_balance_transactions",
     ):
         assert instance.inspect().one(f"SELECT count(*) AS n FROM {table}") == {"n": 0}
+
+
+def test_the_account_row_is_the_live_sandbox(instance: seahaven.Instance) -> None:
+    """`empty` was built with the default startup, so its account is live."""
+    assert instance.inspect().rows("SELECT id, livemode FROM account") == [
+        {"id": ACCOUNT_ID, "livemode": 1}
+    ]
 
 
 def test_the_counters_seed_is_present_and_untracked(instance: seahaven.Instance) -> None:

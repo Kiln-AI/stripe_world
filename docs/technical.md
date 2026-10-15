@@ -74,7 +74,7 @@ and no world default.
 
 ## What it covers
 
-**155 routed operations** across 24 SQLite tables, pinned to Stripe API version
+**155 routed operations** across 25 SQLite tables, pinned to Stripe API version
 `2026-08-26.dahlia`. The operation count is asserted by a test and cannot drift silently.
 Discovery covers the 123 operations the real Stripe MCP catalogues (72 routed, 51 catalogued but
 unrouted, which answer a product-activation or permission refusal when called); the remaining 471
@@ -141,9 +141,24 @@ names). Recording needs a test-mode key and `api.stripe.com` egress, and never r
 
 ## Fixtures
 
-Only the `empty` fixture ships today -- the schema and nothing else, frozen at
-`2026-09-01T14:00:00.000Z`. The `small` and `large` fixtures described in the spec are **deferred**
-and not yet built. The eval suite is also deferred.
+Three fixtures ship, all frozen at `2026-09-01T14:00:00.000Z`:
+
+| Fixture | What | Mode | File |
+|---|---|---|---|
+| `empty` | The schema and the sandbox account, nothing else | live | 0.6 MB |
+| `small_co` | Wrenfield Labs: 45 hand-written customers of a two-person tutoring-tools company | test | 1.8 MB |
+| `big_co` | Ostrander Systems: about 380 simulated business customers of a field-service SaaS company over 18 months | test | 23.7 MB |
+
+A company fixture is opened in the mode its account was made in; asking for the other mode is
+refused at instance creation. Each is built by `fixtures_src/generate.py`, which replays its
+history through the world's own dispatcher and billing engine at historical instants
+(`fixtures_src/replay/`), checks it (`fixtures_src/replay/checks.py`) and freezes it; a rebuild is
+byte-identical, and `tests/test_fixtures.py` and `tests/test_small_co.py` prove it. `big_co` builds
+in about 25 seconds; its population is scaled to about 380 customers so the file stays at 25 MB or
+less (`fixtures_src/big_co/shape.py`). Forking an instance from either takes milliseconds
+(`tests/test_fork_cost.py`). [`fixtures.md`](fixtures.md) is the guide for eval writers: each
+company's story, catalog and loose ends, with landmark queries that `tests/test_guide.py` checks
+against the committed files. The eval suite is deferred.
 
 ## Development
 
@@ -247,11 +262,11 @@ THIRD_PARTY_LICENSES.md
 .github/workflows/ci.yml                # the check list, on every push to main and every PR
 src/seahaven_stripe_world/
   world.py                              # the World object
-  startup.py                            # per-instance account (livemode startup option)
+  startup.py                            # the account row -> ctx.state; the mode rule
   openenv_app.py                        # the ASGI app `seahaven serve` builds
   errors.py  stripe_errors.py           # the two error systems
   _ids.py  _time.py  _json.py  _seq.py  # shared helpers
-  schema/                               # 001-005, DDL for 24 tables + FTS5
+  schema/                               # 001-006, DDL for 25 tables + FTS5
   dispatch/                             # router, ResourceSpec engine, params, response
   resources/                            # one module per resource + hand-written actions
   billing/                              # proration, invoicing, dunning, ledger, lifecycle, magic cards
@@ -262,8 +277,8 @@ src/seahaven_stripe_world/
   middleware/                           # error handler, stripe envelope, idempotency
   http_api/                             # Stripe's HTTP API as a seahaven.http handler
   spec/                                 # spec3.json, spec3.min.json, mcp_catalogue.jsonl, products table
-fixtures/empty/                         # the one shipped fixture
-fixtures_src/                           # the generators fixtures are frozen from
+fixtures/                               # empty, small_co, big_co: the shipped fixtures
+fixtures_src/                           # the recipe they are frozen from, and the guide check
 tools_dev/                              # build-time tools: spec pruning, catalogue enumeration, cassette recorder
 tests/                                  # 1,100+ tests
   conformance/                          # cassette replay, allowed differences

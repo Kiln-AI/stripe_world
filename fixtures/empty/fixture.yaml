@@ -1,10 +1,11 @@
-created_at: '2026-09-22T20:04:03.480Z'
-description: Schema only. Start here to write history, or to test setup flows.
-file_sha256: c32f6a55fe05be97ddd4cf324350af5518a86256e3b3f7b86f3858271190716b
+created_at: '2026-10-15T20:25:27.258Z'
+description: The schema and the sandbox account, in live mode, with no history. Start
+  here to write history, or to test setup flows.
+file_sha256: 33c4999fbf5b2c3ae954678838ddb41e00d0fa656dae82d6dec3aa11d770865a
 format_version: 1
 id: empty
 now: '2026-09-01T14:00:00.000Z'
 parent_id: null
-schema_hash: db47e63cc10be6773ea1c35a9519e93eb9a145afe0de17d14caf521bf58e87f0
+schema_hash: e2f582a5828e83c16e123cbf44d4e0344939ba17ee0942b3b338bf5a08eecf66
 world: seahaven_stripe_world
-world_version: 0.1.0
+world_version: 0.2.0
