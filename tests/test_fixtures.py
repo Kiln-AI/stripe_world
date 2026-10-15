@@ -11,7 +11,8 @@ a temporary directory. Moving the imported world's directory instead would move
 it for everything else in the run, and `copy.copy(world)` is the supported way
 to say "this world, writing somewhere else".
 
-`small` and `large` get a case each in the fixtures phase, when they are built.
+`small_co`'s rebuild is in `test_small_co.py`; `big_co`'s is here. `big_co` replays about
+380 customers over 18 months, so its case takes about half a minute.
 """
 
 import copy
@@ -63,6 +64,23 @@ def test_the_recipe_still_makes_the_committed_empty_bytes(
     # The copy is what took the write: the imported world holds only its
     # committed fixtures (the company fixtures sit beside `empty`).
     assert all(frozen.dir.parent == world.fixtures_dir for frozen in world.fixtures())
+
+
+def test_the_recipe_still_makes_the_committed_big_co_bytes(
+    generate: Any, world: seahaven.World, tmp_path: Path
+) -> None:
+    """`big_co` rebuilt into a temporary directory is byte-identical to the committed file."""
+    elsewhere = copy.copy(world)
+    elsewhere.fixtures_dir = tmp_path / "fixtures"
+    elsewhere.fixtures_dir.mkdir()
+
+    fixture = generate.build("big_co", world=elsewhere)
+
+    assert fixture.now == generate.NOW
+    assert fixture.description == generate.DESCRIPTIONS["big_co"]
+    committed = next(frozen for frozen in world.fixtures() if frozen.id == "big_co")
+    assert _sha256(fixture.state_path) == _sha256(committed.state_path)
+    assert committed.description == generate.DESCRIPTIONS["big_co"]
 
 
 def test_the_recipe_defaults_to_this_packages_world(generate: Any, world: seahaven.World) -> None:

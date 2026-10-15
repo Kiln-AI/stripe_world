@@ -21,7 +21,7 @@ status: complete
       the build and the frozen fixture, `tests/test_small_co.py`, the determinism test, the guide
       tooling (`fixtures_src/guide.py`, `tests/test_guide.py`) and the `small_co` half of
       `docs/fixtures.md`. A web check that "Wrenfield" and `wrenfield.app` name no real company.
-- [ ] **Phase 4: `big_co`.** `accounts.OSTRANDER`, the shape and catalog, the population draw,
+- [x] **Phase 4: `big_co`.** `accounts.OSTRANDER`, the shape and catalog, the population draw,
       the lives, the scripted loose ends, the build and the frozen fixture, `tests/test_population.py`,
       `tests/test_big_co.py`, the fork-cost test, the `big_co` half of `docs/fixtures.md`, and the
       remaining doc lines (`AGENTS.md`'s fixture line, the README's "ready-made fixtures" line,

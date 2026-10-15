@@ -147,6 +147,9 @@ def api_read(
     instance: seahaven.Instance,
     path: str,
     params: dict[str, Any] | None = None,
+    *,
+    stripe_context: str = ACCOUNT_ID,
+    livemode: bool = _DEFAULT_LIVEMODE,
 ) -> Any:
     """Test helper: stripe_api_read with the new operation-id signature."""
     from seahaven_stripe_world.dispatch.router import ROUTER
@@ -159,8 +162,8 @@ def api_read(
         "stripe_api_read",
         stripe_api_operation_id=route.op_id,
         parameters=merged,
-        stripe_context=ACCOUNT_ID,
-        livemode=_DEFAULT_LIVEMODE,
+        stripe_context=stripe_context,
+        livemode=livemode,
     )
 
 
@@ -169,6 +172,9 @@ def api_write(
     method: str,
     path: str,
     params: dict[str, Any] | None = None,
+    *,
+    stripe_context: str = ACCOUNT_ID,
+    livemode: bool = _DEFAULT_LIVEMODE,
 ) -> Any:
     """Test helper: stripe_api_write with the new operation-id signature."""
     from seahaven_stripe_world.dispatch.router import ROUTER
@@ -181,8 +187,8 @@ def api_write(
         "stripe_api_write",
         stripe_api_operation_id=route.op_id,
         parameters=merged,
-        stripe_context=ACCOUNT_ID,
-        livemode=_DEFAULT_LIVEMODE,
+        stripe_context=stripe_context,
+        livemode=livemode,
     )
 
 
@@ -191,14 +197,17 @@ def api_search(
     intent: str,
     resource: str,
     limit: int = 5,
+    *,
+    stripe_context: str = ACCOUNT_ID,
+    livemode: bool = _DEFAULT_LIVEMODE,
 ) -> Any:
     """Test helper: stripe_api_search with the new signature."""
     return instance.call(
         "stripe_api_search",
         intent=intent,
         resource=resource,
-        stripe_context=ACCOUNT_ID,
-        livemode=_DEFAULT_LIVEMODE,
+        stripe_context=stripe_context,
+        livemode=livemode,
         limit=limit,
     )
 
@@ -206,13 +215,16 @@ def api_search(
 def api_details(
     instance: seahaven.Instance,
     operation_id: str,
+    *,
+    stripe_context: str = ACCOUNT_ID,
+    livemode: bool = _DEFAULT_LIVEMODE,
 ) -> Any:
     """Test helper: stripe_api_details with the new signature."""
     return instance.call(
         "stripe_api_details",
         stripe_api_operation_id=operation_id,
-        stripe_context=ACCOUNT_ID,
-        livemode=_DEFAULT_LIVEMODE,
+        stripe_context=stripe_context,
+        livemode=livemode,
     )
 
 

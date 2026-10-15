@@ -93,10 +93,13 @@ DESCRIPTIONS = {
         "customer has a story."
     ),
     "big_co": (
-        "Ostrander Systems, field-service scheduling software for trades businesses, as a "
-        "test-mode Stripe account: thousands of customers over 18 months of simulated "
-        "subscriptions, renewals, upgrades, churn, dunning, refunds, disputes and payouts, plus "
-        "scripted loose ends. Good for evals that need a realistic account at scale."
+        "Ostrander Systems, a Denver company selling field-service software to HVAC, plumbing "
+        "and electrical contractors, as a test-mode Stripe account: about 380 business customers "
+        "over 18 months, from a migration off a legacy billing system through sales-led growth, "
+        "with per-technician seat plans, annual contracts invoiced on terms, sales tax, "
+        "renewals, upgrades, churn, dunning, refunds, disputes, credit notes and daily payouts, "
+        "plus scripted loose ends. Good for evals that need a realistic account at scale: "
+        "pagination, search, aggregation and needle-in-a-haystack lookups."
     ),
 }
 

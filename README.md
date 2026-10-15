@@ -361,7 +361,10 @@ for seed in range(100):
 The servers take it too: `env.reset(fixture="pro_plan", ...)` over OpenEnv, and
 `uv run serve_http.py --reset-options '{"fixture": "pro_plan", "startup": {"livemode": false}}'`
 for the HTTP API. Commit the script that builds a fixture alongside it, so it can be rebuilt.
-Ready-made fixtures with richer histories are on the way.
+Two ready-made fixtures with real history ship beside `empty`, both test-mode accounts:
+`small_co` (Wrenfield Labs, 45 hand-written customers) and `big_co` (Ostrander Systems, about 380
+simulated business customers over 18 months). [docs/fixtures.md](docs/fixtures.md) describes each
+company and its loose ends.
 
 ## What's modelled
 
