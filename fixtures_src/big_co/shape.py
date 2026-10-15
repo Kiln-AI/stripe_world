@@ -8,7 +8,7 @@ coming down further if 500 does not fit. `SCALE` is the factor that fits: every 
 is the spec's count times `SCALE` (rounded up, so no feature drops to zero), and every rate is the
 spec's. The file's size follows the number of billing cycles the draw happens to produce, so it
 moves by several percent from one draw to the next: at 0.115 the build holds 379 customers,
-scripted loose ends included, in 23.0 MB, while draws at 0.12 and 0.125 came to 25.9 and 25.1 MB.
+scripted loose ends included, in 23.7 MB, while draws at 0.12 and 0.125 came to 25.9 and 25.1 MB.
 """
 
 import math

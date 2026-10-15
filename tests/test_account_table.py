@@ -55,7 +55,9 @@ def test_seed_is_todays_sandbox_account(world: seahaven.World) -> None:
 
 def test_blank_defaults_live_and_stamps(world: seahaven.World) -> None:
     with world.instance(None, now=BLANK_NOW) as inst:
-        assert inst.call("get_stripe_account_info") == json.loads(GOLDEN.read_text())
+        assert inst.call("get_stripe_account_info") == json.loads(
+            GOLDEN.read_text(encoding="utf-8")
+        )
         assert account_entry(inst) == {"stripe_context": ACCOUNT_ID, "livemode": True, "name": None}
         assert stored_mode(inst) == [{"id": ACCOUNT_ID, "livemode": 1}]
         # The stamp is a startup write: starting state, not the episode's work.
@@ -64,6 +66,9 @@ def test_blank_defaults_live_and_stamps(world: seahaven.World) -> None:
 
 def test_blank_opens_test_and_stamps(world: seahaven.World) -> None:
     with world.instance(None, now=BLANK_NOW, startup={"livemode": False}) as inst:
+        assert inst.call("get_stripe_account_info") == json.loads(
+            GOLDEN.read_text(encoding="utf-8")
+        )
         assert account_entry(inst)["livemode"] is False
         assert stored_mode(inst) == [{"id": ACCOUNT_ID, "livemode": 0}]
 
@@ -143,12 +148,28 @@ def test_unknown_settings_key_refused(world: seahaven.World) -> None:
         )
 
 
+@pytest.mark.parametrize(
+    "path", ["$.settings.dashboard.display_name", "$.settings.dashboard", "$.country",
+             "$.default_currency"],
+)  # fmt: skip
+def test_an_object_missing_a_field_the_state_reads_is_refused(
+    world: seahaven.World, path: str
+) -> None:
+    """The name, country and currency are read from the object: a row without one cannot start.
+    A null value is fine (the sandbox's display name is null); a missing key is not."""
+    setup_sql = f"UPDATE account SET object = json_remove(object, '{path}')"
+    with pytest.raises(seahaven.WorldBug) as raised:
+        world.instance(None, now=BLANK_NOW, setup_sql=setup_sql)
+    missing = "settings.dashboard.display_name" if "dashboard" in path else path[2:]
+    assert str(raised.value) == f"account {ACCOUNT_ID} object has no {missing}"
+
+
 def test_settings_reach_ledger_and_dunning(world: seahaven.World) -> None:
     settings = {
         "ledger": {"dispute_received_fee": 2000},
         "dunning": {"end_behavior": "mark_unpaid"},
     }
-    setup_sql = f"UPDATE account SET settings = '{json.dumps(settings)}'"
+    setup_sql = f"UPDATE account SET settings = '{json.dumps(settings, ensure_ascii=False)}'"
     with world.instance(None, now=BLANK_NOW, setup_sql=setup_sql) as inst, inst.bulk() as ctx:
         assert ledger.ledger_spec(ctx).dispute_received_fee == 2000
         assert dunning.policy(ctx).end_behavior == "mark_unpaid"

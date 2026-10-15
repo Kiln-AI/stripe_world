@@ -93,11 +93,13 @@ class BillPending:
 
 @dataclass(frozen=True)
 class OneOffPayment:
-    """A payment intent confirmed with the member's default card."""
+    """A payment intent confirmed on the spot: with the member's default card, or with `card`, a
+    card added for this payment alone (not made the default)."""
 
     at: str
     amount: int
     description: str
+    card: tuple[TestCard, tuple[int, int]] | None = None
 
 
 Beat = (
@@ -117,7 +119,7 @@ Beat = (
 class Member:
     key: str
     name: str
-    email: str | None
+    email: str
     description: str
     created: str
     beats: tuple[Beat, ...]
@@ -196,8 +198,9 @@ CAST: tuple[Member, ...] = (
     _m("anika_sharma", "Anika Sharma", "Sharma Tutoring Collective", "anika@sharmatutoring.com",
        "2026-03-04T21:29", (MASTERCARD, (12, 2027)),
        Subscribe(t("2026-03-04T21:30"), "studio_monthly", coupon=_L),
-       # Neither subscription creation nor a renewal sweeps pending items in this world, so
-       # the setup fee is invoiced on its own right after she subscribes.
+       # Neither subscription creation nor a renewal sweeps pending items in this world
+       # (https://github.com/Kiln-AI/stripe_world/issues/14), so the setup fee is invoiced on
+       # its own right after she subscribes.
        InvoiceItem(t("2026-03-04T21:31"), "setup"),
        BillPending(t("2026-03-04T21:32"))),
     _m("olivia_grant", "Olivia Grant", "SAT tutor", "olivia@grantprep.com",
@@ -284,7 +287,12 @@ CAST: tuple[Member, ...] = (
        "2026-08-24T22:30", (VISA, (5, 2028)), price="studio_monthly", trial=True),
     _m("leila_farah", "Leila Farah", "Oud teacher", "leila@farahmusic.com",
        "2026-08-27T17:20", (MASTERCARD, (2, 2029)), price="solo_monthly", trial=True, coupon=_T),
+    # Disputes open only on a payment intent the world confirms (the user's decision; small_co.md
+    # had her Studio annual bought on the dispute card): she subscribes with a good card, then
+    # pays for setup with a dispute test card, and that payment is disputed as fraudulent.
     _m("grace_adeyemi", "Grace Adeyemi", "Brightside Music Studio",
-       "grace@brightsidemusic.studio", "2026-08-30T15:10", (cards.DISPUTE_FRAUDULENT, (6, 2028)),
+       "grace@brightsidemusic.studio", "2026-08-30T15:10", (VISA, (6, 2028)),
+       OneOffPayment(t("2026-08-30T15:25"), 4900, "Done-for-you setup",
+                     card=(cards.DISPUTE_FRAUDULENT, (9, 2029))),
        price="studio_annual"),
 )  # fmt: skip

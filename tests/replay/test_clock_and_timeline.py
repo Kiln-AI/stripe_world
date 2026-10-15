@@ -2,11 +2,14 @@
 
 import pytest
 import seahaven
+from fixtures_src import accounts
+from fixtures_src.replay import cards
 from fixtures_src.replay.client import Client
 from fixtures_src.replay.clock import at, plus
 from fixtures_src.replay.timeline import FixtureBuildError, Timeline
 
 from replay.support import NOW, blank, rows
+from seahaven_stripe_world._ids import _base62_timestamp
 
 T = "2026-03-02T15:45:00.000Z"
 
@@ -32,6 +35,41 @@ def test_rows_ids_and_events_carry_the_instant() -> None:
         stored = rows(inst, "SELECT created FROM customers WHERE id = ?", customer["id"])
         assert stored == [{"created": T}]
         events = rows(inst, "SELECT created, request_id FROM events ORDER BY x_seq")
+        assert events and all(e["created"] == T for e in events)
+        assert all(str(e["request_id"]).startswith("req_") for e in events)
+
+
+def test_payment_intent_ids_and_events_carry_the_instant() -> None:
+    """A `pi_` id's time group encodes the instant it was made at, as its row and events do."""
+    with blank() as inst:
+        with inst.bulk() as ctx:
+            accounts.install_account(ctx, accounts.WRENFIELD)
+            client = Client()
+            customer = client.create_customer(
+                at(ctx, T), name="Ines Duarte", email="ines@duartepiano.com"
+            )
+            pm = client.add_card(at(ctx, T), customer, cards.GOOD[0], exp=(4, 2029))
+            pi = client.call(
+                at(ctx, T),
+                "POST",
+                "/v1/payment_intents",
+                {
+                    "amount": 500,
+                    "currency": "usd",
+                    "customer": customer,
+                    "payment_method": pm,
+                    "confirm": True,
+                },
+            )
+        assert pi["created"] == 1772466300
+        assert pi["id"].startswith("pi_1" + _base62_timestamp(T))
+        stored = rows(inst, "SELECT created FROM payment_intents WHERE id = ?", pi["id"])
+        assert stored == [{"created": T}]
+        events = rows(
+            inst,
+            "SELECT created, request_id FROM events WHERE type LIKE 'payment_intent.%'"
+            " ORDER BY x_seq",
+        )
         assert events and all(e["created"] == T for e in events)
         assert all(str(e["request_id"]).startswith("req_") for e in events)
 

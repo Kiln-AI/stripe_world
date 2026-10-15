@@ -24,8 +24,6 @@ from fixtures_src.small_co.cast import (
 )
 from fixtures_src.small_co.catalog import Catalog
 
-from seahaven_stripe_world.resources import disputes
-
 __all__ = ["schedule"]
 
 
@@ -39,14 +37,21 @@ class _Story:
 
     def create(self, member: Member) -> Callable[[seahaven.Ctx], None]:
         def run(ctx: seahaven.Ctx) -> None:
-            params: dict[str, Any] = {"name": member.name, "description": member.description}
-            if member.email is not None:
-                params["email"] = member.email
-            self.customers[member.key] = self.client.call(ctx, "POST", "/v1/customers", params)[
-                "id"
-            ]
+            self.customers[member.key] = self.client.create_customer(
+                ctx, name=member.name, email=member.email, description=member.description
+            )
 
         return run
+
+    def _default_card(self, ctx: seahaven.Ctx, key: str, customer: str) -> str:
+        row = ctx.db.one(
+            "SELECT json_extract(invoice_settings, '$.default_payment_method') AS pm"
+            " FROM customers WHERE id = ?",
+            customer,
+        )
+        if row is None or row["pm"] is None:
+            raise FixtureBuildError(f"{key} has no default card")
+        return str(row["pm"])
 
     def _sub(self, key: str) -> str:
         if key not in self.subscriptions:
@@ -70,7 +75,6 @@ class _Story:
                         coupon=beat.coupon,
                     )
                     self.subscriptions[key] = sub["id"]
-                    _open_dispute(ctx, customer)
                     self.subs.follow(ctx, sub["id"])
                 case ChangePlan():
                     sub_id = self._sub(key)
@@ -126,13 +130,11 @@ class _Story:
                     client.call(ctx, "POST", f"/v1/invoices/{invoice}/finalize")
                     client.pay_invoice(ctx, invoice)
                 case OneOffPayment():
-                    row = ctx.db.one(
-                        "SELECT json_extract(invoice_settings, '$.default_payment_method') AS pm"
-                        " FROM customers WHERE id = ?",
-                        customer,
-                    )
-                    if row is None or row["pm"] is None:
-                        raise FixtureBuildError(f"{key} has no default card")
+                    if beat.card is not None:
+                        card, exp = beat.card
+                        pm = client.add_card(ctx, customer, card, exp=exp, default=False)
+                    else:
+                        pm = self._default_card(ctx, key, customer)
                     client.call(
                         ctx,
                         "POST",
@@ -141,7 +143,7 @@ class _Story:
                             "amount": beat.amount,
                             "currency": "usd",
                             "customer": customer,
-                            "payment_method": row["pm"],
+                            "payment_method": pm,
                             "description": beat.description,
                             "confirm": True,
                             "payment_method_types": ["card"],
@@ -149,25 +151,6 @@ class _Story:
                     )
 
         return run
-
-
-def _open_dispute(ctx: seahaven.Ctx, customer: str) -> None:
-    """Open the dispute a dispute-tagged card's first subscription payment carries.
-
-    The world opens it on the payment-intent confirm path only; an invoice paid through a
-    subscription does not reach `maybe_create_dispute`. The step calls that same world function
-    at the same instant, right after the paying call, so Grace's dispute exists as the card says.
-    """
-    charge = ctx.db.one(
-        "SELECT * FROM charges WHERE customer = ? AND status = 'succeeded' AND NOT disputed"
-        " ORDER BY x_seq DESC LIMIT 1",
-        customer,
-    )
-    if charge is None or charge["payment_method"] is None:
-        return
-    pm = ctx.db.one("SELECT * FROM payment_methods WHERE id = ?", charge["payment_method"])
-    if pm is not None:
-        disputes.maybe_create_dispute(ctx, charge, pm)
 
 
 def schedule(

@@ -8,10 +8,10 @@ Rebuild one fixture by deleting its directory and re-running the recipe:
 
     rm -rf fixtures/<id> && uv run python fixtures_src/generate.py <id>
 
-With no arguments, every fixture is rebuilt in lineage order: `empty`,
-`small_co`, `big_co`. Do not use `seahaven fixture freeze --run` for the company
-fixtures: that path opens the instance without the test-mode startup and
-without a fixed clock, so it cannot reproduce them.
+With no arguments, every fixture is rebuilt in order: `empty`, `small_co`,
+`big_co`, each from its own blank instance. Do not use `seahaven fixture freeze
+--run` for the company fixtures: that path opens the instance without the
+test-mode startup and without a fixed clock, so it cannot reproduce them.
 
 Every build starts from a blank instance at `NOW` on a `fixed` clock, opened
 with that fixture's `STARTUP` options (the companies are test-mode accounts).
@@ -50,11 +50,10 @@ NOW = "2026-09-01T14:00:00.000Z"
 
 
 def empty(inst: seahaven.Instance) -> None:
-    """`empty`: the schema and nothing else.
+    """`empty`: the schema and the sandbox account it seeds, stamped live.
 
     Deliberately does no work. It exists so that the first fixture is made the
-    same way every later one is, and so the fixture others are forked from has a
-    source like the rest.
+    same way every later one is, and so it has a source like the rest.
     """
 
 
@@ -74,7 +73,7 @@ def big_co(inst: seahaven.Instance) -> None:
     _company_builder("fixtures_src.big_co")(inst)
 
 
-# Every fixture this module can build, by id, in lineage order; the startup
+# Every fixture this module can build, by id, in build order; the startup
 # options each blank instance is opened with; and what each one tells whoever is
 # choosing between them (functional spec §3.6).
 BUILDERS = {"empty": empty, "small_co": small_co, "big_co": big_co}
@@ -84,7 +83,10 @@ STARTUP: dict[str, dict[str, object]] = {
     "big_co": {"livemode": False},
 }
 DESCRIPTIONS = {
-    "empty": "Schema only. Start here to write history, or to test setup flows.",
+    "empty": (
+        "The schema and the sandbox account, in live mode, with no history. Start here to "
+        "write history, or to test setup flows."
+    ),
     "small_co": (
         "Wrenfield Labs, a two-person booking and payments tool for independent tutors, music "
         "teachers and coaches, as a test-mode Stripe account: a hand-written cast of about 45 "
@@ -142,8 +144,8 @@ def _package_world() -> seahaven.World:
 def main(argv: list[str], *, world: seahaven.World | None = None) -> int:
     """`python fixtures_src/generate.py [fixture-id ...]`: re-run the recipe.
 
-    With no arguments, rebuilds every fixture in the committed lineage order
-    (`empty` first; a later fixture forks the one before it). Prints each
+    With no arguments, rebuilds every fixture in `BUILDERS` order (`empty`,
+    `small_co`, `big_co`), each from its own blank instance. Prints each
     fixture's id, `now` and directory. Returns 1 for an unknown id.
 
     Rebuilding over committed bytes is delete-then-regenerate: `freeze` and

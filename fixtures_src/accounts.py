@@ -1,15 +1,19 @@
 """The two company accounts (functional spec §2.2; architecture §2.3), and their installation.
 
-Each `CompanyAccount` is the sandbox golden object (`tests/golden/sandbox_account.json`) with the
-company's fields changed: an activated US company account, test-mode, with one test bank account
-for payouts and a manual payout schedule.
+A `CompanyAccount` holds only what the company sets: its id, its fields of the account object and
+its settings. The rest of the object is the sandbox account the schema seeds
+(`schema/006_account.sql`), read from the row when the account is installed, so the SQL seed is
+the one copy of it. Each company is an activated US company account, test-mode, with one test bank
+account for payouts and a manual payout schedule.
 """
 
 import copy
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 import seahaven
+from fixtures_src.replay.timeline import FixtureBuildError
 
 from seahaven_stripe_world import _json, startup
 
@@ -19,101 +23,56 @@ __all__ = ["OSTRANDER", "WRENFIELD", "CompanyAccount", "install_account"]
 @dataclass(frozen=True)
 class CompanyAccount:
     id: str
-    object: dict[str, Any]
-    settings: dict[str, Any]
+    fields: Mapping[str, Any]  # the company's values, nested as in the account object
+    settings: Mapping[str, Any]  # the row's `settings`: ledger and dunning overrides
+    bank_suffix: str  # the external bank account's id is `ba_` + the account fragment + this
 
     @property
     def bank_account_id(self) -> str:
         """The payout destination: the account's one external bank account."""
-        return str(self.object["external_accounts"]["data"][0]["id"])
+        return f"ba_{self.id[5:]}{self.bank_suffix}"
+
+    def object_over(self, sandbox: Mapping[str, Any]) -> dict[str, Any]:
+        """`sandbox` with this company's fields set over it.
+
+        A nested field is set inside the sandbox's object of that name; anything else, an empty
+        object included, replaces the sandbox's value. A field the sandbox does not have is
+        refused, so a change to the seed cannot silently leave a company field behind."""
+        return _set_over(copy.deepcopy(dict(sandbox)), self.fields, "")
+
+
+def _set_over(base: dict[str, Any], fields: Mapping[str, Any], prefix: str) -> dict[str, Any]:
+    for key, value in fields.items():
+        path = f"{prefix}{key}"
+        if key not in base:
+            raise FixtureBuildError(f"the sandbox account object has no {path}")
+        if isinstance(value, Mapping) and isinstance(base[key], dict) and base[key]:
+            _set_over(base[key], value, f"{path}.")
+        else:
+            base[key] = copy.deepcopy(value)
+    return base
 
 
 def install_account(ctx: seahaven.Ctx, account: CompanyAccount) -> None:
-    """Replace the account row with `account`, then reload `ctx.state["account"]`, so every id
+    """Make the seeded sandbox row `account`, then reload `ctx.state["account"]`, so every id
     minted afterwards carries the company's account fragment. `livemode` stays as startup stamped
     it. The one row a builder writes directly: it is the fixture's definition, not history."""
+    row = ctx.db.one("SELECT id, object FROM account")
+    if row is None or row["id"] != startup.ACCOUNT_ID:
+        found = None if row is None else row["id"]
+        raise FixtureBuildError(
+            f"install_account starts from the seeded sandbox account {startup.ACCOUNT_ID},"
+            f" not {found!r}"
+        )
+    # The table's CHECK guarantees the column holds a JSON object.
+    obj = account.object_over(cast("dict[str, Any]", _json.loads(row["object"])))
     ctx.db.execute(
         "UPDATE account SET id = ?, object = ?, settings = ?",
         account.id,
-        _json.dumps(account.object),
-        _json.dumps(account.settings),
+        _json.dumps(obj),
+        _json.dumps(dict(account.settings)),
     )
     ctx.state["account"] = startup.open_account(ctx, livemode=None)
-
-
-_SANDBOX: dict[str, Any] = {
-    "business_profile": {
-        "annual_revenue": None,
-        "estimated_worker_count": None,
-        "mcc": None,
-        "name": None,
-        "support_address": None,
-        "support_email": None,
-        "support_phone": None,
-        "support_url": None,
-        "url": None,
-    },
-    "business_type": None,
-    "capabilities": {},
-    "charges_enabled": False,
-    "controller": {"is_controller": True, "type": "account"},
-    "country": "US",
-    "created": 1704067200,
-    "default_currency": "usd",
-    "details_submitted": False,
-    "email": None,
-    "external_accounts": {"data": [], "has_more": False, "object": "list", "url": ""},
-    "future_requirements": {
-        "alternatives": [],
-        "current_deadline": None,
-        "currently_due": [],
-        "disabled_reason": None,
-        "errors": [],
-        "eventually_due": [],
-        "past_due": [],
-        "pending_verification": [],
-    },
-    "id": "",
-    "object": "account",
-    "payouts_enabled": False,
-    "requirements": {
-        "alternatives": [],
-        "current_deadline": None,
-        "currently_due": [],
-        "disabled_reason": "requirements.past_due",
-        "errors": [],
-        "eventually_due": [],
-        "past_due": [],
-        "pending_verification": [],
-    },
-    "settings": {
-        "bacs_debit_payments": {"display_name": None, "service_user_number": None},
-        "branding": {"icon": None, "logo": None, "primary_color": None, "secondary_color": None},
-        "card_issuing": {"tos_acceptance": {"date": None, "ip": None}},
-        "card_payments": {
-            "decline_on": {"avs_failure": False, "cvc_failure": False},
-            "statement_descriptor_prefix": None,
-            "statement_descriptor_prefix_kana": None,
-            "statement_descriptor_prefix_kanji": None,
-        },
-        "dashboard": {"display_name": None, "timezone": "Etc/UTC"},
-        "invoices": {"default_account_tax_ids": None},
-        "payments": {
-            "statement_descriptor": None,
-            "statement_descriptor_kana": None,
-            "statement_descriptor_kanji": None,
-        },
-        "payouts": {
-            "debit_negative_balances": True,
-            "schedule": {"delay_days": 7, "interval": "daily"},
-            "statement_descriptor": None,
-        },
-        "sepa_debit_payments": {},
-        "treasury": {"tos_acceptance": {"date": None, "ip": None}},
-    },
-    "tos_acceptance": {"date": None, "ip": None, "user_agent": None},
-    "type": "standard",
-}
 
 
 def _bank_account(account_id: str, holder: str, created_suffix: str) -> dict[str, Any]:
@@ -167,39 +126,39 @@ def _company(
     created: int,
     dunning: dict[str, Any],
 ) -> CompanyAccount:
-    obj = copy.deepcopy(_SANDBOX)
-    obj["id"] = account_id
-    obj["business_profile"].update(
-        {
+    fields = {
+        "id": account_id,
+        "business_profile": {
             "mcc": "5734",
             "name": business_name,
             "support_address": support_address,
             "support_email": support_email,
             "support_phone": support_phone,
             "url": url,
-        }
-    )
-    obj["business_type"] = "company"
-    obj["capabilities"] = {"card_payments": "active", "transfers": "active"}
-    obj["charges_enabled"] = True
-    obj["payouts_enabled"] = True
-    obj["details_submitted"] = True
-    obj["created"] = created
-    obj["email"] = email
-    obj["external_accounts"] = {
-        "data": [_bank_account(account_id, display_name, bank_suffix)],
-        "has_more": False,
-        "object": "list",
-        "url": f"/v1/accounts/{account_id}/external_accounts",
+        },
+        "business_type": "company",
+        "capabilities": {"card_payments": "active", "transfers": "active"},
+        "charges_enabled": True,
+        "payouts_enabled": True,
+        "details_submitted": True,
+        "created": created,
+        "email": email,
+        "external_accounts": {
+            "data": [_bank_account(account_id, display_name, bank_suffix)],
+            "url": f"/v1/accounts/{account_id}/external_accounts",
+        },
+        "requirements": {"disabled_reason": None},
+        "settings": {
+            "card_payments": {"statement_descriptor_prefix": descriptor_prefix},
+            "dashboard": {"display_name": display_name, "timezone": timezone},
+            "payments": {"statement_descriptor": descriptor},
+            "payouts": {"schedule": {"delay_days": 2, "interval": "manual"}},
+        },
+        "tos_acceptance": {"date": created},
     }
-    obj["requirements"]["disabled_reason"] = None
-    settings = obj["settings"]
-    settings["card_payments"]["statement_descriptor_prefix"] = descriptor_prefix
-    settings["dashboard"] = {"display_name": display_name, "timezone": timezone}
-    settings["payments"]["statement_descriptor"] = descriptor
-    settings["payouts"]["schedule"] = {"delay_days": 2, "interval": "manual"}
-    obj["tos_acceptance"] = {"date": created, "ip": None, "user_agent": None}
-    return CompanyAccount(id=account_id, object=obj, settings={"dunning": dunning})
+    return CompanyAccount(
+        id=account_id, fields=fields, settings={"dunning": dunning}, bank_suffix=bank_suffix
+    )
 
 
 def _address(city: str, state: str, postal_code: str) -> dict[str, Any]:

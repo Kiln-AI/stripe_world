@@ -61,9 +61,8 @@ def test_the_recipe_still_makes_the_committed_empty_bytes(
     assert [frozen.id for frozen in elsewhere.fixtures()] == ["empty"]
     committed = next(frozen for frozen in world.fixtures() if frozen.id == "empty")
     assert _sha256(fixture.state_path) == _sha256(committed.state_path)
-    # The copy is what took the write: the imported world holds only its
-    # committed fixtures (the company fixtures sit beside `empty`).
-    assert all(frozen.dir.parent == world.fixtures_dir for frozen in world.fixtures())
+    # The copy is what took the write: the imported world holds exactly its committed fixtures.
+    assert {frozen.id for frozen in world.fixtures()} == {"empty", "small_co", "big_co"}
 
 
 def test_the_recipe_still_makes_the_committed_big_co_bytes(

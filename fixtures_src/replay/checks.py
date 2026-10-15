@@ -2,6 +2,7 @@
 §3.1): the consistency invariants of functional spec §3.4, the realism guards of §3.2, and the
 fixture's own expectations. One module, so build-time and test-time checks cannot drift."""
 
+import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -10,6 +11,7 @@ import seahaven
 from fixtures_src.replay.cards import ALL
 from fixtures_src.replay.clock import plus
 
+from seahaven_stripe_world import _time
 from seahaven_stripe_world.billing import ledger, magic_cards
 
 __all__ = [
@@ -38,30 +40,37 @@ DENIED_NAMES = (
     "wayne enterprises", "stark industries",
 )  # fmt: skip
 
-# Timestamp columns that point forward by design (functional spec §3.4).
+# Instants that point forward by design (functional spec §3.4), by column or JSON key name: a
+# period's end (an item's current period, an invoice item's or a line's period, a discount's
+# `end`, a schedule phase's `end_date`), a trial's end and the billing anchor it sets, a scheduled
+# cancellation, due dates, the next retry or finalization, when funds become available or a payout
+# arrives, and a coupon's last redemption date. Every date inside a schedule's `phases` is forward
+# too: its later phases have not started.
 _FORWARD = frozenset(
     {
-        "current_period_end",
-        "trial_end",
-        "due_date",
-        "next_payment_attempt",
+        "arrival_date",
         "automatically_finalizes_at",
         "available_on",
-        "arrival_date",
-        "redeem_by",
+        "billing_cycle_anchor",
         "cancel_at",
+        "current_period_end",
+        "due_by",
+        "due_date",
+        "end",
         "end_date",
+        "next_payment_attempt",
+        "period_end",
+        "redeem_by",
+        "trial_end",
     }
 )
-_PAST_COLUMNS = (
-    "created",
-    "canceled_at",
-    "ended_at",
-    "voided_at",
-    "effective_at",
-    "released_at",
-    "completed_at",
-    "date",
+# Canonical UTC text, the one form a TEXT timestamp column is written in (`_time`).
+_ISO_TEXT = (
+    "[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z"
+)
+# A JSON key naming an instant, which stored JSON holds as Unix seconds (the API's form).
+_TIME_KEY = re.compile(
+    r"created|date|updated|start|end|billing_cycle_anchor|.+_(at|date|start|end|on|by)"
 )
 
 Rows = list[dict[str, Any]]
@@ -102,28 +111,77 @@ def _payouts_overdrew(db: seahaven.Db, _now: str) -> Rows:
     return bad
 
 
-def _nothing_after_now(db: seahaven.Db, now: str) -> Rows:
-    bad: Rows = []
-    tables = db.rows(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE '%fts%'"
-        " AND name NOT LIKE 'sqlite_%' ORDER BY name"
+def _tables(db: seahaven.Db) -> list[str]:
+    """Every ordinary table. The FTS virtual tables and their shadow tables hold no rows of their
+    own: they index the tables they name."""
+    return [
+        str(row["name"])
+        for row in db.rows(
+            "SELECT name FROM pragma_table_list WHERE schema = 'main' AND type = 'table'"
+            " AND name NOT LIKE 'sqlite_%' ORDER BY name"
+        )
+    ]
+
+
+def _is_past_instant(column: str, path: str, key: object) -> bool:
+    """Whether the integer at `path` in JSON column `column` is an instant that must not be after
+    NOW: a time-named key, not a forward one, and not inside a schedule's phases."""
+    return (
+        isinstance(key, str)
+        and _TIME_KEY.fullmatch(key) is not None
+        and key not in _FORWARD
+        and column != "phases"
+        and ".phases[" not in path
     )
-    for table in tables:
-        name = str(table["name"])
+
+
+def _json_integers_after(db: seahaven.Db, table: str, key: str, column: str, now_unix: int) -> Rows:
+    """Every integer above `now_unix` inside `table.column`'s JSON objects and arrays, with its
+    path and key. Only values that are JSON documents are walked: a column's plain text is not."""
+    col = f'"{column}"'
+    return db.rows(
+        f'WITH docs AS MATERIALIZED (SELECT {key} AS id, {col} AS doc FROM "{table}"'
+        f" WHERE typeof({col}) = 'text' AND substr({col}, 1, 1) IN ('{{', '[')"
+        f" AND json_valid({col}))"
+        " SELECT docs.id AS id, j.fullkey AS path, j.key AS key, j.value AS v"
+        " FROM docs, json_tree(docs.doc) AS j"
+        " WHERE j.type = 'integer' AND j.value > ? ORDER BY docs.id, j.fullkey",
+        now_unix,
+    )
+
+
+def _nothing_after_now(db: seahaven.Db, now: str) -> Rows:
+    """Every timestamp at or before NOW, except the forward ones: each TEXT value in canonical
+    UTC form, and each time-named integer inside a JSON column, in every table."""
+    now_unix = _time.to_unix(now)
+    bad: Rows = []
+    for table in _tables(db):
         columns = [
             str(col["name"])
-            for col in db.rows("SELECT name FROM pragma_table_info(?) ORDER BY cid", name)
+            for col in db.rows("SELECT name FROM pragma_table_info(?) ORDER BY cid", table)
         ]
+        key = "id" if "id" in columns else "rowid"
         for column in columns:
-            if column in _PAST_COLUMNS and column not in _FORWARD:
+            if column not in _FORWARD:
                 bad.extend(
-                    {"table": name, "column": column, "id": row["id"], "value": row["v"]}
+                    {"table": table, "column": column, "id": row["id"], "value": row["v"]}
                     for row in db.rows(
-                        f'SELECT rowid AS id, "{column}" AS v FROM "{name}"'
-                        f' WHERE "{column}" > ? ORDER BY rowid',
+                        f'SELECT {key} AS id, "{column}" AS v FROM "{table}"'
+                        f' WHERE "{column}" GLOB ? AND "{column}" > ? ORDER BY {key}',
+                        _ISO_TEXT,
                         now,
                     )
                 )
+            bad.extend(
+                {
+                    "table": table,
+                    "column": f"{column}{row['path'][1:]}",
+                    "id": row["id"],
+                    "value": _time.from_unix(int(row["v"])),
+                }
+                for row in _json_integers_after(db, table, key, column, now_unix)
+                if _is_past_instant(column, str(row["path"]), row["key"])
+            )
     return bad
 
 
@@ -149,8 +207,13 @@ def _email_domains(db: seahaven.Db, _now: str) -> Rows:
     return [
         row
         for row in db.rows("SELECT id, email FROM customers WHERE email IS NOT NULL ORDER BY id")
-        if str(row["email"]).lower().rsplit("@", 1)[-1] in DENIED_EMAIL_DOMAINS
+        if _denied_domain(str(row["email"]).lower().rsplit("@", 1)[-1])
     ]
+
+
+def _denied_domain(domain: str) -> bool:
+    """A denied domain or any subdomain of one (`mail.yahoo.com`)."""
+    return any(domain == denied or domain.endswith(f".{denied}") for denied in DENIED_EMAIL_DOMAINS)
 
 
 def _cliche_names(db: seahaven.Db, _now: str) -> Rows:
@@ -187,19 +250,24 @@ INVARIANTS: tuple[tuple[str, Check], ...] = (
         "no overlapping cycle periods",
         _sql(
             "SELECT a.id AS a, b.id AS b FROM invoices a JOIN invoices b"
-            " ON a.parent_subscription = b.parent_subscription AND a.id < b.id"
+            " ON b.parent_subscription = a.parent_subscription AND b.x_seq > a.x_seq"
             " WHERE a.billing_reason = 'subscription_cycle'"
             " AND b.billing_reason = 'subscription_cycle'"
             " AND a.status <> 'void' AND b.status <> 'void'"
-            # A trial-end invoice bills the NEW period while each later renewal is labelled
-            # with the period just ended, so a converted trial's first two cycle invoices
-            # share a span by the world's own rule (small_co Phase 3); the trial-end
-            # invoice is left out of the comparison.
-            " AND a.created IS NOT (SELECT trial_end FROM subscriptions WHERE id ="
-            " a.parent_subscription)"
-            " AND b.created IS NOT (SELECT trial_end FROM subscriptions WHERE id ="
-            " b.parent_subscription)"
-            " AND a.period_start < b.period_end AND b.period_start < a.period_end ORDER BY a.id"
+            " AND a.period_start < b.period_end AND b.period_start < a.period_end"
+            # A declared world gap (https://github.com/Kiln-AI/stripe_world/issues/12): a
+            # renewal bills the period that just ended, but the invoice a trial's end makes is
+            # stamped with the new period, so the renewal after it repeats that span exactly.
+            # That one pair is allowed, and nothing else: an identical span, the trial-end
+            # invoice first, the very next live cycle invoice second.
+            " AND NOT (a.created = (SELECT trial_end FROM subscriptions s"
+            " WHERE s.id = a.parent_subscription)"
+            " AND b.period_start = a.period_start AND b.period_end = a.period_end"
+            " AND b.x_seq = (SELECT MIN(n.x_seq) FROM invoices n"
+            " WHERE n.parent_subscription = a.parent_subscription"
+            " AND n.billing_reason = 'subscription_cycle' AND n.status <> 'void'"
+            " AND n.x_seq > a.x_seq))"
+            " ORDER BY a.id, b.id"
         ),
     ),
     (

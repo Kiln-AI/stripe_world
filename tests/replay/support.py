@@ -21,17 +21,25 @@ CATALOG_AT = "2026-01-05T09:00:00.000Z"
 
 
 @contextmanager
-def blank() -> Iterator[seahaven.Instance]:
+def blank(setup_sql: str | None = None) -> Iterator[seahaven.Instance]:
     """A blank instance opened as the company builders open theirs."""
-    with world.instance(None, now=NOW, clock_mode="fixed", startup={"livemode": False}) as inst:
+    with world.instance(
+        None, now=NOW, clock_mode="fixed", startup={"livemode": False}, setup_sql=setup_sql
+    ) as inst:
         yield inst
 
 
 class Story:
     """One account, one monthly $12 price, a timeline to `NOW`, and the subscription driver."""
 
-    def __init__(self, ctx: seahaven.Ctx, hooks: Hooks | None = None) -> None:
-        accounts.install_account(ctx, accounts.WRENFIELD)
+    def __init__(
+        self,
+        ctx: seahaven.Ctx,
+        hooks: Hooks | None = None,
+        *,
+        account: accounts.CompanyAccount = accounts.WRENFIELD,
+    ) -> None:
+        accounts.install_account(ctx, account)
         self.timeline = Timeline(ctx, until=NOW)
         self.client = Client()
         self.subs = Subscriptions(self.timeline, self.client, hooks or NoHooks())
@@ -87,6 +95,38 @@ class Story:
             self.client.add_card(ctx, self.ids[f"{key}.customer"], card, exp=(6, 2030))
 
         self.timeline.add(at, f"swap card {key}", run)
+
+    def refund(self, at: str, key: str, amount: int) -> None:
+        """At `at`: refund `amount` of the customer's latest succeeded charge."""
+
+        def run(ctx: seahaven.Ctx) -> None:
+            charge = self.client.latest_charge(ctx, self.ids[f"{key}.customer"])
+            self.client.refund(ctx, charge["id"], amount=amount)
+
+        self.timeline.add(at, f"refund {key}", run)
+
+    def one_off(self, at: str, key: str, card: Card, amount: int = 4900) -> None:
+        """At `at`: a payment intent for the customer, confirmed with `card` added for it (a
+        dispute test card opens its dispute here)."""
+
+        def run(ctx: seahaven.Ctx) -> None:
+            customer = self.ids[f"{key}.customer"]
+            pm = self.client.add_card(ctx, customer, card, exp=(9, 2029), default=False)
+            self.client.call(
+                ctx,
+                "POST",
+                "/v1/payment_intents",
+                {
+                    "amount": amount,
+                    "currency": "usd",
+                    "customer": customer,
+                    "payment_method": pm,
+                    "confirm": True,
+                    "payment_method_types": ["card"],
+                },
+            )
+
+        self.timeline.add(at, f"one-off payment {key}", run)
 
 
 def rows(inst: seahaven.Instance, sql: str, *params: Any) -> list[dict[str, Any]]:

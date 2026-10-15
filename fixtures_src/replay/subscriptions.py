@@ -9,8 +9,9 @@ from fixtures_src.replay import engine
 from fixtures_src.replay.cards import DECLINING_CODE
 from fixtures_src.replay.client import Client
 from fixtures_src.replay.clock import plus
-from fixtures_src.replay.timeline import Timeline
+from fixtures_src.replay.timeline import FixtureBuildError, Timeline
 
+from seahaven_stripe_world import _time
 from seahaven_stripe_world.billing.subscription_lifecycle import RENEWING_STATUSES
 
 __all__ = ["Hooks", "NoHooks", "Subscriptions", "finalize_when_due"]
@@ -19,7 +20,12 @@ _STOPPED = ("canceled", "incomplete_expired", "paused")
 
 
 class Hooks(Protocol):
-    def before_boundary(self, ctx: seahaven.Ctx, sub_id: str, n: int) -> None: ...
+    def before_boundary(self, ctx: seahaven.Ctx, sub_id: str, n: int) -> None:
+        """`n` is the number this boundary takes if it renews. A boundary this hook abandons (by
+        moving the period or stopping the subscription) uses no number: the next boundary is
+        offered the same `n` again."""
+        ...
+
     def after_boundary(self, ctx: seahaven.Ctx, sub_id: str, n: int) -> None: ...
     def on_open_invoice(self, ctx: seahaven.Ctx, sub_id: str, invoice_id: str) -> None: ...
 
@@ -98,9 +104,7 @@ def finalize_when_due(
 
 
 def _iso(value: str | int) -> str:
-    if isinstance(value, int):
-        return plus("1970-01-01T00:00:00.000Z", seconds=value)
-    return value
+    return _time.from_unix(value) if isinstance(value, int) else value
 
 
 class Subscriptions:
@@ -145,7 +149,13 @@ class Subscriptions:
             and latest["status"] == "open"
             and latest["next_payment_attempt"] is not None
         ):
-            self._schedule("retry", sub_id, latest["next_payment_attempt"], self._retry)
+            invoice_id = str(latest["id"])
+            self._schedule(
+                "retry",
+                sub_id,
+                latest["next_payment_attempt"],
+                lambda sub, when: self._retry(sub, invoice_id, when),
+            )
         if (
             latest["status"] == "draft"
             and latest["auto_advance"]
@@ -218,14 +228,15 @@ class Subscriptions:
                 return
             if _period_end(ctx, sub_id) != when:
                 return  # stale: the period moved since this was scheduled
-            self._boundaries[sub_id] += 1
-            n = self._boundaries[sub_id]
+            # `n` counts boundaries that ran: one the before hook abandons uses up no number.
+            n = self._boundaries[sub_id] + 1
             self.hooks.before_boundary(ctx, sub_id, n)
             if self._status_of(ctx, sub_id) not in RENEWING_STATUSES:
                 return
             if _period_end(ctx, sub_id) != when:
                 return
             renewed = engine.renew(ctx, sub_id)
+            self._boundaries[sub_id] = n
             self.hooks.after_boundary(ctx, sub_id, n)
             latest = _invoice(ctx, renewed["latest_invoice"])
             if (
@@ -238,17 +249,25 @@ class Subscriptions:
 
         return run
 
-    def _retry(self, sub_id: str, when: str) -> Callable[[seahaven.Ctx], None]:
+    def _retry(self, sub_id: str, invoice_id: str, when: str) -> Callable[[seahaven.Ctx], None]:
+        """The automatic retry of `invoice_id` due at `when`. Nothing when the invoice was paid
+        meanwhile, or when a later attempt moved its retry. An invoice still open that is no
+        longer its subscription's latest stops the build: its remaining retries would be lost."""
+
         def run(ctx: seahaven.Ctx) -> None:
-            sub = ctx.db.one("SELECT latest_invoice FROM subscriptions WHERE id = ?", sub_id)
-            invoice = _invoice(ctx, None if sub is None else sub["latest_invoice"])
-            if (
-                invoice is None
-                or invoice["status"] != "open"
-                or invoice["next_payment_attempt"] != when
-            ):
+            invoice = _invoice(ctx, invoice_id)
+            if invoice is None or invoice["status"] != "open":
                 return
-            invoice_id = str(invoice["id"])
+            sub = ctx.db.one("SELECT latest_invoice FROM subscriptions WHERE id = ?", sub_id)
+            latest = None if sub is None else sub["latest_invoice"]
+            if latest != invoice_id:
+                raise FixtureBuildError(
+                    f"retry of {invoice_id} at {when}: it is still open but no longer"
+                    f" {sub_id}'s latest invoice ({latest}), so its remaining retries would be"
+                    " dropped"
+                )
+            if invoice["next_payment_attempt"] != when:
+                return
             attempt = int(invoice["attempt_count"]) + 1
             if self.hooks.on_retry(ctx, sub_id, invoice_id, attempt):
                 self.client.pay_invoice(ctx, invoice_id)

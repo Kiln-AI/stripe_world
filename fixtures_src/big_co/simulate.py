@@ -145,6 +145,8 @@ class Catalog:
             client.call(ctx, "POST", f"/v1/products/{self.products[key]}", {"active": False})
 
     def _switch25(self, ctx: seahaven.Ctx, client: Client) -> None:
+        # 25% off once, not big_co.md §2's 3 repeating months: this world never ends a repeating
+        # discount (https://github.com/Kiln-AI/stripe_world/issues/13), so none is used.
         client.call(
             ctx,
             "POST",
@@ -152,9 +154,8 @@ class Catalog:
             {
                 "id": "SWITCH25",
                 "percent_off": 25.0,
-                "duration": "repeating",
-                "duration_in_months": 3,
-                "name": "Competitive switch: 25% off 3 months",
+                "duration": "once",
+                "name": "Competitive switch: 25% off the first invoice",
             },
         )
 

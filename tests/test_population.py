@@ -4,11 +4,20 @@ import random
 import re
 
 from fixtures_src.big_co.loose_ends import scripted
-from fixtures_src.big_co.population import NOW, Prospect, company_key, draw_population
+from fixtures_src.big_co.population import (
+    NOW,
+    Prospect,
+    _trade_coupon,
+    company_key,
+    draw_population,
+)
 from fixtures_src.big_co.shape import SHAPE, TIERS
 from fixtures_src.replay import cards
 from fixtures_src.replay.checks import DENIED_EMAIL_DOMAINS, DENIED_NAMES
 from fixtures_src.replay.clock import plus
+from fixtures_src.replay.people import CITIES, FIRST_NAMES, LAST_NAMES, TRADE_WORDS
+
+CRM_ID = r"006\d{12}"  # one format for every CRM record id, drawn or scripted
 
 
 def _draw(seed: int) -> list[Prospect]:
@@ -93,8 +102,9 @@ def test_organic_signups_follow_the_sales_motion() -> None:
             assert p.trial == "none" and p.onboarding == "onboarding_enterprise"
             assert p.enterprise_rate is not None and 7000 <= p.enterprise_rate <= 9500
         if p.tier in ("business", "enterprise"):
-            (key,) = p.metadata
+            ((key, crm),) = p.metadata.items()
             assert key in ("crm_account_id", "CRM ID", "crmAccountId")
+            assert re.fullmatch(CRM_ID, crm)
         if p.card is cards.AUTH_REQUIRED:
             assert p.trial == "none"
 
@@ -127,3 +137,36 @@ def test_loose_ends_are_fixed() -> None:
     keys = [p.key for p in scripted(SHAPE)]
     assert len(keys) == len(set(keys)) and all(k.startswith("le_") for k in keys)
     assert all(p.scripted and p.cohort == "loose_end" for p in scripted(SHAPE))
+
+
+def test_loose_ends_carry_the_same_crm_ids() -> None:
+    crm = [p.metadata["crm_account_id"] for p in scripted(SHAPE) if p.metadata]
+    assert crm and all(re.fullmatch(CRM_ID, value) for value in crm)
+
+
+def test_every_company_is_in_the_market() -> None:
+    """HVAC, plumbing and electrical contractors and their close kin (functional spec §5)."""
+    trades = r"plumbing|heating|air|hvac|cooling|climate|comfort|electric\w*|mechanical|drain"
+    for p in _draw(11):
+        if not p.tax_exempt:
+            assert re.search(rf"\b({trades})\b", p.company.lower()), p.company
+    for word in ("Roofing", "Pest Control", "Garage Doors", "Home Services"):
+        assert word not in TRADE_WORDS
+
+
+def test_association_coupons_match_whole_words() -> None:
+    assert _trade_coupon("Prairie Mechanical") is None
+    assert _trade_coupon("Prairie Electric") == "RMEC10"
+    assert _trade_coupon("Summit Heating & Air") == "FRHA10"
+    assert _trade_coupon("Talbot Electrical Services") == "RMEC10"
+    assert _trade_coupon("Ahn & Sons Plumbing & Heating") == "MSPG10"
+    assert _trade_coupon("Cedar Creek Drain & Sewer Co.") == "MSPG10"
+
+
+def test_the_pools_are_the_specified_size() -> None:
+    """replay.md §4: about 200 first and last names and about 150 real cities, none repeated."""
+    assert len(set(FIRST_NAMES)) == len(FIRST_NAMES) >= 190
+    assert len(set(LAST_NAMES)) == len(LAST_NAMES) >= 190
+    assert len({(c.city, c.state) for c in CITIES}) == len(CITIES) >= 145
+    assert all(re.fullmatch(r"\d{5}", c.postal_code) for c in CITIES)
+    assert all(re.fullmatch(r"[2-9]\d{2}", c.area_code) for c in CITIES)

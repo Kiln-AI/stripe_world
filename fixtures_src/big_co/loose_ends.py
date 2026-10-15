@@ -17,7 +17,7 @@ A beat is `(kind, at, *args)`; `Lives` runs them instead of the random draws:
 from dataclasses import replace
 from typing import Any
 
-from fixtures_src.big_co.population import Interval, Prospect, Tier, Trial
+from fixtures_src.big_co.population import Interval, Prospect, Tier, Trial, crm_id
 from fixtures_src.big_co.shape import SERVICES, Shape
 from fixtures_src.replay import cards
 from fixtures_src.replay.cards import Card
@@ -248,7 +248,7 @@ def scripted(shape: Shape) -> list[Prospect]:
         replace(
             p,
             phone=f"+1{_AREA[str(p.address['state'])]}55501{10 + i:02d}",
-            metadata={"crm_account_id": f"006{8100000000 + i:010d}"} if p.metadata else {},
+            metadata={"crm_account_id": crm_id(810000000000 + i)} if p.metadata else {},
         )
         for i, p in enumerate(out)
     ]

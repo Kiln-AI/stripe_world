@@ -146,8 +146,8 @@ Three fixtures ship, all frozen at `2026-09-01T14:00:00.000Z`:
 | Fixture | What | Mode | File |
 |---|---|---|---|
 | `empty` | The schema and the sandbox account, nothing else | live | 0.6 MB |
-| `small_co` | Wrenfield Labs: 45 hand-written customers of a two-person tutoring-tools company | test | 1.7 MB |
-| `big_co` | Ostrander Systems: about 380 simulated business customers of a field-service SaaS company over 18 months | test | 23.0 MB |
+| `small_co` | Wrenfield Labs: 45 hand-written customers of a two-person tutoring-tools company | test | 1.8 MB |
+| `big_co` | Ostrander Systems: about 380 simulated business customers of a field-service SaaS company over 18 months | test | 23.7 MB |
 
 A company fixture is opened in the mode its account was made in; asking for the other mode is
 refused at instance creation. Each is built by `fixtures_src/generate.py`, which replays its
@@ -262,7 +262,7 @@ THIRD_PARTY_LICENSES.md
 .github/workflows/ci.yml                # the check list, on every push to main and every PR
 src/seahaven_stripe_world/
   world.py                              # the World object
-  startup.py                            # per-instance account (livemode startup option)
+  startup.py                            # the account row -> ctx.state; the mode rule
   openenv_app.py                        # the ASGI app `seahaven serve` builds
   errors.py  stripe_errors.py           # the two error systems
   _ids.py  _time.py  _json.py  _seq.py  # shared helpers

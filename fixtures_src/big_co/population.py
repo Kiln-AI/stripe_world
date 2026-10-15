@@ -2,6 +2,7 @@
 
 import math
 import random
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
@@ -12,7 +13,16 @@ from fixtures_src.replay import cards, people
 from fixtures_src.replay.cards import Card
 from fixtures_src.replay.clock import plus
 
-__all__ = ["Interval", "Prospect", "Tier", "Trial", "company_key", "draw_population", "iso"]
+__all__ = [
+    "Interval",
+    "Prospect",
+    "Tier",
+    "Trial",
+    "company_key",
+    "crm_id",
+    "draw_population",
+    "iso",
+]
 
 # generate.NOW; repeated rather than imported so this package does not import the recipe module.
 NOW = "2026-09-01T14:00:00.000Z"
@@ -88,14 +98,24 @@ def _parse(value: str) -> datetime:
     return datetime.fromisoformat(value)
 
 
+# The trade-association coupons (big_co.md §3), by the words in a company's name naming its trade.
+_ASSOCIATION_WORDS = (
+    ("MSPG10", frozenset({"plumbing", "drain", "sewer"})),
+    (
+        "FRHA10",
+        frozenset({"hvac", "heating", "air", "comfort", "cooling", "climate", "conditioning"}),
+    ),
+    ("RMEC10", frozenset({"electric", "electrical"})),
+)
+
+
 def _trade_coupon(company: str) -> str | None:
-    lowered = company.lower()
-    if "plumbing" in lowered or "drain" in lowered:
-        return "MSPG10"
-    if any(w in lowered for w in ("hvac", "heating", "air", "comfort")):
-        return "FRHA10"
-    if "electric" in lowered:
-        return "RMEC10"
+    """The association coupon for the company's trade, matched on whole words: "Prairie" is not
+    "air"."""
+    words = set(re.findall(r"[a-z]+", company.lower()))
+    for coupon, trade in _ASSOCIATION_WORDS:
+        if words & trade:
+            return coupon
     return None
 
 
@@ -104,9 +124,14 @@ def _tier(rng: random.Random, shape: Shape) -> Tier:
     return cast(Tier, rng.choices(names, weights=[shape.tier_mix[t] for t in names])[0])
 
 
+def crm_id(number: int) -> str:
+    """A CRM record id: `006` and 12 digits, the one format every sales-led account carries."""
+    return f"006{number:012d}"
+
+
 def _crm_metadata(rng: random.Random) -> dict[str, str]:
     key = rng.choices(("crm_account_id", "CRM ID", "crmAccountId"), weights=(70, 20, 10))[0]
-    return {key: f"006{rng.randint(10**11, 10**12 - 1)}"}
+    return {key: crm_id(rng.randint(10**11, 10**12 - 1))}
 
 
 def company_key(name: str) -> str:

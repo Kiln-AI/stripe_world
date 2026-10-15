@@ -27,7 +27,7 @@ def test_the_empty_fixture_is_committed(world: seahaven.World) -> None:
     empty = fixtures["empty"]
     assert empty.now == FIXTURE_NOW
     assert empty.parent_id is None
-    assert empty.description.startswith("Schema only.")
+    assert empty.description.startswith("The schema and the sandbox account, in live mode")
 
 
 def test_an_instance_of_empty_has_the_schema_and_no_rows(instance: seahaven.Instance) -> None:

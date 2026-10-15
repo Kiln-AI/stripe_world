@@ -86,13 +86,23 @@ def open_account(ctx: seahaven.Ctx, *, livemode: bool | None) -> dict[str, Any]:
     state: dict[str, Any] = {
         "id": account_id,
         "livemode": mode,
-        "name": obj["settings"]["dashboard"]["display_name"],
-        "country": obj["country"],
-        "default_currency": obj["default_currency"],
+        "name": _field(obj, account_id, "settings", "dashboard", "display_name"),
+        "country": _field(obj, account_id, "country"),
+        "default_currency": _field(obj, account_id, "default_currency"),
         "object": obj,
     }
     state.update(settings)
     return state
+
+
+def _field(obj: dict[str, Any], account_id: str, *path: str) -> Any:
+    """The account object's field at `path`, which must be present (its value may be null)."""
+    value: Any = obj
+    for key in path:
+        if not isinstance(value, dict) or key not in value:
+            raise seahaven.WorldBug(f"account {account_id} object has no {'.'.join(path)}")
+        value = value[key]
+    return value
 
 
 @world.instance_startup

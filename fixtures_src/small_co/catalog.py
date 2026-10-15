@@ -2,18 +2,15 @@
 its own step at its own instant. `Catalog` maps keys to the ids the API returns, so the cast can
 name a price by key."""
 
-from datetime import datetime
 from typing import Any
 
 import seahaven
 from fixtures_src.replay.client import Client
 from fixtures_src.replay.timeline import Timeline
 
+from seahaven_stripe_world import _time
+
 __all__ = ["Catalog"]
-
-
-def _unix(iso: str) -> int:
-    return int(datetime.fromisoformat(iso).timestamp())
 
 
 def _price(
@@ -90,6 +87,8 @@ class Catalog:
                 )["id"]
 
         def launch_coupon(ctx: seahaven.Ctx) -> None:
+            # 50% off the first invoice, not small_co.md §2's 3 repeating months: this world
+            # never ends a repeating discount (https://github.com/Kiln-AI/stripe_world/issues/13).
             client.call(
                 ctx,
                 "POST",
@@ -97,10 +96,9 @@ class Catalog:
                 {
                     "id": "LAUNCH",
                     "percent_off": 50,
-                    "duration": "repeating",
-                    "duration_in_months": 3,
-                    "redeem_by": _unix("2026-03-31T23:59:59+00:00"),
-                    "name": "Launch: 50% off for 3 months",
+                    "duration": "once",
+                    "redeem_by": _time.to_unix("2026-03-31T23:59:59.000Z"),
+                    "name": "Launch: 50% off your first invoice",
                 },
             )
 
