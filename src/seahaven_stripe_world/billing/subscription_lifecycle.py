@@ -41,6 +41,7 @@ __all__ = [
     "apply_pending_update_on_seti_success",
     "apply_update",
     "cancel_subscription",
+    "clear_pending_cancel",
     "create_subscription",
     "expire_incomplete",
     "on_invoice_paid",
@@ -405,6 +406,7 @@ def create_subscription(ctx: seahaven.Ctx, params: dict[str, Any]) -> dict[str, 
     )
     tax_specs = _tax_specs(ctx, params.get("default_tax_rates", []))
 
+    cancel_requested = bool(_cancel_requested(params))
     # The row, with a provisional status the invoice outcome settles.
     sub_id = _ids.stripe_id(ctx, "sub_", timestamp=now)
     cols: dict[str, Any] = {
@@ -415,8 +417,16 @@ def create_subscription(ctx: seahaven.Ctx, params: dict[str, Any]) -> dict[str, 
         "billing_schedules": "[]",
         "cancel_at": params.get("cancel_at"),
         "cancel_at_period_end": int(params.get("cancel_at_period_end", False)),
+        # A cancel scheduled at creation carries the update's shape: the
+        # request's instant and reason (unprobed at create).
+        "canceled_at": now if cancel_requested else None,
         "cancellation_details": _json.dumps(
-            {"comment": None, "feedback": None, "feedback_option": None, "reason": None}
+            {
+                "comment": None,
+                "feedback": None,
+                "feedback_option": None,
+                "reason": "cancellation_requested" if cancel_requested else None,
+            }
         ),
         "collection_method": collection_method,
         "currency": currency,
@@ -468,6 +478,13 @@ def create_subscription(ctx: seahaven.Ctx, params: dict[str, Any]) -> dict[str, 
                 "subscription": sub_id,
                 "tax_rates": _json.dumps(list(item.get("tax_rates", []))),
             },
+        )
+    if params.get("cancel_at_period_end") and "cancel_at" not in params:
+        # The flag's instant is the first period's end, as on update (where
+        # an explicit `cancel_at` wins too); the period exists only once the
+        # items do.
+        ctx.db.execute(
+            "UPDATE subscriptions SET cancel_at = ? WHERE id = ?", _period_end(ctx, sub_id), sub_id
         )
 
     sub_row = _re_read(ctx, sub_id)
@@ -1207,6 +1224,18 @@ def _roll_periods_to(ctx: seahaven.Ctx, sub_id: str, start: str) -> None:
 _CANCELED_OK = frozenset(("cancellation_details", "metadata"))
 
 
+def _cancel_requested(params: Mapping[str, Any]) -> bool | None:
+    """True when the request schedules a cancellation (`cancel_at_period_end:
+    true` or a `cancel_at` instant), False when it clears one
+    (`cancel_at_period_end: false` or `cancel_at: ""`), None when it names
+    neither cancel field."""
+    if params.get("cancel_at_period_end") or params.get("cancel_at") is not None:
+        return True
+    if "cancel_at_period_end" in params or "cancel_at" in params:
+        return False
+    return None
+
+
 def apply_update(ctx: seahaven.Ctx, sub_id: str, params: dict[str, Any]) -> dict[str, Any]:
     row = _re_read(ctx, sub_id)
     # The pre-change wire body, serialized before this call's writes (the
@@ -1272,6 +1301,20 @@ def apply_update(ctx: seahaven.Ctx, sub_id: str, params: dict[str, Any]) -> dict
         sets["cancel_at"] = _period_end(ctx, sub_id) if params["cancel_at_period_end"] else None
     if "cancel_at" in params:
         sets["cancel_at"] = params["cancel_at"]
+    cancel_requested = _cancel_requested(params)
+    if cancel_requested is not None:
+        # Recorded (cassette 12 steps 12/13): scheduling the cancel stamps
+        # `canceled_at` with the request's instant; un-scheduling nulls it.
+        # Only a request naming the cancel fields stamps — a metadata or
+        # items update while the cancel is pending leaves the stamp as it
+        # was (unprobed: the docs' "most recent update request" is read as
+        # the most recent cancel request).
+        sets["canceled_at"] = now if cancel_requested else None
+        if not cancel_requested:
+            # `cancel_at: ""` alone clears the flag too, so a cleared
+            # cancel can never still fire at the boundary (unprobed; the
+            # schedule release clears both the same way).
+            sets["cancel_at_period_end"] = 0
     if "collection_method" in params:
         sets["collection_method"] = params["collection_method"]
     if "days_until_due" in params:
@@ -1324,15 +1367,17 @@ def apply_update(ctx: seahaven.Ctx, sub_id: str, params: dict[str, Any]) -> dict
         )
     if "trial_settings" in params:
         sets["trial_settings"] = _json.dumps(_canonical_trial_settings(params["trial_settings"]))
-    if "cancellation_details" in params or "cancel_at_period_end" in params:
+    if "cancellation_details" in params or cancel_requested is not None:
         # Recorded (Phase 12): scheduling the cancel stamps the reason and
         # un-scheduling clears the stamp; a simultaneously supplied
         # `cancellation_details` merges over the stamp (its own `reason`
-        # key, if any, wins).
+        # key, if any, wins). A `cancel_at` timestamp schedules the same
+        # cancel by another spelling, so it stamps the same reason
+        # (unprobed).
         current = _load_dict(row["cancellation_details"])
         details = dict(params.get("cancellation_details") or {})
-        if "cancel_at_period_end" in params and "reason" not in details:
-            details["reason"] = "cancellation_requested" if params["cancel_at_period_end"] else None
+        if cancel_requested is not None and "reason" not in details:
+            details["reason"] = "cancellation_requested" if cancel_requested else None
         sets["cancellation_details"] = _json.dumps({**current, **details})
     if sets:
         assignments = ", ".join(f"{column} = ?" for column in sets)
@@ -1806,6 +1851,23 @@ def emit_proration_side_effects(
         _set_status(ctx, sub_id, "past_due")
 
 
+def clear_pending_cancel(ctx: seahaven.Ctx, sub_id: str) -> None:
+    """Drop a scheduled cancellation outside the update path (the schedule
+    release): `cancel_at` and the flag clear, and a cancel still pending
+    loses its `canceled_at` and reason the way reactivation does (cassette
+    12 step 13). An ended subscription keeps its stamps — they record the
+    cancel that happened, not one that is scheduled."""
+    row = _re_read(ctx, sub_id)
+    sets: dict[str, Any] = {"cancel_at": None, "cancel_at_period_end": 0}
+    pending = row["cancel_at"] is not None or row["cancel_at_period_end"]
+    if pending and row["status"] not in TERMINAL_STATUSES:
+        sets["canceled_at"] = None
+        details = _load_dict(row["cancellation_details"])
+        sets["cancellation_details"] = _json.dumps({**details, "reason": None})
+    assignments = ", ".join(f"{column} = ?" for column in sets)
+    ctx.db.execute(f"UPDATE subscriptions SET {assignments} WHERE id = ?", *sets.values(), sub_id)
+
+
 def cancel_subscription(
     ctx: seahaven.Ctx,
     sub_id: str,
@@ -2198,11 +2260,12 @@ def advance_cycle(ctx: seahaven.Ctx, sub_id: str) -> dict[str, Any]:
         )
         return _re_read(ctx, sub_id)
     if row["cancel_at_period_end"]:
-        # The deferred cancel fires: no renewal invoice is generated.
+        # The deferred cancel fires: no renewal invoice is generated. The
+        # stored `canceled_at` is the request's instant and stands (spec3:
+        # it reflects "the time of the most recent update request, not the
+        # end of the subscription period"); only `ended_at` is the boundary.
         ctx.db.execute(
-            "UPDATE subscriptions SET status = 'canceled', canceled_at = ?, ended_at = ?"
-            " WHERE id = ?",
-            boundary,
+            "UPDATE subscriptions SET status = 'canceled', ended_at = ? WHERE id = ?",
             boundary,
             sub_id,
         )

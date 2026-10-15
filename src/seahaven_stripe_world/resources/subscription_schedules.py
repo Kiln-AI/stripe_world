@@ -862,11 +862,9 @@ def release(ctx: seahaven.Ctx, req: Request) -> dict[str, Any]:
 
     # Unlink the subscription from the schedule
     if released_sub is not None:
-        update_sql = "UPDATE subscriptions SET schedule = NULL"
+        ctx.db.execute("UPDATE subscriptions SET schedule = NULL WHERE id = ?", released_sub)
         if not preserve_cancel:
-            update_sql += ", cancel_at = NULL, cancel_at_period_end = 0"
-        update_sql += " WHERE id = ?"
-        ctx.db.execute(update_sql, released_sub)
+            subscription_lifecycle.clear_pending_cancel(ctx, released_sub)
 
     ctx.db.execute(
         "UPDATE subscription_schedules SET status = 'released', released_at = ?,"

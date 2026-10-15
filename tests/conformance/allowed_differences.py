@@ -73,6 +73,18 @@ def _both_boolean(recorded: Any, replayed: Any) -> bool:
     return isinstance(recorded, bool) and isinstance(replayed, bool)
 
 
+def _is_unix_seconds(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _same_stamp_shape(recorded: Any, replayed: Any) -> bool:
+    """A timestamp pair whose values differ only by clock: both instants, or
+    both null. A null against an instant is a stamp one side never wrote."""
+    if recorded is None and replayed is None:
+        return True
+    return _is_unix_seconds(recorded) and _is_unix_seconds(replayed)
+
+
 def _both_cus_ids(recorded: Any, replayed: Any) -> bool:
     """A `customer`-shaped reference field: both sides are freshly minted ids
     of the same shape, never equal — the `**.id` rule on the field it lands
@@ -590,7 +602,10 @@ ALLOWED_DIFFERENCES: list[AllowedDifference] = [
         "**.*_at",
         "Every `*_at` timestamp field (`canceled_at`, `available_on`-shaped "
         "windows, …) differs for the same clock reason as `created`. Suffix-"
-        "matched per field so a blanket `**` cannot hide a non-timestamp.",
+        "matched per field so a blanket `**` cannot hide a non-timestamp, and "
+        "predicated to two instants or two nulls: a stamp on one side only is "
+        "a real difference, never a clock one.",
+        predicate=_same_stamp_shape,
     ),
     AllowedDifference(
         "**.invoice_prefix",
@@ -1792,6 +1807,15 @@ ALLOWED_DIFFERENCES: list[AllowedDifference] = [
         predicate=lambda recorded, replayed: (
             recorded in ("draft", "uncollectible") and replayed == "uncollectible"
         ),
+    ),
+    AllowedDifference(
+        "body.status_transitions.marked_uncollectible_at",
+        "The same invoice_now cancel collapse, on its stamp: the still-draft "
+        "final invoice live answers has not been marked yet (null), while "
+        "this world's collapsed invoice already carries the instant it was "
+        "marked uncollectible.",
+        scenario="01_proration_half_cent",
+        predicate=lambda recorded, replayed: recorded is None and _is_unix_seconds(replayed),
     ),
 ]
 

@@ -42,6 +42,8 @@ uses. The user kept the name (decision 5 below).
      - Elena's $49 item stays pending. The spec said "for her 2026-09-10 renewal"; the guide no
        longer says it will be swept there, and declares the gap.
    - **#15, `canceled_at` is null on a cancel-at-period-end request.** Declared in the guide.
+     **Fixed since:** the world now stamps `canceled_at` at the request, both fixtures were
+     rebuilt, and the guide no longer lists the gap.
 2. **Disputes come only from one-off payments** confirmed through `POST /v1/payment_intents` on
    a dispute test card. `big_co` already worked this way.
    - small_co.md row 45 had Grace buy Studio annual on the dispute card. Now she buys it with a

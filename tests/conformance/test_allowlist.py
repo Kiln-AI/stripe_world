@@ -33,6 +33,16 @@ def test_suffix_segments_match_timestamps() -> None:
     assert not match_path("**.*_at", "body.attack")
 
 
+def test_a_timestamp_may_differ_by_clock_but_not_by_presence() -> None:
+    """Two instants, or two nulls, are the clock difference `**.*_at`
+    declares; a stamp written on one side only is a real one."""
+    assert allowed("body.canceled_at", 1789948565, 1788271200, "any") is not None
+    assert allowed("body.data[0].canceled_at", None, None, "any") is not None
+    assert allowed("body.canceled_at", 1789948565, None, "any") is None
+    assert allowed("body.canceled_at", None, 1788271200, "any") is None
+    assert allowed("body.canceled_at", True, False, "any") is None
+
+
 def test_bracketed_segments_are_literal_not_a_character_class() -> None:
     """A pattern segment pinning a list index matches that index and nothing
     else — `data[3]` is three literal characters in brackets, not fnmatch's

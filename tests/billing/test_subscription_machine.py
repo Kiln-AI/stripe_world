@@ -5,10 +5,13 @@ and the seti-confirm resume are unit-tested only (declared structural
 differences — no attachable decline token exists, and live's minted seti
 reads canceled within moments)."""
 
+import json
+
 import pytest
 import seahaven
 
 from conftest import BLANK_NOW, api_read, api_write
+from seahaven_stripe_world import _time
 from seahaven_stripe_world.errors import StripeToolError
 
 pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW, clock_mode="fixed")
@@ -55,6 +58,16 @@ def events_of(instance: seahaven.Instance) -> list[str]:
     return [
         row["type"] for row in instance.inspect().rows("SELECT type FROM events ORDER BY x_seq")
     ]
+
+
+def last_update_previous(instance: seahaven.Instance) -> dict:
+    """The newest `customer.subscription.updated` event's previous_attributes."""
+    last = one_row(
+        instance,
+        "SELECT data FROM events WHERE type = 'customer.subscription.updated'"
+        " ORDER BY x_seq DESC LIMIT 1",
+    )
+    return json.loads(last["data"])["previous_attributes"]
 
 
 # --- creation branches -----------------------------------------------------------------
@@ -492,21 +505,99 @@ def test_canceled_subscription_updates_follow_the_recorded_rule(
         )
 
 
+@pytest.mark.seahaven(fixture=None, now=BLANK_NOW, clock_mode="tick")
 def test_cancel_at_period_end_stamps_without_moving_the_status(instance: seahaven.Instance) -> None:
+    """Cassette 12 steps 12/13, on a ticking clock so the request's instant
+    is distinguishable from the creation's."""
     cus, _, price = setup_catalog(instance)
     sub = call(
         instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": price}]}
     )
     body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"cancel_at_period_end": True})
+    requested_at = _time.to_unix(instance.clock.iso())
     assert body["status"] == "active"
     assert body["cancel_at_period_end"] is True
     assert body["cancel_at"] == body["items"]["data"][0]["current_period_end"]
-    # Recorded: scheduling the cancel stamps the reason; un-scheduling clears it
+    # Recorded: scheduling the cancel stamps the request's instant and the
+    # reason; the subscription has not ended
+    assert requested_at > sub["created"]
+    assert body["canceled_at"] == requested_at
+    assert body["ended_at"] is None
     assert body["cancellation_details"]["reason"] == "cancellation_requested"
+    assert last_update_previous(instance)["canceled_at"] is None
+    # an update that names no cancel field leaves the stamp alone
+    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"metadata": {"k": "v"}})
+    assert body["canceled_at"] == requested_at
+    assert "canceled_at" not in last_update_previous(instance)
+    # Recorded: un-scheduling clears all three
     body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"cancel_at_period_end": False})
     assert body["cancel_at_period_end"] is False
     assert body["cancel_at"] is None
+    assert body["canceled_at"] is None
     assert body["cancellation_details"]["reason"] is None
+    assert last_update_previous(instance)["canceled_at"] == requested_at
+
+
+def test_a_cancel_at_instant_stamps_the_request_like_the_flag(instance: seahaven.Instance) -> None:
+    cus, _, price = setup_catalog(instance)
+    sub = call(
+        instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": price}]}
+    )
+    cancel_at = sub["items"]["data"][0]["current_period_end"] - 86_400
+    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"cancel_at": cancel_at})
+    assert body["cancel_at"] == cancel_at
+    assert body["cancel_at_period_end"] is False
+    assert body["canceled_at"] == _time.to_unix(BLANK_NOW)
+    assert body["cancellation_details"]["reason"] == "cancellation_requested"
+    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"cancel_at": ""})
+    assert body["cancel_at"] is None
+    assert body["canceled_at"] is None
+    assert body["cancellation_details"]["reason"] is None
+    # the empty-string clear drops a flag-scheduled cancel whole
+    call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"cancel_at_period_end": True})
+    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"cancel_at": ""})
+    assert body["cancel_at_period_end"] is False
+    assert body["cancel_at"] is None
+    assert body["canceled_at"] is None
+    assert body["cancellation_details"]["reason"] is None
+
+
+def test_create_with_cancel_at_period_end_schedules_the_cancel(
+    instance: seahaven.Instance,
+) -> None:
+    cus, _, price = setup_catalog(instance)
+    body = call(
+        instance,
+        "POST",
+        "/v1/subscriptions",
+        {"customer": cus, "items": [{"price": price}], "cancel_at_period_end": True},
+    )
+    assert body["status"] == "active"
+    assert body["cancel_at_period_end"] is True
+    assert body["cancel_at"] == body["items"]["data"][0]["current_period_end"]
+    assert body["canceled_at"] == body["created"]
+    assert body["cancellation_details"]["reason"] == "cancellation_requested"
+    plain = call(
+        instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": price}]}
+    )
+    assert plain["cancel_at"] is None
+    assert plain["canceled_at"] is None
+    assert plain["cancellation_details"]["reason"] is None
+
+
+def test_create_with_a_cancel_at_instant_stamps_the_request(instance: seahaven.Instance) -> None:
+    cus, _, price = setup_catalog(instance)
+    cancel_at = _time.to_unix(BLANK_NOW) + 7 * 86_400
+    body = call(
+        instance,
+        "POST",
+        "/v1/subscriptions",
+        {"customer": cus, "items": [{"price": price}], "cancel_at": cancel_at},
+    )
+    assert body["cancel_at"] == cancel_at
+    assert body["cancel_at_period_end"] is False
+    assert body["canceled_at"] == body["created"]
+    assert body["cancellation_details"]["reason"] == "cancellation_requested"
 
 
 def test_pause_collection_leaves_the_status_unchanged(instance: seahaven.Instance) -> None:
@@ -570,6 +661,9 @@ def test_advance_cycle_renews_and_the_deferred_cancel_fires(instance: seahaven.I
     ended = subscription_row(instance, sub["id"])
     assert ended["status"] == "canceled"
     assert one_row(instance, "SELECT count(*) AS n FROM invoices")["n"] == before
+    # the request's instant stands; only the end is the boundary
+    assert ended["canceled_at"] == BLANK_NOW
+    assert ended["ended_at"] == item_after["current_period_end"]
 
 
 def test_expire_incomplete_voids_and_is_terminal(instance: seahaven.Instance) -> None:

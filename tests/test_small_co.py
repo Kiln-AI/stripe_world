@@ -139,6 +139,7 @@ def test_priya_cancels_at_period_end(instance: seahaven.Instance) -> None:
     priya = _subscription(instance, "priya@natarajanpiano.com")
     assert (priya["status"], priya["cancel_at_period_end"]) == ("active", True)
     assert priya["cancel_at"] == _period_end(priya) == _unix("2026-09-05T18:40")
+    assert priya["canceled_at"] == _unix("2026-08-11T20:15")  # when she asked
     assert priya["cancellation_details"]["comment"] == "Retiring from teaching"
 
 

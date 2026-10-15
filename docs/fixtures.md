@@ -25,7 +25,7 @@ there; every other timestamp column is canonical UTC text.
 
 ## Known gaps
 
-Both companies were replayed through this world as it is, so they show four of its known
+Both companies were replayed through this world as it is, so they show three of its known
 differences from Stripe. Each is filed as an issue. The fixtures avoid it where they can and live
 with it where they cannot:
 
@@ -44,10 +44,6 @@ with it where they cannot:
   ([#14](https://github.com/Kiln-AI/stripe_world/issues/14)). A one-time fee is invoiced on its
   own invoice, as `small_co`'s first setup fee was. An item left pending stays pending: nothing
   bills it at the customer's next renewal.
-- **`canceled_at` is null on a cancel-at-period-end request**
-  ([#15](https://github.com/Kiln-AI/stripe_world/issues/15)). A subscription set to cancel at
-  period end shows `canceled_at: null` until it ends. One that has ended is stamped with its
-  period end, not the instant the customer asked.
 
 Disputes in both fixtures come from one-off payments: this world opens a dispute test card's
 dispute when it confirms a PaymentIntent. A subscription's own charges are never disputed.
@@ -250,8 +246,8 @@ ORDER BY si.current_period_end, s.id
 ]
 ```
 
-A subscription set to end at its period end (`canceled_at` stays null until then:
-[#15](https://github.com/Kiln-AI/stripe_world/issues/15)).
+A subscription set to end at its period end. `canceled_at` is the instant the customer asked, as
+on Stripe; `cancel_at` is when it ends.
 
 ```sql landmark=small_co/cancel_at_period_end
 SELECT c.name, c.email, s.cancel_at, s.canceled_at,
@@ -265,7 +261,7 @@ ORDER BY s.id
 
 ```json rows
 [
-  {"name": "Priya Natarajan", "email": "priya@natarajanpiano.com", "cancel_at": "2026-09-05T18:40:00.000Z", "canceled_at": null, "feedback": "other", "comment": "Retiring from teaching"}
+  {"name": "Priya Natarajan", "email": "priya@natarajanpiano.com", "cancel_at": "2026-09-05T18:40:00.000Z", "canceled_at": "2026-08-11T20:15:00.000Z", "feedback": "other", "comment": "Retiring from teaching"}
 ]
 ```
 

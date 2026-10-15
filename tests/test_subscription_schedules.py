@@ -550,9 +550,11 @@ def test_release_with_preserve_cancel_date(instance: seahaven.Instance) -> None:
         {"preserve_cancel_date": True},
     )
     assert released["status"] == "released"
-    # The subscription keeps its cancel_at_period_end
+    # The subscription keeps its cancel_at_period_end and the request's stamp
     sub = call(instance, "GET", f"/v1/subscriptions/{sub_id}")
     assert sub["cancel_at_period_end"] is True
+    assert sub["canceled_at"] is not None
+    assert sub["cancellation_details"]["reason"] == "cancellation_requested"
 
 
 def test_release_without_preserve_cancel_date_clears_it(instance: seahaven.Instance) -> None:
@@ -583,6 +585,10 @@ def test_release_without_preserve_cancel_date_clears_it(instance: seahaven.Insta
     assert released["status"] == "released"
     sub = call(instance, "GET", f"/v1/subscriptions/{sub_id}")
     assert sub["cancel_at_period_end"] is False
+    # cleared the way reactivation clears it (cassette 12 step 13)
+    assert sub["cancel_at"] is None
+    assert sub["canceled_at"] is None
+    assert sub["cancellation_details"]["reason"] is None
 
 
 def test_release_refuses_not_started(instance: seahaven.Instance) -> None:
