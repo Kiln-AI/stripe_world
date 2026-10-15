@@ -255,19 +255,30 @@ INVARIANTS: tuple[tuple[str, Check], ...] = (
             " AND b.billing_reason = 'subscription_cycle'"
             " AND a.status <> 'void' AND b.status <> 'void'"
             " AND a.period_start < b.period_end AND b.period_start < a.period_end"
-            # A declared world gap (https://github.com/Kiln-AI/stripe_world/issues/12): a
-            # renewal bills the period that just ended, but the invoice a trial's end makes is
-            # stamped with the new period, so the renewal after it repeats that span exactly.
-            # That one pair is allowed, and nothing else: an identical span, the trial-end
-            # invoice first, the very next live cycle invoice second.
-            " AND NOT (a.created = (SELECT trial_end FROM subscriptions s"
-            " WHERE s.id = a.parent_subscription)"
-            " AND b.period_start = a.period_start AND b.period_end = a.period_end"
-            " AND b.x_seq = (SELECT MIN(n.x_seq) FROM invoices n"
-            " WHERE n.parent_subscription = a.parent_subscription"
-            " AND n.billing_reason = 'subscription_cycle' AND n.status <> 'void'"
-            " AND n.x_seq > a.x_seq))"
             " ORDER BY a.id, b.id"
+        ),
+    ),
+    (
+        # An invoice's own period looks back while its lines bill ahead, so only the lines show
+        # a subscription item billed twice for one span: two of its non-proration lines that bill
+        # something, on invoices not voided, whose periods overlap. A $0 line bills nothing: a
+        # trial's `Free trial` line may overlap the first paid period when the trial ends early.
+        "no overlapping item line periods",
+        _sql(
+            "WITH billed AS MATERIALIZED (SELECT i.id AS invoice, i.x_seq AS seq, l.key AS idx,"
+            " json_extract(l.value, '$.parent.subscription_item_details.subscription_item')"
+            " AS item, json_extract(l.value, '$.period.start') AS start_at,"
+            " json_extract(l.value, '$.period.end') AS end_at"
+            " FROM invoices i, json_each(i.lines) l WHERE i.status <> 'void'"
+            " AND json_extract(l.value, '$.parent.subscription_item_details.subscription_item')"
+            " IS NOT NULL"
+            " AND COALESCE(json_extract(l.value,"
+            " '$.parent.subscription_item_details.proration'), 0) = 0"
+            " AND json_extract(l.value, '$.amount') <> 0)"
+            " SELECT a.invoice AS a, b.invoice AS b, a.item AS item FROM billed a JOIN billed b"
+            " ON b.item = a.item AND (b.seq > a.seq OR (b.seq = a.seq AND b.idx > a.idx))"
+            " WHERE a.start_at < b.end_at AND b.start_at < a.end_at"
+            " ORDER BY a.invoice, b.invoice, a.item"
         ),
     ),
     (

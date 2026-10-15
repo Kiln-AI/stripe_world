@@ -179,6 +179,9 @@ Both fixtures satisfy these at build time; the build fails on the first violatio
 - No charge is refunded past its captured amount.
 - Every invoice's lines sum to its subtotal.
 - No two cycle invoices on one subscription have overlapping periods.
+- No subscription item is billed twice for one span: no two of its non-proration invoice lines
+  with a non-zero amount, on invoices not voided, have overlapping periods. A $0 line, such as a
+  trial's free line, bills nothing.
 - Causality: no object is older than what it depends on (a charge after its payment intent, a
   dispute or refund after its charge, a balance transaction after what it settles).
 - Each customer's `balance` equals the ending balance of their latest customer balance transaction

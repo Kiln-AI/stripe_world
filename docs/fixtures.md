@@ -25,16 +25,10 @@ there; every other timestamp column is canonical UTC text.
 
 ## Known gaps
 
-Both companies were replayed through this world as it is, so they show three of its known
+Both companies were replayed through this world as it is, so they show two of its known
 differences from Stripe. Each is filed as an issue. The fixtures avoid it where they can and live
 with it where they cannot:
 
-- **A renewal bills the period that just ended**
-  ([#12](https://github.com/Kiln-AI/stripe_world/issues/12)). Each renewal invoice's line
-  repeats the service period the previous invoice billed, so the current period is on no line.
-  The invoice a trial's end creates is stamped with the new period, so the renewal after it has
-  the same span. The fixtures' consistency check allows that one pair, an identical span on a
-  trial-end invoice and the renewal right after it, and no other overlap.
 - **Repeating coupons never end, and `times_redeemed` stays 0**
   ([#13](https://github.com/Kiln-AI/stripe_world/issues/13)). No coupon in either fixture is
   `repeating`: the launch and switch-over codes are 50% and 25% off the first invoice

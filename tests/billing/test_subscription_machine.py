@@ -5,6 +5,7 @@ and the seti-confirm resume are unit-tested only (declared structural
 differences — no attachable decline token exists, and live's minted seti
 reads canceled within moments)."""
 
+import itertools
 import json
 
 import pytest
@@ -1418,6 +1419,17 @@ def test_advance_cycles_trial_at_the_boundary(instance: seahaven.Instance) -> No
     assert item["current_period_start"] == 1798761600
     invoice = one_row(instance, "SELECT * FROM invoices WHERE id = ?", fresh["latest_invoice"])
     assert invoice["billing_reason"] == "subscription_cycle"
+    # its line bills the new period; its own period looks back over the
+    # trial (issue #12), so the renewal after it cannot share that span
+    (line,) = json.loads(invoice["lines"])
+    assert line["period"] == {
+        "end": item["current_period_end"],
+        "start": item["current_period_start"],
+    }
+    assert (invoice["period_start"], invoice["period_end"]) == (
+        BLANK_NOW,
+        _time.from_unix(1798761600),
+    )
 
 
 # --- the round-7 corrections ----------------------------------------------------------------
@@ -1454,7 +1466,9 @@ def test_keep_as_draft_pause_leaves_the_renewal_in_draft(instance: seahaven.Inst
 
 def test_send_invoice_trial_end_bills_the_new_period(instance: seahaven.Instance) -> None:
     """Roll-then-invoice, exactly as the PM branch: the draft's line spans
-    the NEW period, never the trial span the $0 invoice already covered."""
+    the NEW period, never the trial span the $0 invoice already covered —
+    while the invoice's own period looks back over the trial it closes
+    (issue #12; unprobed, declared in the code)."""
     import json
 
     cus, _pm, price = setup_catalog(instance)
@@ -1470,26 +1484,35 @@ def test_send_invoice_trial_end_bills_the_new_period(instance: seahaven.Instance
             "days_until_due": 30,
         },
     )
+    # Backdate the trial's period: under the frozen clock it would start at
+    # the very `now` it ends at, and the look-back span would be degenerate.
+    trial_began = "2026-08-20T14:00:00.000Z"
+    with instance.bulk() as ctx:
+        ctx.db.execute(
+            "UPDATE subscription_items SET current_period_start = ? WHERE subscription = ?",
+            trial_began,
+            sub["id"],
+        )
     body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": "now"})
     invoice = one_row(instance, "SELECT * FROM invoices WHERE id = ?", body["latest_invoice"])
     line = json.loads(invoice["lines"])[0]
     item = body["items"]["data"][0]
+    assert item["current_period_start"] == _time.to_unix(BLANK_NOW)
     assert line["period"]["start"] == item["current_period_start"]
     assert line["period"]["end"] == item["current_period_end"]
     assert (
         line["period"]["end"] - line["period"]["start"] == 30 * 86_400
     )  # one month, not the trial
-    # the period columns are ISO in storage; unix on the wire
-    from seahaven_stripe_world import _time
-
-    assert _time.to_unix(invoice["period_start"]) == item["current_period_start"]
-    assert _time.to_unix(invoice["period_end"]) == item["current_period_end"]
+    # the period columns are ISO in storage: the trial's start to the end
+    # moment, where the new period opens
+    assert (invoice["period_start"], invoice["period_end"]) == (trial_began, BLANK_NOW)
 
 
 def test_resume_cycle_invoice_bills_the_parked_anchor_period(instance: seahaven.Instance) -> None:
     """Unprobed on live (declared in the code): the resume's open cycle
-    invoice bills `[anchor, anchor + interval)` — not the paused trial span
-    — with non-degenerate period columns."""
+    invoice's line bills `[anchor, anchor + interval)` — not the paused
+    trial span — while its own period looks back from the paused period's
+    start to the resume moment (issue #12)."""
     import json
 
     _, _, price = setup_catalog(instance)
@@ -1506,16 +1529,23 @@ def test_resume_cycle_invoice_bills_the_parked_anchor_period(instance: seahaven.
         },
     )
     call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": "now"})
+    # Backdate the paused period: under the frozen clock it starts at the
+    # very `now` the resume happens at, and the look-back span would be
+    # degenerate.
+    paused_since = "2026-08-20T14:00:00.000Z"
+    with instance.bulk() as ctx:
+        ctx.db.execute(
+            "UPDATE subscription_items SET current_period_start = ? WHERE subscription = ?",
+            paused_since,
+            sub["id"],
+        )
     body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}/resume", {})
     invoice = one_row(instance, "SELECT * FROM invoices WHERE id = ?", body["latest_invoice"])
     assert invoice["status"] == "open"
     line = json.loads(invoice["lines"])[0]
     assert line["period"]["start"] == body["created"]  # the parked `now` anchor
     assert line["period"]["end"] - line["period"]["start"] == 30 * 86_400
-    from seahaven_stripe_world import _time
-
-    assert _time.to_unix(invoice["period_start"]) == line["period"]["start"]
-    assert _time.to_unix(invoice["period_end"]) == line["period"]["end"]
+    assert (invoice["period_start"], invoice["period_end"]) == (paused_since, BLANK_NOW)
 
 
 def test_a_deleted_coupons_parked_discount_keeps_billing(instance: seahaven.Instance) -> None:
@@ -1793,3 +1823,245 @@ def test_advance_cycle_refuses_the_itemless_state(instance: seahaven.Instance) -
     call(instance, "DELETE", f"/v1/subscription_items/{sub['items']['data'][0]['id']}")
     with instance.bulk() as ctx, pytest.raises(seahaven.WorldBug):
         lifecycle.advance_cycle(ctx, sub["id"])
+
+
+# --- issue #12: a renewal bills the period that opens at its boundary ----------------------
+
+
+def _sub_lines(invoice: dict) -> list[dict]:
+    """The subscription-item lines of an invoice row (its stored JSON)."""
+    return [
+        line
+        for line in json.loads(invoice["lines"])
+        if (line["parent"]["subscription_item_details"] or {}).get("subscription_item")
+    ]
+
+
+def _renew(instance: seahaven.Instance, sub_id: str) -> dict:
+    """One boundary through the walker; answers the renewal invoice row."""
+    import seahaven_stripe_world.billing.subscription_lifecycle as lifecycle
+
+    with instance.bulk() as ctx:
+        fresh = lifecycle.advance_cycle(ctx, sub_id)
+    return one_row(instance, "SELECT * FROM invoices WHERE id = ?", fresh["latest_invoice"])
+
+
+def test_a_renewal_bills_the_period_starting_at_its_boundary(instance: seahaven.Instance) -> None:
+    """Licensed prices bill in advance: each renewal's line spans
+    `[boundary, next boundary)` — the item's new period — while the
+    invoice's own period looks back over the interval that just closed."""
+    cus, _, price = setup_catalog(instance)
+    sub = call(
+        instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": price}]}
+    )
+    created = one_row(instance, "SELECT * FROM invoices WHERE id = ?", sub["latest_invoice"])
+    billed = [_sub_lines(created)[0]["period"]]
+    for _ in range(2):
+        before = one_row(
+            instance, "SELECT * FROM subscription_items WHERE subscription = ?", sub["id"]
+        )
+        renewal = _renew(instance, sub["id"])
+        after = one_row(
+            instance, "SELECT * FROM subscription_items WHERE subscription = ?", sub["id"]
+        )
+        (line,) = _sub_lines(renewal)
+        assert after["current_period_start"] == before["current_period_end"]
+        assert line["period"] == {
+            "end": _time.to_unix(after["current_period_end"]),
+            "start": _time.to_unix(after["current_period_start"]),
+        }
+        assert (renewal["period_start"], renewal["period_end"]) == (
+            before["current_period_start"],
+            before["current_period_end"],
+        )
+        billed.append(line["period"])
+    # back to back: each line opens where the previous one closed
+    for earlier, later in itertools.pairwise(billed):
+        assert later["start"] == earlier["end"]
+
+
+def test_a_draft_renewal_keeps_its_line_through_a_rebuild(instance: seahaven.Instance) -> None:
+    """An unpaid subscription's renewal stays draft, and a draft edit
+    rebuilds its lines from the items' current periods: the subscription
+    line keeps its `il_` id and its period, because the item periods
+    already say what the renewal billed."""
+    _cus, _pm, price = setup_catalog(instance)
+    sub_id = _unpaid_subscription(instance, price)
+    renewal = _renew(instance, sub_id)
+    assert renewal["status"] == "draft"
+    (line,) = _sub_lines(renewal)
+    edited = call(
+        instance,
+        "POST",
+        f"/v1/invoices/{renewal['id']}/add_lines",
+        {"lines": [{"amount": 500, "description": "Onboarding"}]},
+    )
+    assert [entry["amount"] for entry in edited["lines"]["data"]] == [500, 2000]
+    rebuilt = _sub_lines(one_row(instance, "SELECT * FROM invoices WHERE id = ?", renewal["id"]))
+    assert [(entry["id"], entry["period"]) for entry in rebuilt] == [(line["id"], line["period"])]
+
+
+def test_a_proration_after_a_renewal_credits_the_renewal_line(
+    instance: seahaven.Instance,
+) -> None:
+    """A change after a renewal credits the period the renewal billed, so
+    the credit links back to the renewal's own line — both the update's
+    pending credit and the cancel credit swept onto the final invoice."""
+    cus, _, price = setup_catalog(instance)
+    dearer = call(
+        instance,
+        "POST",
+        "/v1/prices",
+        {
+            "product": call(instance, "GET", f"/v1/prices/{price}")["product"],
+            "unit_amount": 3000,
+            "currency": "cad",
+            "recurring": {"interval": "month"},
+        },
+    )["id"]
+    sub = call(
+        instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": price}]}
+    )
+    renewal = _renew(instance, sub["id"])
+    (line,) = _sub_lines(renewal)
+    call(
+        instance,
+        "POST",
+        f"/v1/subscriptions/{sub['id']}",
+        {"items": [{"id": sub["items"]["data"][0]["id"], "price": dearer}]},
+    )
+    pending = call(instance, "GET", "/v1/invoiceitems", {"customer": cus, "pending": True})["data"]
+    credit = next(item for item in pending if item["amount"] < 0)
+    assert credit["proration_details"]["credited_items"]["invoice_line_item_details"] == {
+        "invoice": renewal["id"],
+        "invoice_line_items": [line["id"]],
+    }
+
+    other = call(
+        instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": price}]}
+    )
+    renewal = _renew(instance, other["id"])
+    (line,) = _sub_lines(renewal)
+    canceled = call(
+        instance,
+        "DELETE",
+        f"/v1/subscriptions/{other['id']}",
+        {"prorate": True, "invoice_now": True},
+    )
+    final = call(instance, "GET", f"/v1/invoices/{canceled['latest_invoice']}")
+    (swept,) = final["lines"]["data"]
+    assert swept["parent"]["subscription_item_details"]["proration_details"] == {
+        "credited_items": {"invoice": renewal["id"], "invoice_line_items": [line["id"]]}
+    }
+
+
+@pytest.mark.parametrize("renewed", [False, True], ids=["first period", "after a renewal"])
+def test_a_cancel_credit_links_its_own_subscription_line(
+    instance: seahaven.Instance, renewed: bool
+) -> None:
+    """Two subscriptions of one customer on one price bill periods that end
+    at the same instant. Canceling the older one credits ITS line: the
+    plain credit records no parent, so the cancel scopes the lookup to the
+    item it credited instead of the customer's newest matching line."""
+    cus, _, price = setup_catalog(instance)
+    first, second = (
+        call(instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": price}]})
+        for _ in range(2)
+    )
+    billed = one_row(instance, "SELECT * FROM invoices WHERE id = ?", first["latest_invoice"])
+    if renewed:
+        billed = _renew(instance, first["id"])
+        _renew(instance, second["id"])
+    (line,) = _sub_lines(billed)
+    canceled = call(
+        instance,
+        "DELETE",
+        f"/v1/subscriptions/{first['id']}",
+        {"prorate": True, "invoice_now": True},
+    )
+    final = call(instance, "GET", f"/v1/invoices/{canceled['latest_invoice']}")
+    (swept,) = final["lines"]["data"]
+    details = swept["parent"]["subscription_item_details"]
+    assert (details["subscription"], details["subscription_item"]) == (
+        first["id"],
+        first["items"]["data"][0]["id"],
+    )
+    assert details["proration_details"] == {
+        "credited_items": {"invoice": billed["id"], "invoice_line_items": [line["id"]]}
+    }
+
+
+def test_a_cancel_credit_swept_later_keeps_its_identity(instance: seahaven.Instance) -> None:
+    """A prorate-only cancel leaves its plain credit pending. The invoice
+    that sweeps it later cannot know the item, so its line falls back to
+    the customer-wide match on the period end (unprobed): it names its
+    `ii_`, subscription and item, and keeps its `il_` across a draft edit."""
+    cus, _, price = setup_catalog(instance)
+    sub = call(
+        instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": price}]}
+    )
+    created = one_row(instance, "SELECT * FROM invoices WHERE id = ?", sub["latest_invoice"])
+    (billed,) = _sub_lines(created)
+    call(instance, "DELETE", f"/v1/subscriptions/{sub['id']}", {"prorate": True})
+    invoice = call(
+        instance,
+        "POST",
+        "/v1/invoices",
+        {"customer": cus, "pending_invoice_items_behavior": "include"},
+    )
+    (credit,) = invoice["lines"]["data"]
+    details = credit["parent"]["subscription_item_details"]
+    assert details["invoice_item"].startswith("ii_")
+    assert (details["subscription"], details["subscription_item"]) == (
+        sub["id"],
+        sub["items"]["data"][0]["id"],
+    )
+    assert details["proration_details"] == {
+        "credited_items": {"invoice": created["id"], "invoice_line_items": [billed["id"]]}
+    }
+    edited = call(
+        instance,
+        "POST",
+        f"/v1/invoices/{invoice['id']}/add_lines",
+        {"lines": [{"amount": 500, "description": "Onboarding"}]},
+    )
+    assert [line["id"] for line in edited["lines"]["data"]][1:] == [credit["id"]]
+
+
+def test_a_cancel_credit_names_its_item_when_no_plain_line_billed_it(
+    instance: seahaven.Instance,
+) -> None:
+    """An item added mid-period is billed by a proration, never by a plain
+    line, so its cancel credit has no line to link back to — but the final
+    invoice's line still names the subscription and the item it credits."""
+    cus, _, price = setup_catalog(instance)
+    extra = call(
+        instance,
+        "POST",
+        "/v1/prices",
+        {
+            "product": call(instance, "GET", f"/v1/prices/{price}")["product"],
+            "unit_amount": 3000,
+            "currency": "cad",
+            "recurring": {"interval": "month"},
+        },
+    )["id"]
+    sub = call(
+        instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": price}]}
+    )
+    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"items": [{"price": extra}]})
+    added = next(item["id"] for item in body["items"]["data"] if item["price"]["id"] == extra)
+    canceled = call(
+        instance,
+        "DELETE",
+        f"/v1/subscriptions/{sub['id']}",
+        {"prorate": True, "invoice_now": True},
+    )
+    final = call(instance, "GET", f"/v1/invoices/{canceled['latest_invoice']}")
+    by_item = {
+        line["parent"]["subscription_item_details"]["subscription_item"]: line
+        for line in final["lines"]["data"]
+    }
+    details = by_item[added]["parent"]["subscription_item_details"]
+    assert details["subscription"] == sub["id"]
+    assert details["proration_details"] == {"credited_items": None}

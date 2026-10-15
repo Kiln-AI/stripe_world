@@ -850,8 +850,9 @@ def _cycle_invoice(
     """Create (and optionally finalize) one invoice over the subscription's
     current item periods, with the coupon and tax arithmetic applied. The
     invoice's own `period_*` columns default to the creation instant (the
-    recorded `subscription_create` shape); a renewal passes the boundary
-    interval it bills.
+    recorded `subscription_create` shape); a renewal or a trial end passes
+    the window it looks back over, which closes where its lines' period
+    opens.
 
     Callers that resolve discounts themselves (creation, which applies its
     once-coupons alongside the persisted ones) pass `discount_specs`; every
@@ -1091,18 +1092,19 @@ def trial_end_now(
         # because activation never waits on payment for send_invoice. Roll
         # first, invoice after, exactly as the PM branch: the line bills the
         # NEW period, never the trial span the $0 invoice already covered.
+        trial_start = _period_start(ctx, row["id"])
         _set_status(ctx, row["id"], "active")
         _roll_periods_to(ctx, row["id"], now)
-        period_end = _period_end(ctx, row["id"])
-        if period_end is not None:
+        if trial_start is not None:
             invoice = _cycle_invoice(
                 ctx,
                 row,
                 billing_reason=billing_reason,
                 auto_advance=True,
                 finalize=False,
-                period_start=now,
-                period_end=period_end,
+                # the trial it closes, as the PM branch's below (unprobed)
+                period_start=trial_start,
+                period_end=now,
             )
             _set_latest_invoice(ctx, row["id"], invoice["id"])
         # an itemless trial end bills nothing (the PM branch's ruling)
@@ -1122,10 +1124,10 @@ def trial_end_now(
         # spans the NEW period `[now, now + interval)`, and the row's
         # persisted discounts — including a once-coupon the trial parked —
         # apply to it and are consumed here.
+        trial_start = _period_start(ctx, row["id"])
         _set_status(ctx, row["id"], "active")
         _roll_periods_to(ctx, row["id"], now)
-        period_end = _period_end(ctx, row["id"])
-        if period_end is None:
+        if trial_start is None:
             # An itemless subscription (spec-blessed) has nothing to bill
             # and nothing to roll: the status moves and no invoice is
             # minted — the declared unrecorded ruling.
@@ -1143,8 +1145,13 @@ def trial_end_now(
             billing_reason=billing_reason,
             auto_advance=False,
             finalize=True,
-            period_start=now,
-            period_end=period_end,
+            # The invoice's own period looks back over the trial it closes,
+            # `[trial period start, now]` — the recorded subscription
+            # invoice rule (window start to the invoice moment), never the
+            # new period its line bills (unprobed: no trial-end invoice body
+            # is recorded; https://github.com/Kiln-AI/stripe_world/issues/12).
+            period_start=trial_start,
+            period_end=now,
         )
         # Latest before pay: `on_invoice_paid` keys on the subscription's
         # latest invoice, and the once-coupon consumption rides on it.
@@ -1910,28 +1917,31 @@ def cancel_subscription(
         _json.dumps(details),
         sub_id,
     )
-    if prorate or invoice_now:
+    if prorate:
         items = _items_of(ctx, sub_id)
         # The canceled row still reads `active` to the arithmetic below —
         # only the items' periods and the BILLED configurations matter.
         credited = _credited_for_items(ctx, sub_id, items)
-        plain_lines: list[proration.ProrationLine] = []
+        written: list[dict[str, Any]] = []
+        # Each plain credit's own item: the row records no parent, so the
+        # final invoice's line learns which line it reverses from here.
+        credit_items: dict[str, str] = {}
         for item in items:
             config = _billed_config(ctx, item, credited.get(item["id"]))
-            plain_lines.extend(
-                proration.proration_lines(
-                    [config],
-                    [],
-                    period_start=_time.to_unix(item["current_period_start"]),
-                    period_end=_time.to_unix(item["current_period_end"]),
-                    proration_date=_time.to_unix(now),
-                )
+            plain_lines = proration.proration_lines(
+                [config],
+                [],
+                period_start=_time.to_unix(item["current_period_start"]),
+                period_end=_time.to_unix(item["current_period_end"]),
+                proration_date=_time.to_unix(now),
             )
-        written: list[dict[str, Any]] = []
-        if plain_lines and prorate:
-            written = _write_proration_items(ctx, row, plain_lines, credited=credited, plain=True)
+            for credit in _write_proration_items(
+                ctx, row, plain_lines, credited=credited, plain=True
+            ):
+                written.append(credit)
+                credit_items[credit["id"]] = item["id"]
         if invoice_now:
-            _final_invoice_on_cancel(ctx, sub_id, row, attached=written)
+            _final_invoice_on_cancel(ctx, sub_id, row, attached=written, credit_items=credit_items)
     body = _serialize(ctx, _re_read(ctx, sub_id))
     events.emit_event(ctx, type="customer.subscription.deleted", obj=body)
     return body
@@ -1943,6 +1953,7 @@ def _final_invoice_on_cancel(
     row: Mapping[str, Any],
     *,
     attached: list[dict[str, Any]],
+    credit_items: Mapping[str, str],
 ) -> None:
     """The `invoice_now` final invoice, ONLY when this same call minted
     something to bill (recorded, cassette 01 — the customer's older pending
@@ -1982,7 +1993,7 @@ def _final_invoice_on_cancel(
         invoice["id"],
         *[item["id"] for item in attached],
     )
-    invoicing.rebuild_invoice_lines(ctx, invoice["id"])
+    invoicing.rebuild_invoice_lines(ctx, invoice["id"], credit_items=credit_items)
     invoice = _lookup.require_row(ctx, "invoices", "invoice", invoice["id"], param="invoice")
     _set_latest_invoice(ctx, sub_id, invoice["id"])
     invoicing.mark_uncollectible_invoice_draft(ctx, invoice["id"])
@@ -2087,8 +2098,13 @@ def resume_subscription(
         subscription_id=sub_id,
         auto_advance=False,
         days_until_due=row["days_until_due"],
-        period_start=anchor_target,
-        period_end=rolled[0].period_end,
+        # The invoice's own period looks back — `[current item period start,
+        # now]`, the recorded subscription invoice rule — rather than
+        # stamping the parked period its lines bill, which the next renewal
+        # would then share (unprobed;
+        # https://github.com/Kiln-AI/stripe_world/issues/12).
+        period_start=_period_start(ctx, sub_id) or now,
+        period_end=now,
     )
     if row["collection_method"] != "send_invoice":
         invoicing.finalize_invoice(ctx, invoice["id"])
@@ -2292,6 +2308,12 @@ def advance_cycle(ctx: seahaven.Ctx, sub_id: str) -> dict[str, Any]:
     # cell never performs.
     keep_draft = unpaid or (pause is not None and pause.get("behavior") == "keep_as_draft")
     previous_start = _period_start(ctx, sub_id)
+    # Roll first, invoice after (https://github.com/Kiln-AI/stripe_world/issues/12): a licensed
+    # price bills in advance, so the renewal's lines carry the period that STARTS at the
+    # boundary (unprobed — no renewal body is recorded; the trial-end paths' probed ordering
+    # applied). The item periods must already say so, because a draft renewal's rebuild, a
+    # later proration's credited back-link and the paid hook's update event all read them.
+    _roll_periods_to(ctx, sub_id, boundary)
     invoice = _cycle_invoice(
         ctx,
         row,
@@ -2299,9 +2321,11 @@ def advance_cycle(ctx: seahaven.Ctx, sub_id: str) -> dict[str, Any]:
         # The unpaid and kept-draft cases never auto-advance.
         auto_advance=not keep_draft,
         finalize=not keep_draft,
-        # The renewal bills the interval that just closed, not the instant
-        # it was generated at (the create invoice's recorded degenerate
-        # period is creation-specific).
+        # The invoice's own period looks back over the interval that just
+        # closed (the recorded rule: current window start to the invoice
+        # moment; Stripe's docs: a subscription invoice's period "looks back
+        # one period"), not the instant it was generated at — the create
+        # invoice's recorded degenerate period is creation-specific.
         period_start=previous_start,
         period_end=boundary,
     )
@@ -2316,7 +2340,6 @@ def advance_cycle(ctx: seahaven.Ctx, sub_id: str) -> dict[str, Any]:
         outcome = invoicing.pay_invoice(ctx, invoice["id"], sub_row=row)
         if outcome["outcome"] != "paid":
             _set_status(ctx, sub_id, "past_due")
-    _roll_periods_to(ctx, sub_id, boundary)
     return _re_read(ctx, sub_id)
 
 

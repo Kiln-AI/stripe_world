@@ -684,16 +684,32 @@ def create_invoice(
 
 
 def _billed_line_for_credit(
-    ctx: seahaven.Ctx, item: Mapping[str, Any]
+    ctx: seahaven.Ctx, item: Mapping[str, Any], subscription_item_id: str | None
 ) -> tuple[str | None, str | None, str | None, tuple[str, ...]] | None:
     """The identity a plain cancel credit's line carries (recorded, cassette
     01): the subscription, the item and the credited back-links of the
     non-proration line whose period the credit reverses — matched on the
-    period end, newest invoice first. None when nothing billed that period."""
-    invoices = ctx.db.rows(
-        "SELECT id, lines FROM invoices WHERE customer = ? ORDER BY x_seq DESC",
-        item["customer"],
-    )
+    period end, newest invoice first. None when nothing billed that period.
+
+    With `subscription_item_id` the match is that item's line only: another
+    item, of this subscription or another of the customer's, can bill a
+    period ending at the same instant. Without it (a credit swept by a later
+    invoice, which records no item) the match is customer-wide on the period
+    end alone — a known gap, not a probed reading: sibling items of one
+    subscription, or two subscriptions, ending on one boundary all link to
+    the newest invoice's first matching line, so such credits name the wrong
+    item and share one `il_` key in `rebuild_invoice_lines`."""
+    if subscription_item_id is None:
+        invoices = ctx.db.rows(
+            "SELECT id, lines FROM invoices WHERE customer = ? ORDER BY x_seq DESC",
+            item["customer"],
+        )
+    else:
+        invoices = ctx.db.rows(
+            "SELECT i.id, i.lines FROM invoices i JOIN subscription_items si"
+            " ON si.subscription = i.parent_subscription WHERE si.id = ? ORDER BY i.x_seq DESC",
+            subscription_item_id,
+        )
     want_end = _time.to_unix(item["period_end"])
     for invoice in invoices:
         for line in _load_list(invoice["lines"]):
@@ -704,6 +720,7 @@ def _billed_line_for_credit(
             period = line.get("period") or {}
             if (
                 isinstance(details, dict)
+                and subscription_item_id in (None, details.get("subscription_item"))
                 and details.get("proration") in (None, False, 0)
                 and period.get("end") == want_end
                 and details.get("subscription") is not None
@@ -717,13 +734,20 @@ def _billed_line_for_credit(
     return None
 
 
-def invoice_item_line(ctx: seahaven.Ctx, item: Mapping[str, Any]) -> ItemLine:
+def invoice_item_line(
+    ctx: seahaven.Ctx, item: Mapping[str, Any], *, credited_subscription_item: str | None = None
+) -> ItemLine:
     """One attached invoiceitem row as a line input: `pricing` names the
     one-off price behind the item (the recorded shape — an `amount+currency`
     create mints a price and product live, and so does this world). A
     proration row (recorded, cassette 01) additionally carries its
     subscription parent, its side's quantity and its credited back-links,
-    and the row amount IS the line amount (see `compute_totals`)."""
+    and the row amount IS the line amount (see `compute_totals`).
+
+    `credited_subscription_item` is the subscription item a plain cancel
+    credit reverses, which only the cancel that minted the row knows (the
+    row records no parent); see `_billed_line_for_credit` for a credit
+    swept without it."""
     pricing = _load_dict(item["pricing"])
     price_details = pricing.get("price_details")
     if not isinstance(price_details, dict):
@@ -753,7 +777,7 @@ def invoice_item_line(ctx: seahaven.Ctx, item: Mapping[str, Any]) -> ItemLine:
             # subscription, the item and the credited lines (recorded,
             # cassette 01) — reconstruct them from the period the credit
             # reverses: the non-proration line whose period ends with it.
-            enriched = _billed_line_for_credit(ctx, item)
+            enriched = _billed_line_for_credit(ctx, item, credited_subscription_item)
             if enriched is not None:
                 (
                     subscription_id,
@@ -761,6 +785,16 @@ def invoice_item_line(ctx: seahaven.Ctx, item: Mapping[str, Any]) -> ItemLine:
                     credited_invoice,
                     credited_line_ids,
                 ) = enriched
+            elif credited_subscription_item is not None:
+                # Nothing billed the period as a plain line (a proration
+                # billed it, say): the line still names its item, with no
+                # credited back-links.
+                owner = ctx.db.one(
+                    "SELECT subscription FROM subscription_items WHERE id = ?",
+                    credited_subscription_item,
+                )
+                subscription_item_id = credited_subscription_item
+                subscription_id = None if owner is None else owner["subscription"]
     return ItemLine(
         subscription_item_id=subscription_item_id,
         subscription_id=subscription_id,
@@ -806,7 +840,9 @@ def sweep_pending_items(
     )
 
 
-def _line_inputs_for(ctx: seahaven.Ctx, row: Mapping[str, Any]) -> list[ItemLine]:
+def _line_inputs_for(
+    ctx: seahaven.Ctx, row: Mapping[str, Any], credit_items: Mapping[str, str]
+) -> list[ItemLine]:
     """A draft's line inputs: its attached invoice items newest-first, then
     the subscription's items newest-first (the recorded collapse of the
     spec's three buckets into two — a later-added item is simply the newest
@@ -818,7 +854,7 @@ def _line_inputs_for(ctx: seahaven.Ctx, row: Mapping[str, Any]) -> list[ItemLine
     TERMINAL subscription's invoice bills no future period at all (the
     invoice_now cancel credit is the final invoice's only line)."""
     inputs = [
-        invoice_item_line(ctx, item)
+        invoice_item_line(ctx, item, credited_subscription_item=credit_items.get(item["id"]))
         for item in ctx.db.rows(
             "SELECT * FROM invoiceitems WHERE invoice = ? ORDER BY x_seq DESC", row["id"]
         )
@@ -862,19 +898,24 @@ def _invoice_tax_specs(ctx: seahaven.Ctx, row: Mapping[str, Any]) -> list[TaxRat
     return subscription_lifecycle._tax_specs(ctx, _load_list(row["default_tax_rates"]))
 
 
-def rebuild_invoice_lines(ctx: seahaven.Ctx, invoice_id: str) -> dict[str, Any]:
+def rebuild_invoice_lines(
+    ctx: seahaven.Ctx, invoice_id: str, *, credit_items: Mapping[str, str] | None = None
+) -> dict[str, Any]:
     """Recompute a draft's lines and totals from scratch — nothing is
     incremental (billing_engine §2) — while PRESERVING each line's `il_` id
     across the rebuild: a line is keyed by its source (the backing
     invoiceitem, or the subscription item plus its period), and a draft
     edit must answer the same ids it was given (recorded, cassette 13 step
     33 — the updated line keeps its id). A draft's `amount_due` mirrors the
-    recomputed total; finalization applies the customer balance over it."""
+    recomputed total; finalization applies the customer balance over it.
+
+    `credit_items` maps each plain cancel credit the caller attached to the
+    subscription item it reverses (see `invoice_item_line`)."""
     row = _lookup.require_row(ctx, "invoices", "invoice", invoice_id, param="invoice")
     if row["status"] != "draft":
         raise seahaven.WorldBug(f"rebuild_invoice_lines on a {row['status']!r} invoice")
     totals = compute_totals(
-        _line_inputs_for(ctx, row),
+        _line_inputs_for(ctx, row, credit_items or {}),
         currency=row["currency"],
         invoice_discounts=_invoice_discount_specs(ctx, row),
         tax_rates=_invoice_tax_specs(ctx, row),

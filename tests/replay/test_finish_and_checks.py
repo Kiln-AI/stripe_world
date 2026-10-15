@@ -1,5 +1,6 @@
 """The finishing steps, the checks, and the test cards (replay.md §4, §6, §7, §8)."""
 
+import itertools
 from collections.abc import Iterator
 
 import pytest
@@ -152,6 +153,16 @@ PLANTS: dict[str, tuple[str, tuple[str, ...]]] = {
             " ORDER BY i.x_seq DESC LIMIT 1)",
         ),
     ),
+    "an item billed twice": (
+        "no overlapping item line periods",
+        (
+            "UPDATE invoices SET lines = json_set(lines, '$[0].period.start',"
+            f" {_time.to_unix(START)}) WHERE id = (SELECT i.id"
+            " FROM invoices i JOIN subscriptions s ON s.id = i.parent_subscription"
+            " WHERE s.trial_end IS NULL AND i.billing_reason = 'subscription_cycle'"
+            " ORDER BY i.x_seq DESC LIMIT 1)",
+        ),
+    ),
     "charge before its intent": (
         "causality: charge after its payment intent",
         (f"UPDATE charges SET created = '{EARLIER}' WHERE payment_intent IS NOT NULL",),
@@ -289,50 +300,102 @@ def test_nothing_after_now_spares_the_forward_fields(tiny: seahaven.Instance) ->
     assert "nothing after NOW" not in _failing(tiny)
 
 
-def test_a_trial_end_invoice_may_share_its_span_with_the_next_renewal_only(
+def test_a_trial_end_invoice_looks_back_and_no_cycle_overlap_passes(
     tiny: seahaven.Instance,
 ) -> None:
-    """World gap #12: the converted trial's first two cycle invoices carry one span. That pair
-    passes; a span that is merely close, or a later renewal that overlaps, does not."""
-    (trial,) = rows(tiny, "SELECT id, trial_end FROM subscriptions WHERE trial_end IS NOT NULL")
+    """Issue #12: the converted trial's end invoice looks back over the trial, so the renewal
+    after it opens where it closes. Any overlap fails: the renewal's own span repeated (the
+    forward stamp a trial end used to carry), or a span that merely reaches into it."""
+    (trial,) = rows(
+        tiny, "SELECT id, trial_start, trial_end FROM subscriptions WHERE trial_end IS NOT NULL"
+    )
     cycle = rows(
         tiny,
         "SELECT id, created, period_start, period_end FROM invoices"
         " WHERE parent_subscription = ? AND billing_reason = 'subscription_cycle' ORDER BY x_seq",
         trial["id"],
     )
-    trial_end, renewal, later = cycle[0], cycle[1], cycle[2]
+    trial_end, renewal = cycle[0], cycle[1]
     assert trial_end["created"] == trial["trial_end"]
-    assert (renewal["period_start"], renewal["period_end"]) == (
-        trial_end["period_start"],
-        trial_end["period_end"],
+    assert (trial_end["period_start"], trial_end["period_end"]) == (
+        trial["trial_start"],
+        trial["trial_end"],
     )
+    assert renewal["period_start"] == trial_end["period_end"]
     assert "no overlapping cycle periods" not in _failing(tiny)
 
-    with blank() as other:  # the trial-end invoice's own span no longer matches the renewal's
+    with blank() as other:
         _tiny(other)
         _plant(
             other,
-            f"UPDATE invoices SET period_end = '{plus(trial_end['period_end'], hours=1)}'"
-            f" WHERE id = '{trial_end['id']}'",
-        )
-        assert _failing(other) == {"no overlapping cycle periods"}
-    with blank() as other:  # the trial-end span repeated by a renewal that is not the next one
-        _tiny(other)
-        _plant(
-            other,
-            "UPDATE invoices SET period_start = '2026-01-01T00:00:00.000Z',"
-            f" period_end = '2026-01-02T00:00:00.000Z' WHERE id = '{renewal['id']}'",
-            f"UPDATE invoices SET period_start = '{trial_end['period_start']}',"
-            f" period_end = '{trial_end['period_end']}' WHERE id = '{later['id']}'",
+            f"UPDATE invoices SET period_start = '{renewal['period_start']}',"
+            f" period_end = '{renewal['period_end']}' WHERE id = '{trial_end['id']}'",
         )
         assert _failing(other) == {"no overlapping cycle periods"}
     _plant(
         tiny,
-        f"UPDATE invoices SET period_start = '{trial_end['period_start']}'"
-        f" WHERE id = '{later['id']}'",
+        f"UPDATE invoices SET period_end = '{plus(trial_end['period_end'], hours=1)}'"
+        f" WHERE id = '{trial_end['id']}'",
     )
     assert _failing(tiny) == {"no overlapping cycle periods"}
+
+
+def test_each_renewal_line_bills_the_period_after_the_last(tiny: seahaven.Instance) -> None:
+    """Issue #12: every non-proration line of an item opens where the item's previous one closed.
+    The shape the old ordering minted — a renewal line repeating the period the item's last line
+    already billed — fails the line check, and only it: the invoice-level periods never see it."""
+    (sub,) = rows(
+        tiny,
+        "SELECT id FROM subscriptions WHERE trial_end IS NULL AND status = 'active'"
+        " ORDER BY x_seq LIMIT 1",
+    )
+    lines = rows(
+        tiny,
+        "SELECT i.id AS invoice, json_extract(l.value, '$.period.start') AS start_at,"
+        " json_extract(l.value, '$.period.end') AS end_at FROM invoices i, json_each(i.lines) l"
+        " WHERE i.parent_subscription = ? ORDER BY i.x_seq, l.key",
+        sub["id"],
+    )
+    assert len(lines) >= 3
+    for earlier, later in itertools.pairwise(lines):
+        assert later["start_at"] == earlier["end_at"]
+    first, renewal = lines[0], lines[1]
+    _plant(
+        tiny,
+        "UPDATE invoices SET lines = json_set(lines, '$[0].period',"
+        f" json_object('end', {first['end_at']}, 'start', {first['start_at']}))"
+        f" WHERE id = '{renewal['invoice']}'",
+    )
+    assert _failing(tiny) == {"no overlapping item line periods"}
+
+
+def test_an_early_trial_end_passes_the_line_check() -> None:
+    """A trial ended early bills its first paid period from that moment, inside the span the $0
+    `Free trial` line covered. That line bills nothing, so the pair is no item billed twice."""
+    with blank() as inst:
+        with inst.bulk() as ctx:
+            story = Story(ctx)
+            story.signup(START, "t", trial_days=14)
+
+            def end_trial(ctx: seahaven.Ctx) -> None:
+                sub = story.ids["t"]
+                story.client.call(ctx, "POST", f"/v1/subscriptions/{sub}", {"trial_end": "now"})
+                story.subs.follow(ctx, sub)
+
+            story.timeline.add(plus(START, days=5), "end trial t", end_trial)
+            story.timeline.run()
+            finish.refresh_balance_statuses(ctx, now=NOW)
+            finish.trim_events(ctx, now=NOW)
+        trial, paid = rows(
+            inst,
+            "SELECT json_extract(l.value, '$.amount') AS amount,"
+            " json_extract(l.value, '$.period.start') AS start_at,"
+            " json_extract(l.value, '$.period.end') AS end_at FROM invoices i,"
+            " json_each(i.lines) l ORDER BY i.x_seq, l.key LIMIT 2",
+        )
+        assert trial["amount"] == 0 and paid["amount"] > 0
+        assert paid["start_at"] < trial["end_at"]  # the paid period opens inside the trial's
+        assert _failing(inst) == set()
 
 
 def test_cards_match_the_world() -> None:
