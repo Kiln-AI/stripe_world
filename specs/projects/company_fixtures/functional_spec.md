@@ -178,6 +178,7 @@ Both fixtures satisfy these at build time; the build fails on the first violatio
   `NOW`. No payout ever drew more than was available at its own moment.
 - No charge is refunded past its captured amount.
 - Every invoice's lines sum to its subtotal.
+- No two invoice lines share an id.
 - No two cycle invoices on one subscription have overlapping periods.
 - No subscription item is billed twice for one span: no two of its non-proration invoice lines
   with a non-zero amount, on invoices not voided, have overlapping periods. A $0 line, such as a

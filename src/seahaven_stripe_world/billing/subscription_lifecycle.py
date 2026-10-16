@@ -265,8 +265,11 @@ def _resolve_discounts(
     and `subscription.discounts` reads `[]` (recorded, Phase 12); on a
     trialing create the $0 trial invoice pays nothing, so the once-coupon
     parks on the row and is consumed at the trial-end invoice
-    (probed, Phase 12 CR round 4's trail). `forever`/`repeating` persist
-    either way. The stored object is the full inline discount
+    (probed, Phase 12 CR round 4's trail) — unless the create sweeps a
+    pending item, whose invoice consumes it as a no-trial create's does
+    (`park_once=False`; unprobed, `create_subscription`'s
+    `trial_bills_items`). `forever`/`repeating` persist either way. The
+    stored object is the full inline discount
     (`data_model.md` §6 — no discounts table), emitted as its `di_` id."""
     now = ctx.clock.iso()
     specs: list[DiscountSpec] = []
@@ -401,8 +404,19 @@ def create_subscription(ctx: seahaven.Ctx, params: dict[str, Any]) -> dict[str, 
     if needs_pm:
         _refuse_no_payment_method()
 
+    # A trial create that sweeps a pending item bills it on a paid first
+    # invoice, so its coupons apply there exactly as on a paid create's
+    # first invoice, a once-coupon consumed with it rather than parked for
+    # the trial end (unprobed; https://github.com/Kiln-AI/stripe_world/issues/14).
+    trial_bills_items = trial_end is not None and bool(
+        invoicing.subscription_pending_items(
+            ctx, customer_id=customer["id"], subscription_id=None, currency=currency
+        )
+    )
     discount_specs, persisted_discounts = _resolve_discounts(
-        ctx, params.get("discounts", []), park_once=trial_end is not None
+        ctx,
+        params.get("discounts", []),
+        park_once=trial_end is not None and not trial_bills_items,
     )
     tax_specs = _tax_specs(ctx, params.get("default_tax_rates", []))
 
@@ -489,37 +503,59 @@ def create_subscription(ctx: seahaven.Ctx, params: dict[str, Any]) -> dict[str, 
 
     sub_row = _re_read(ctx, sub_id)
     if trial_end is not None:
-        # Recorded (Phase 12 probe): the trialing subscription's first
-        # invoice exists — a paid $0 `subscription_create` invoice whose
-        # line is `Free trial for 1 x <product>` over `[start, trial_end)`.
-        # The $0 trial invoice bills nothing to discount: a parked
-        # once-coupon waits for the first PAID invoice (probed, round 4's
-        # trail), so no specs are applied — not even the row's own
-        # persisted ones. The stored SHAPE still carries the parked
-        # discount (probed, round 5's trail invoice): the `discounts`
-        # column lists it and `total_discount_amounts` marks it at 0.
-        invoice = _cycle_invoice(
-            ctx,
-            sub_row,
-            billing_reason="subscription_create",
-            auto_advance=False,
-            finalize=True,
-            trial=True,
-            discount_specs=[],
-            applied_discount_objects=[
-                {
-                    "id": spec.discount_id,
-                    "object": "discount",
-                    "source": {"type": "coupon", "coupon": spec.coupon_id},
-                    "start": _time.to_unix(now),
-                }
-                for spec in discount_specs
-            ],
-            zero_total_discounts=[
-                {"amount": 0, "discount": spec.discount_id} for spec in discount_specs
-            ],
-        )
-        invoicing.pay_invoice(ctx, invoice["id"], sub_row=sub_row)
+        if trial_bills_items:
+            # The swept items bill on the trial's first invoice beside its
+            # $0 trial lines, discounted as a paid create's first invoice is
+            # (unprobed; see `trial_bills_items` above).
+            invoice = _cycle_invoice(
+                ctx,
+                sub_row,
+                billing_reason="subscription_create",
+                auto_advance=False,
+                finalize=True,
+                trial=True,
+                discount_specs=discount_specs,
+                tax_specs=tax_specs,
+            )
+        else:
+            # Recorded (Phase 12 probe): the trialing subscription's first
+            # invoice exists — a paid $0 `subscription_create` invoice whose
+            # line is `Free trial for 1 x <product>` over `[start,
+            # trial_end)`. The $0 trial invoice bills nothing to discount: a
+            # parked once-coupon waits for the first PAID invoice (probed,
+            # round 4's trail), so no specs are applied — not even the row's
+            # own persisted ones. The stored SHAPE still carries the parked
+            # discount (probed, round 5's trail invoice): the `discounts`
+            # column lists it and `total_discount_amounts` marks it at 0.
+            invoice = _cycle_invoice(
+                ctx,
+                sub_row,
+                billing_reason="subscription_create",
+                auto_advance=False,
+                finalize=True,
+                trial=True,
+                discount_specs=[],
+                applied_discount_objects=[
+                    {
+                        "id": spec.discount_id,
+                        "object": "discount",
+                        "source": {"type": "coupon", "coupon": spec.coupon_id},
+                        "start": _time.to_unix(now),
+                    }
+                    for spec in discount_specs
+                ],
+                zero_total_discounts=[
+                    {"amount": 0, "discount": spec.discount_id} for spec in discount_specs
+                ],
+            )
+        # The invoice is collected like a paid create's first invoice —
+        # charged automatically, or left open for a send_invoice customer to
+        # pay — while the trial stands either way (unprobed). Unlike a paid
+        # create, a failed charge never answers per `payment_behavior`: the
+        # trial is the subscription's state, not the charge (declared in
+        # `allowed_differences.py`). The $0 invoice pays at once, as recorded.
+        if collection_method != "send_invoice" or invoice["amount_due"] == 0:
+            invoicing.pay_invoice(ctx, invoice["id"], sub_row=sub_row)
         _set_latest_invoice(ctx, sub_id, invoice["id"])
         _set_status(ctx, sub_id, "trialing")
         if _resolve_pm(ctx, sub_row, customer["id"]) is None:
@@ -848,11 +884,11 @@ def _cycle_invoice(
     zero_total_discounts: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Create (and optionally finalize) one invoice over the subscription's
-    current item periods, with the coupon and tax arithmetic applied. The
-    invoice's own `period_*` columns default to the creation instant (the
-    recorded `subscription_create` shape); a renewal or a trial end passes
-    the window it looks back over, which closes where its lines' period
-    opens.
+    current item periods plus the pending items it sweeps (`_pending_sweep`),
+    with the coupon and tax arithmetic applied. The invoice's own `period_*`
+    columns default to the creation instant (the recorded
+    `subscription_create` shape); a renewal or a trial end passes the window
+    it looks back over, which closes where its lines' period opens.
 
     Callers that resolve discounts themselves (creation, which applies its
     once-coupons alongside the persisted ones) pass `discount_specs`; every
@@ -867,9 +903,10 @@ def _cycle_invoice(
     if applied_tax is None:
         applied_tax = _persisted_tax_specs(ctx, sub_row)
     items = _items_of(ctx, sub_row["id"])
+    swept, swept_ids = _pending_sweep(ctx, sub_row)
     line_inputs = invoicing.build_item_lines(ctx, items, currency=sub_row["currency"], trial=trial)
     totals = invoicing.compute_totals(
-        line_inputs,
+        [*swept, *line_inputs],
         currency=sub_row["currency"],
         invoice_discounts=applied_discounts,
         tax_rates=applied_tax,
@@ -907,10 +944,34 @@ def _cycle_invoice(
             ]
         ),
         tax_rate_ids=_load_list(sub_row["default_tax_rates"]),
+        attach=swept_ids,
     )
     if finalize:
         return invoicing.finalize_invoice(ctx, invoice["id"])
     return invoice
+
+
+def _pending_sweep(
+    ctx: seahaven.Ctx, sub_row: Mapping[str, Any]
+) -> tuple[list[invoicing.ItemLine], list[str]]:
+    """The pending items this subscription's next invoice sweeps
+    (`invoicing.subscription_pending_items`: untagged or tagged to it, in its
+    currency) as their own lines, with their ids for `create_invoice`'s
+    `attach`. Every subscription invoice but the cancel's final one sweeps
+    (https://github.com/Kiln-AI/stripe_world/issues/14). The lines go
+    newest-first AHEAD of the plan lines — the order the manual `include`
+    sweep answers (recorded, cassette 13), unprobed on a subscription
+    invoice. The plan lines stay as each path builds them (a trial's $0
+    lines, a resume's parked-anchor periods), which is why no path sweeps
+    through `rebuild_invoice_lines`; the invoice's discounts reach a swept
+    line only when it is `discountable` (`compute_totals`)."""
+    rows = invoicing.subscription_pending_items(
+        ctx,
+        customer_id=sub_row["customer"],
+        subscription_id=sub_row["id"],
+        currency=sub_row["currency"],
+    )
+    return [invoicing.invoice_item_line(ctx, row) for row in rows], [row["id"] for row in rows]
 
 
 def _conversion_invoice(
@@ -942,7 +1003,13 @@ def _conversion_invoice(
     `invoice_item` (`ii_…`) naming the proration item behind it, and
     `proration_details.credited_items = {invoice, invoice_line_items}`
     pointing at the original debit. Both need the Phase 13/14
-    `invoiceitems` machinery; declared here rather than half-built."""
+    `invoiceitems` machinery; declared here rather than half-built.
+
+    The pending items the subscription's invoices sweep (`_pending_sweep`)
+    ride ahead of these lines. The coupon reaches only the netted credit:
+    this invoice applies no invoice-level discount arithmetic, so a swept
+    item bills its full amount (unprobed; declared in
+    `allowed_differences.py`)."""
     from datetime import datetime
 
     items = _items_of(ctx, row["id"])
@@ -1006,8 +1073,9 @@ def _conversion_invoice(
                 description=f"Free trial for {quantity} \u00d7 {product['name']}",
             )
         )
+    swept, swept_ids = _pending_sweep(ctx, row)
     totals = invoicing.compute_totals(
-        lines,
+        [*swept, *lines],
         currency=row["currency"],
         tax_rates=_persisted_tax_specs(ctx, row),
         livemode=instance_livemode(ctx),
@@ -1017,7 +1085,7 @@ def _conversion_invoice(
     # discount records mark the discount without subtracting again.
     zero_entries = [{"amount": 0, "discount": spec.discount_id} for spec in discount_specs]
     totals.total_discount_amounts.extend(zero_entries)
-    for line in totals.lines:
+    for line in totals.lines[len(swept) :]:
         if line["description"].startswith("Unused time on"):
             line["discount_amounts"].extend(zero_entries)
             line["discounts"] = sorted(spec.discount_id for spec in discount_specs)
@@ -1043,6 +1111,7 @@ def _conversion_invoice(
             for spec in discount_specs
         ],
         tax_rate_ids=_load_list(row["default_tax_rates"]),
+        attach=swept_ids,
     )
     if row["collection_method"] == "send_invoice":
         # A send_invoice conversion is never charged (the create's own
@@ -1763,8 +1832,8 @@ def _write_proration_items(
 
     # Debits first (recorded, cassette 01: the pending list and the invoice
     # lines — both newest-first — show the CREDIT first, so the credit is
-    # the newer row). `plain` is the cancel credit's recorded shape: no
-    # parent, no back-links.
+    # the newer row). `plain` is the cancel credit's recorded shape: a null
+    # wire parent, no back-links (`invoiceitems.insert_proration_item`).
     ordered = [line for line in lines if line.amount > 0] + [
         line for line in lines if line.amount < 0
     ]
@@ -1782,7 +1851,7 @@ def _write_proration_items(
                 ctx,
                 customer_id=sub_row["customer"],
                 subscription_id=sub_row["id"],
-                subscription_item_id=None if plain else line.subscription_item_id,
+                subscription_item_id=line.subscription_item_id,
                 amount=line.amount,
                 currency=sub_row["currency"],
                 description=line.description,
@@ -1793,6 +1862,7 @@ def _write_proration_items(
                 quantity=line.quantity,
                 credited_invoice=invoice_id,
                 credited_line_ids=() if plain else line_ids,
+                plain=plain,
             )
         )
     return written
@@ -1826,14 +1896,21 @@ def emit_proration_side_effects(
     _write_proration_items(ctx, sub_row, lines, credited=credited)
     if proration_behavior != "always_invoice":
         return
-    empty = invoicing.compute_totals([], currency=sub_row["currency"])
+    # The proration invoice carries only swept items (recorded, cassette
+    # 01) — the subscription's own sweep, so another subscription's pending
+    # prorations stay pending (https://github.com/Kiln-AI/stripe_world/issues/14).
+    swept, swept_ids = _pending_sweep(ctx, sub_row)
     invoice = invoicing.create_invoice(
         ctx,
         customer_id=sub_row["customer"],
         currency=sub_row["currency"],
         collection_method=sub_row["collection_method"],
         billing_reason="subscription_update",
-        totals=empty,
+        # No subscription coupon applies here, to swept items either (as
+        # before the sweep was tag-aware; declared in allowed_differences.py).
+        totals=invoicing.compute_totals(
+            swept, currency=sub_row["currency"], livemode=instance_livemode(ctx)
+        ),
         subscription_id=sub_id,
         auto_advance=sub_row["collection_method"] == "send_invoice",
         days_until_due=sub_row["days_until_due"],
@@ -1841,7 +1918,7 @@ def emit_proration_side_effects(
         # own period start to the update moment.
         period_start=_period_start(ctx, sub_id) or moment,
         period_end=moment,
-        sweep=True,
+        attach=swept_ids,
     )
     _set_latest_invoice(ctx, sub_id, invoice["id"])
     if sub_row["collection_method"] == "send_invoice":
@@ -1923,9 +2000,6 @@ def cancel_subscription(
         # only the items' periods and the BILLED configurations matter.
         credited = _credited_for_items(ctx, sub_id, items)
         written: list[dict[str, Any]] = []
-        # Each plain credit's own item: the row records no parent, so the
-        # final invoice's line learns which line it reverses from here.
-        credit_items: dict[str, str] = {}
         for item in items:
             config = _billed_config(ctx, item, credited.get(item["id"]))
             plain_lines = proration.proration_lines(
@@ -1935,13 +2009,11 @@ def cancel_subscription(
                 period_end=_time.to_unix(item["current_period_end"]),
                 proration_date=_time.to_unix(now),
             )
-            for credit in _write_proration_items(
-                ctx, row, plain_lines, credited=credited, plain=True
-            ):
-                written.append(credit)
-                credit_items[credit["id"]] = item["id"]
+            written.extend(
+                _write_proration_items(ctx, row, plain_lines, credited=credited, plain=True)
+            )
         if invoice_now:
-            _final_invoice_on_cancel(ctx, sub_id, row, attached=written, credit_items=credit_items)
+            _final_invoice_on_cancel(ctx, sub_id, row, attached=written)
     body = _serialize(ctx, _re_read(ctx, sub_id))
     events.emit_event(ctx, type="customer.subscription.deleted", obj=body)
     return body
@@ -1953,11 +2025,13 @@ def _final_invoice_on_cancel(
     row: Mapping[str, Any],
     *,
     attached: list[dict[str, Any]],
-    credit_items: Mapping[str, str],
 ) -> None:
     """The `invoice_now` final invoice, ONLY when this same call minted
-    something to bill (recorded, cassette 01 — the customer's older pending
-    items stay pending, unlike a subscription create's customer-wide sweep).
+    something to bill, and carrying only that: it sweeps nothing (recorded,
+    cassette 01 — the customer's older pending items stay pending there,
+    which every subscription invoice's tag-aware sweep would also leave,
+    since they are tagged to another subscription; the subscription's OWN
+    older prorations riding this invoice is unmodelled).
     `invoice_now=true` with `prorate=false`, or with a zero remainder, bills
     nothing: NO invoice is minted at all — Stripe's final invoice
     outstanding-amount semantics read that way, and an empty invoice marked
@@ -1993,7 +2067,7 @@ def _final_invoice_on_cancel(
         invoice["id"],
         *[item["id"] for item in attached],
     )
-    invoicing.rebuild_invoice_lines(ctx, invoice["id"], credit_items=credit_items)
+    invoicing.rebuild_invoice_lines(ctx, invoice["id"])
     invoice = _lookup.require_row(ctx, "invoices", "invoice", invoice["id"], param="invoice")
     _set_latest_invoice(ctx, sub_id, invoice["id"])
     invoicing.mark_uncollectible_invoice_draft(ctx, invoice["id"])
@@ -2072,13 +2146,6 @@ def resume_subscription(
                 ),
             )
         )
-    totals = invoicing.compute_totals(
-        rolled,
-        currency=row["currency"],
-        invoice_discounts=_persisted_discount_specs(ctx, row),
-        tax_rates=_persisted_tax_specs(ctx, row),
-        livemode=instance_livemode(ctx),
-    )
     if not rolled:
         # An itemless subscription (spec-blessed) resumes with nothing to
         # bill: the park stands, no invoice is minted — the trial-end
@@ -2088,6 +2155,14 @@ def resume_subscription(
             ctx, type="customer.subscription.updated", obj=body, previous=_previous(old_body, body)
         )
         return body
+    swept, swept_ids = _pending_sweep(ctx, row)
+    totals = invoicing.compute_totals(
+        [*swept, *rolled],
+        currency=row["currency"],
+        invoice_discounts=_persisted_discount_specs(ctx, row),
+        tax_rates=_persisted_tax_specs(ctx, row),
+        livemode=instance_livemode(ctx),
+    )
     invoice = invoicing.create_invoice(
         ctx,
         customer_id=row["customer"],
@@ -2105,6 +2180,7 @@ def resume_subscription(
         # https://github.com/Kiln-AI/stripe_world/issues/12).
         period_start=_period_start(ctx, sub_id) or now,
         period_end=now,
+        attach=swept_ids,
     )
     if row["collection_method"] != "send_invoice":
         invoicing.finalize_invoice(ctx, invoice["id"])

@@ -11,7 +11,6 @@ from fixtures_src.replay.subscriptions import Subscriptions
 from fixtures_src.replay.timeline import FixtureBuildError, Timeline
 from fixtures_src.small_co.cast import (
     Beat,
-    BillPending,
     CancelAtPeriodEnd,
     CancelNow,
     Card,
@@ -116,19 +115,6 @@ class _Story:
                     client.refund(ctx, charge["id"], amount=beat.amount)
                 case InvoiceItem():
                     client.invoice_item(ctx, customer, self.catalog.price(beat.price))
-                case BillPending():
-                    invoice = client.call(
-                        ctx,
-                        "POST",
-                        "/v1/invoices",
-                        {
-                            "customer": customer,
-                            "pending_invoice_items_behavior": "include",
-                            "auto_advance": False,
-                        },
-                    )["id"]
-                    client.call(ctx, "POST", f"/v1/invoices/{invoice}/finalize")
-                    client.pay_invoice(ctx, invoice)
                 case OneOffPayment():
                     if beat.card is not None:
                         card, exp = beat.card

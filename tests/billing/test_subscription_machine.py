@@ -1992,13 +1992,16 @@ def test_a_cancel_credit_links_its_own_subscription_line(
 
 
 def test_a_cancel_credit_swept_later_keeps_its_identity(instance: seahaven.Instance) -> None:
-    """A prorate-only cancel leaves its plain credit pending. The invoice
-    that sweeps it later cannot know the item, so its line falls back to
-    the customer-wide match on the period end (unprobed): it names its
-    `ii_`, subscription and item, and keeps its `il_` across a draft edit."""
+    """A prorate-only cancel leaves its plain credit pending. Its stored
+    parent records the item it credits (the wire answers null), so the
+    `include` invoice that sweeps it later links the canceled subscription's
+    own line — not the newest line of another subscription billing a period
+    that ends on the same boundary — and the line keeps its `il_` across a
+    draft edit."""
     cus, _, price = setup_catalog(instance)
-    sub = call(
-        instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": price}]}
+    sub, other = (
+        call(instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": price}]})
+        for _ in range(2)
     )
     created = one_row(instance, "SELECT * FROM invoices WHERE id = ?", sub["latest_invoice"])
     (billed,) = _sub_lines(created)
@@ -2019,6 +2022,7 @@ def test_a_cancel_credit_swept_later_keeps_its_identity(instance: seahaven.Insta
     assert details["proration_details"] == {
         "credited_items": {"invoice": created["id"], "invoice_line_items": [billed["id"]]}
     }
+    assert other["latest_invoice"] != created["id"]
     edited = call(
         instance,
         "POST",
@@ -2065,3 +2069,422 @@ def test_a_cancel_credit_names_its_item_when_no_plain_line_billed_it(
     details = by_item[added]["parent"]["subscription_item_details"]
     assert details["subscription"] == sub["id"]
     assert details["proration_details"] == {"credited_items": None}
+
+
+# --- the pending-item sweep (https://github.com/Kiln-AI/stripe_world/issues/14) ----------------
+
+
+def _pending_item(instance: seahaven.Instance, customer: str, amount: int = 4900, **params) -> str:
+    return call(
+        instance,
+        "POST",
+        "/v1/invoiceitems",
+        {
+            "customer": customer,
+            "amount": amount,
+            "currency": "cad",
+            "description": "Setup",
+            **params,
+        },
+    )["id"]
+
+
+def _pending_ids(instance: seahaven.Instance, customer: str) -> list[str]:
+    listed = call(instance, "GET", "/v1/invoiceitems", {"customer": customer, "pending": True})
+    return [item["id"] for item in listed["data"]]
+
+
+def _line_sources(invoice: dict) -> list[tuple[str | None, int]]:
+    """Each line of a served invoice as (its `ii_`, or None for a plan line; its amount)."""
+    sources = []
+    for line in invoice["lines"]["data"]:
+        parent = line["parent"]
+        details = parent["invoice_item_details"] or parent["subscription_item_details"]
+        sources.append((details["invoice_item"], line["amount"]))
+    return sources
+
+
+def _dearer_price(instance: seahaven.Instance, price: str) -> str:
+    return call(
+        instance,
+        "POST",
+        "/v1/prices",
+        {
+            "product": call(instance, "GET", f"/v1/prices/{price}")["product"],
+            "unit_amount": 3000,
+            "currency": "cad",
+            "recurring": {"interval": "month"},
+        },
+    )["id"]
+
+
+def _change_price(
+    instance: seahaven.Instance, sub: dict, price: str, proration_behavior: str
+) -> dict:
+    return call(
+        instance,
+        "POST",
+        f"/v1/subscriptions/{sub['id']}",
+        {
+            "items": [{"id": sub["items"]["data"][0]["id"], "price": price}],
+            "proration_behavior": proration_behavior,
+        },
+    )
+
+
+def test_a_paid_create_sweeps_an_untagged_pending_item(instance: seahaven.Instance) -> None:
+    """The setup fee ordered before the subscription rides its first
+    invoice: its own line ahead of the plan line, charged with it, and the
+    item no longer pending."""
+    cus, _, price = setup_catalog(instance)
+    item = _pending_item(instance, cus)
+    sub = call(
+        instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": price}]}
+    )
+    invoice = call(instance, "GET", f"/v1/invoices/{sub['latest_invoice']}")
+    assert _line_sources(invoice) == [(item, 4900), (None, 2000)]
+    assert (invoice["status"], invoice["total"], invoice["amount_paid"]) == ("paid", 6900, 6900)
+    assert call(instance, "GET", f"/v1/invoiceitems/{item}")["invoice"] == invoice["id"]
+    assert _pending_ids(instance, cus) == []
+    created = one_row(
+        instance, "SELECT data FROM events WHERE type = 'invoice.created' ORDER BY x_seq DESC"
+    )
+    assert json.loads(created["data"])["object"]["total"] == 6900
+
+
+@pytest.mark.parametrize("collection_method", ["charge_automatically", "send_invoice"])
+def test_a_trial_create_bills_a_swept_item_and_stays_trialing(
+    instance: seahaven.Instance, collection_method: str
+) -> None:
+    """The declared ruling (unprobed): the trial's first invoice bills the
+    swept item at its amount beside the $0 trial line, and is collected like
+    a paid create's — charged, or left open for a send_invoice customer —
+    while the subscription stays `trialing`."""
+    cus, _, price = setup_catalog(instance)
+    item = _pending_item(instance, cus)
+    params: dict = {"customer": cus, "items": [{"price": price}], "trial_end": 1798761600}
+    if collection_method == "send_invoice":
+        params |= {"collection_method": "send_invoice", "days_until_due": 30}
+    sub = call(instance, "POST", "/v1/subscriptions", params)
+    assert sub["status"] == "trialing"
+    invoice = call(instance, "GET", f"/v1/invoices/{sub['latest_invoice']}")
+    assert _line_sources(invoice) == [(item, 4900), (None, 0)]
+    assert invoice["lines"]["data"][1]["description"].startswith("Free trial for 1 ")
+    assert invoice["total"] == 4900
+    if collection_method == "send_invoice":
+        assert (invoice["status"], invoice["amount_remaining"]) == ("open", 4900)
+        assert invoice["attempted"] is False
+    else:
+        assert (invoice["status"], invoice["amount_paid"]) == ("paid", 4900)
+        assert invoice["attempt_count"] == 1
+    assert call(instance, "GET", f"/v1/subscriptions/{sub['id']}")["status"] == "trialing"
+
+
+def test_a_send_invoice_create_sweeps_into_its_draft(instance: seahaven.Instance) -> None:
+    cus, _, price = setup_catalog(instance)
+    item = _pending_item(instance, cus)
+    sub = call(
+        instance,
+        "POST",
+        "/v1/subscriptions",
+        {
+            "customer": cus,
+            "items": [{"price": price}],
+            "collection_method": "send_invoice",
+            "days_until_due": 30,
+        },
+    )
+    invoice = call(instance, "GET", f"/v1/invoices/{sub['latest_invoice']}")
+    assert invoice["status"] == "draft"
+    assert _line_sources(invoice) == [(item, 4900), (None, 2000)]
+    assert invoice["amount_due"] == 6900
+
+
+def test_a_renewal_sweeps_an_item_added_since_the_last_invoice(
+    instance: seahaven.Instance,
+) -> None:
+    cus, _, price = setup_catalog(instance)
+    sub = call(
+        instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": price}]}
+    )
+    item = _pending_item(instance, cus)
+    renewal = call(instance, "GET", f"/v1/invoices/{_renew(instance, sub['id'])['id']}")
+    assert _line_sources(renewal) == [(item, 4900), (None, 2000)]
+    assert (renewal["status"], renewal["amount_paid"]) == ("paid", 6900)
+    assert _pending_ids(instance, cus) == []
+
+
+@pytest.mark.parametrize("collection_method", ["charge_automatically", "send_invoice"])
+def test_a_trial_end_invoice_sweeps_an_item_ordered_during_the_trial(
+    instance: seahaven.Instance, collection_method: str
+) -> None:
+    cus, _, price = setup_catalog(instance)
+    params: dict = {"customer": cus, "items": [{"price": price}], "trial_end": 1798761600}
+    if collection_method == "send_invoice":
+        params |= {"collection_method": "send_invoice", "days_until_due": 30}
+    sub = call(instance, "POST", "/v1/subscriptions", params)
+    item = _pending_item(instance, cus)
+    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": "now"})
+    invoice = call(instance, "GET", f"/v1/invoices/{body['latest_invoice']}")
+    assert _line_sources(invoice) == [(item, 4900), (None, 2000)]
+    assert invoice["status"] == ("draft" if collection_method == "send_invoice" else "paid")
+    assert _pending_ids(instance, cus) == []
+
+
+def test_a_resume_invoice_sweeps_pending_items(instance: seahaven.Instance) -> None:
+    _, _, price = setup_catalog(instance)
+    bare = call(instance, "POST", "/v1/customers", {"email": "sweep@example.test"})["id"]
+    sub = call(
+        instance,
+        "POST",
+        "/v1/subscriptions",
+        {
+            "customer": bare,
+            "items": [{"price": price}],
+            "trial_end": 1798761600,
+            "trial_settings": {"end_behavior": {"missing_payment_method": "pause"}},
+        },
+    )
+    call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": "now"})
+    item = _pending_item(instance, bare)
+    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}/resume", {})
+    invoice = call(instance, "GET", f"/v1/invoices/{body['latest_invoice']}")
+    assert _line_sources(invoice) == [(item, 4900), (None, 2000)]
+    assert (invoice["status"], invoice["amount_due"]) == ("open", 6900)
+
+
+def test_a_conversion_invoice_sweeps_without_netting_the_coupon_into_swept_credits(
+    instance: seahaven.Instance,
+) -> None:
+    """A conversion sweeps like every subscription invoice. Its coupon nets
+    into its own `Unused time` credit only (probed); a swept proration
+    credit of the same spelling carries no netted entries, and no swept
+    line is discounted (the invoice applies no invoice-level arithmetic)."""
+    cus, _, price = setup_catalog(instance)
+    coupon = call(instance, "POST", "/v1/coupons", {"percent_off": 10, "duration": "forever"})["id"]
+    sub = call(
+        instance,
+        "POST",
+        "/v1/subscriptions",
+        {"customer": cus, "items": [{"price": price}], "discounts": [{"coupon": coupon}]},
+    )
+    _change_price(instance, sub, _dearer_price(instance, price), "create_prorations")
+    pair = _pending_ids(instance, cus)
+    item = _pending_item(instance, cus)
+    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": 1798761600})
+    invoice = call(instance, "GET", f"/v1/invoices/{body['latest_invoice']}")
+    lines = invoice["lines"]["data"]
+    assert [source for source, _ in _line_sources(invoice)] == [item, *pair, None, None]
+    (discount,) = sub["discounts"]
+    assert [line["discount_amounts"] for line in lines] == [
+        [],
+        [],
+        [],
+        [{"amount": 0, "discount": discount}],
+        [],
+    ]
+    assert _pending_ids(instance, cus) == []
+
+
+def test_another_subscriptions_prorations_stay_pending(instance: seahaven.Instance) -> None:
+    """Prorations tagged to A ride none of B's invoices — its create, its
+    renewal, its `always_invoice` proration invoice (recorded for the
+    create, cassette 01) — and do ride A's own next renewal."""
+    cus, _, price = setup_catalog(instance)
+    dearer = _dearer_price(instance, price)
+    a = call(instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": price}]})
+    _change_price(instance, a, dearer, "create_prorations")
+    pair = _pending_ids(instance, cus)
+    assert len(pair) == 2
+    b = call(instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": price}]})
+    assert _line_sources(call(instance, "GET", f"/v1/invoices/{b['latest_invoice']}")) == [
+        (None, 2000)
+    ]
+    assert _pending_ids(instance, cus) == pair
+    renewal = call(instance, "GET", f"/v1/invoices/{_renew(instance, b['id'])['id']}")
+    assert _line_sources(renewal) == [(None, 2000)]
+    assert _pending_ids(instance, cus) == pair
+    updated = _change_price(instance, b, dearer, "always_invoice")
+    proration_invoice = call(instance, "GET", f"/v1/invoices/{updated['latest_invoice']}")
+    assert {
+        line["parent"]["subscription_item_details"]["subscription"]
+        for line in proration_invoice["lines"]["data"]
+    } == {b["id"]}
+    assert _pending_ids(instance, cus) == pair
+
+    a_renewal = call(instance, "GET", f"/v1/invoices/{_renew(instance, a['id'])['id']}")
+    assert [source for source, _ in _line_sources(a_renewal)] == [*pair, None]
+    for line in a_renewal["lines"]["data"][:2]:
+        details = line["parent"]["subscription_item_details"]
+        assert (details["subscription"], details["proration"]) == (a["id"], True)
+    assert _pending_ids(instance, cus) == []
+
+
+def test_the_coupon_discounts_a_discountable_swept_item_never_a_proration(
+    instance: seahaven.Instance,
+) -> None:
+    """The renewal's invoice-level coupon apportions over the discountable
+    lines only: the plan line and the swept item, not the item marked
+    non-discountable, and never the subscription's swept prorations."""
+    cus, _, price = setup_catalog(instance)
+    coupon = call(instance, "POST", "/v1/coupons", {"percent_off": 10, "duration": "forever"})["id"]
+    sub = call(
+        instance,
+        "POST",
+        "/v1/subscriptions",
+        {"customer": cus, "items": [{"price": price}], "discounts": [{"coupon": coupon}]},
+    )
+    _change_price(instance, sub, _dearer_price(instance, price), "create_prorations")
+    credit, debit = _pending_ids(instance, cus)
+    item = _pending_item(instance, cus)
+    fixed = _pending_item(instance, cus, 1000, discountable=False)
+    renewal = call(instance, "GET", f"/v1/invoices/{_renew(instance, sub['id'])['id']}")
+    (discount,) = sub["discounts"]
+    by_source = {
+        source: (line["discountable"], line["discount_amounts"])
+        for (source, _), line in zip(_line_sources(renewal), renewal["lines"]["data"], strict=True)
+    }
+    assert by_source == {
+        fixed: (False, [{"amount": 0, "discount": discount}]),
+        item: (True, [{"amount": 490, "discount": discount}]),
+        credit: (False, [{"amount": 0, "discount": discount}]),
+        debit: (False, [{"amount": 0, "discount": discount}]),
+        None: (True, [{"amount": 300, "discount": discount}]),
+    }
+    assert renewal["total_discount_amounts"] == [{"amount": 790, "discount": discount}]
+
+
+def test_a_cancel_credit_stays_its_subscriptions(instance: seahaven.Instance) -> None:
+    """A prorate-only cancel's credit answers the recorded `parent: null`,
+    yet belongs to the canceled subscription: another subscription's
+    create and renewal leave it pending, and only an `include` invoice
+    takes it."""
+    cus, _, price = setup_catalog(instance)
+    first = call(
+        instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": price}]}
+    )
+    call(instance, "DELETE", f"/v1/subscriptions/{first['id']}", {"prorate": True})
+    (credit,) = _pending_ids(instance, cus)
+    assert call(instance, "GET", f"/v1/invoiceitems/{credit}")["parent"] is None
+    second = call(
+        instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": price}]}
+    )
+    _renew(instance, second["id"])
+    assert _pending_ids(instance, cus) == [credit]
+    invoice = call(
+        instance,
+        "POST",
+        "/v1/invoices",
+        {"customer": cus, "pending_invoice_items_behavior": "include"},
+    )
+    assert _line_sources(invoice) == [(credit, -2000)]
+
+
+def test_a_proration_pairs_lines_keep_distinct_ids_through_a_rebuild(
+    instance: seahaven.Instance,
+) -> None:
+    """A credit and a debit share their item and period start, so the
+    rebuild keys each by its `ii_`: an edit of the send_invoice proration
+    draft keeps both ids, and no id is handed out twice."""
+    cus, _, price = setup_catalog(instance)
+    sub = call(
+        instance,
+        "POST",
+        "/v1/subscriptions",
+        {
+            "customer": cus,
+            "items": [{"price": price}],
+            "collection_method": "send_invoice",
+            "days_until_due": 30,
+        },
+    )
+    updated = _change_price(instance, sub, _dearer_price(instance, price), "always_invoice")
+    draft = call(instance, "GET", f"/v1/invoices/{updated['latest_invoice']}")
+    assert draft["status"] == "draft"
+    before = [line["id"] for line in draft["lines"]["data"]]
+    assert len(before) == 2
+    edited = call(
+        instance,
+        "POST",
+        f"/v1/invoices/{draft['id']}/add_lines",
+        {"lines": [{"amount": 500, "description": "Onboarding"}]},
+    )
+    after = [line["id"] for line in edited["lines"]["data"]]
+    assert after[1:] == before
+    assert len(set(after)) == 3
+
+
+@pytest.mark.parametrize(
+    ("duration", "swept", "trial_total", "parked", "trial_end_total"),
+    [
+        ("forever", True, 2450, 1, 1000),
+        ("once", True, 2450, 0, 2000),
+        ("once", False, 0, 1, 1000),
+    ],
+    ids=["forever coupon, item swept", "once coupon, item swept", "once coupon, nothing swept"],
+)
+def test_a_trial_create_that_sweeps_applies_its_coupons_like_a_paid_create(
+    instance: seahaven.Instance,
+    duration: str,
+    swept: bool,
+    trial_total: int,
+    parked: int,
+    trial_end_total: int,
+) -> None:
+    """The declared ruling (unprobed): once a trial create sweeps an item,
+    its first invoice is discounted as a paid create's is — a once-coupon is
+    consumed there, so the trial end bills full price. With nothing swept,
+    the recorded $0 invoice parks the once-coupon for the trial end."""
+    cus, _, price = setup_catalog(instance)
+    coupon = call(instance, "POST", "/v1/coupons", {"percent_off": 50, "duration": duration})["id"]
+    if swept:
+        _pending_item(instance, cus)
+    sub = call(
+        instance,
+        "POST",
+        "/v1/subscriptions",
+        {
+            "customer": cus,
+            "items": [{"price": price}],
+            "trial_end": 1798761600,
+            "discounts": [{"coupon": coupon}],
+        },
+    )
+    assert sub["status"] == "trialing"
+    invoice = call(instance, "GET", f"/v1/invoices/{sub['latest_invoice']}")
+    assert (invoice["status"], invoice["total"]) == ("paid", trial_total)
+    assert len(sub["discounts"]) == parked
+    ended = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": "now"})
+    assert call(instance, "GET", f"/v1/invoices/{ended['latest_invoice']}")["total"] == (
+        trial_end_total
+    )
+
+
+def test_a_swept_subscription_draft_keeps_its_line_ids_through_a_rebuild(
+    instance: seahaven.Instance,
+) -> None:
+    """A send_invoice create's draft carries the swept item ahead of the plan
+    line; an `add_lines` edit rebuilds it and both keep their ids."""
+    cus, _, price = setup_catalog(instance)
+    item = _pending_item(instance, cus)
+    sub = call(
+        instance,
+        "POST",
+        "/v1/subscriptions",
+        {
+            "customer": cus,
+            "items": [{"price": price}],
+            "collection_method": "send_invoice",
+            "days_until_due": 30,
+        },
+    )
+    draft = call(instance, "GET", f"/v1/invoices/{sub['latest_invoice']}")
+    before = [line["id"] for line in draft["lines"]["data"]]
+    edited = call(
+        instance,
+        "POST",
+        f"/v1/invoices/{draft['id']}/add_lines",
+        {"lines": [{"amount": 500, "description": "Onboarding"}]},
+    )
+    assert [line["id"] for line in edited["lines"]["data"]][1:] == before
+    assert [source for source, _ in _line_sources(edited)][1:] == [item, None]

@@ -1,4 +1,4 @@
-created_at: '2026-10-15T23:11:47.787Z'
+created_at: '2026-10-16T00:11:07.502Z'
 description: 'Ostrander Systems, a Denver company selling field-service software to
   HVAC, plumbing and electrical contractors, as a test-mode Stripe account: about
   380 business customers over 18 months, from a migration off a legacy billing system
@@ -6,7 +6,7 @@ description: 'Ostrander Systems, a Denver company selling field-service software
   on terms, sales tax, renewals, upgrades, churn, dunning, refunds, disputes, credit
   notes and daily payouts, plus scripted loose ends. Good for evals that need a realistic
   account at scale: pagination, search, aggregation and needle-in-a-haystack lookups.'
-file_sha256: a8ce74de592ad21668516e7590ddf668164c659108617c103b6edf5946521c37
+file_sha256: 4cd466eade3f8efa462389f1de4e641f36998cb0cc7647432ccd3d387644f437
 format_version: 1
 id: big_co
 now: '2026-09-01T14:00:00.000Z'

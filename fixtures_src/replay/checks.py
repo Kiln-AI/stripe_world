@@ -247,6 +247,16 @@ INVARIANTS: tuple[tuple[str, Check], ...] = (
         ),
     ),
     (
+        # Every line's `il_` is its own. A draft rebuild keys a line by its source; keying a
+        # proration line by its item and period start instead of its `ii_` gave a credit/debit
+        # pair one id between them.
+        "line ids are unique",
+        _sql(
+            "SELECT json_extract(l.value, '$.id') AS line FROM invoices i, json_each(i.lines) l"
+            " GROUP BY 1 HAVING count(*) > 1 ORDER BY 1"
+        ),
+    ),
+    (
         "no overlapping cycle periods",
         _sql(
             "SELECT a.id AS a, b.id AS b FROM invoices a JOIN invoices b"

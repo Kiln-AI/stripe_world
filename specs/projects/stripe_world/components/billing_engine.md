@@ -410,7 +410,7 @@ transaction Seahaven opens for the call.
 
 | Trigger | Guard | → | Side effects | Events |
 |---|---|---|---|---|
-| `create` | `trial_end` in the future, or `trial_period_days > 0` | `trialing` | Items' periods span `[now, trial_end)`; `trial_start`/`trial_end` set; a **paid $0 `subscription_create` invoice** whose line is `Free trial for 1 × <product>` over `[start, trial_end)` (recorded, Phase 12 — corrects this row's earlier "no invoice"); `billing_cycle_anchor := trial_end` | `customer.subscription.created`, `invoice.created`, `invoice.finalized`, `invoice.paid` |
+| `create` | `trial_end` in the future, or `trial_period_days > 0` | `trialing` | Items' periods span `[now, trial_end)`; `trial_start`/`trial_end` set; a **paid $0 `subscription_create` invoice** whose line is `Free trial for 1 × <product>` over `[start, trial_end)` (recorded, Phase 12 — corrects this row's earlier "no invoice"); `billing_cycle_anchor := trial_end`. A pending item the create sweeps (§3.1) bills on this invoice beside the $0 trial line, with the create's coupons applied as on a paid create's first invoice — a once-coupon is consumed there rather than parked for the trial end. The invoice is collected like a paid create's first invoice (charged; `send_invoice` leaves it open) while the status stays `trialing`, and a failed charge never answers per `payment_behavior` (unprobed; issue #14) | `customer.subscription.created`, `invoice.created`, `invoice.finalized`, `invoice.paid`; with a swept item: `charge.succeeded` and `invoice.payment_succeeded` before `invoice.paid` when charged, `invoice.sent` and no `invoice.paid` for `send_invoice`, `charge.failed` and `invoice.payment_failed` and no `invoice.paid` on a decline |
 | `create` | no trial, first invoice total ≤ 0 | `active` | `subscription_create` invoice created, finalized, `paid` with `amount_due = 0` | `customer.subscription.created`, `invoice.created`, `invoice.finalized`, `invoice.paid` |
 | `create` | `collection_method = send_invoice` | `active` | Invoice created and left **`draft`** with `auto_advance = 1` and `due_date = now + days_until_due` (recorded, Phase 12 — corrects this table's earlier "created + finalized, left open"; the hour window follows). Activation does **not** depend on payment — `spec3.json` verbatim | `customer.subscription.created` |
 | `create` | `charge_automatically`, payment required, charge succeeds | `active` | Invoice created → finalized → `paid`; charge + `balance_transaction` | `customer.subscription.created`, `invoice.created`, `invoice.finalized`, `invoice.payment_succeeded`, `invoice.paid` |
@@ -650,6 +650,19 @@ third bucket folds into the first):
    **every** pending `invoiceitems` row for the customer, **regardless of period** — the invoice's
    own period is zero-width and bounds nothing (correcting this section's earlier period-bounded
    sweep). Proration lines created by `proration_lines` ride the same bucket once attached.
+   **A subscription's own invoices sweep too** (issue #14; spec3: an item with no invoice "will be
+   on the next invoice created for the customer"): its create (paid, trial and `send_invoice`),
+   trial-end, renewal, resume and conversion invoices, and the `always_invoice` proration invoice,
+   attach the customer's pending items in the invoice's currency that are **untagged or tagged to
+   that subscription** (`parent.subscription_details.subscription`). An item tagged to another
+   subscription stays pending (recorded, cassette 01 and `probe_proration`: another
+   subscription's prorations ride neither a new subscription's create invoice nor a different
+   subscription's final invoice; spec3 on the item's `subscription`: "scheduled invoices for
+   subscriptions other than the specified subscription will ignore the invoice item"); so does an
+   item in another currency (unprobed). The `invoice_now` final invoice sweeps nothing. The swept
+   items' lines go newest-first **ahead of** the subscription's own lines — the `include` order,
+   unprobed on a subscription invoice — and the subscription lines stay as the path builds them
+   (a trial's $0 lines, a resume's parked-anchor periods), never rebuilt.
 2. **Subscription items**, in reverse chronological order — one line per row in
    `subscription_items` for the invoice's subscription, with
    `period = [item.current_period_start, item.current_period_end)` and
@@ -659,8 +672,11 @@ Each becomes a `LineInput`; nothing else contributes. The list is assembled fres
 mutation and frozen at finalization, when it is written once into `invoices.lines` through
 `_json.py`'s single canonical dump (`sort_keys=True`, tight separators) so bytes are reproducible.
 Each line's `il_` id is **preserved across draft rebuilds**, keyed by its source — a line edit
-answers the id it was given (recorded, Phase 13). `line_item` is a nested JSON object on the
-parent, never a table (functional spec §3.4).
+answers the id it was given (recorded, Phase 13). The source of a line backed by an invoice item is
+that `ii_` (a proration line carries it inside `subscription_item_details`: one change's credit and
+debit share an item and a period start); of a subscription item's own line, the item plus its
+period start. `line_item` is a nested JSON object on the parent, never a table (functional spec
+§3.4).
 
 #### 3.2 One line's arithmetic
 
@@ -702,7 +718,10 @@ entire reason `subtotal_excluding_tax` and `total_excluding_tax` are separate fi
 
 A **proration line always has `discountable = false`** — `spec3.json` verbatim, "Always false for
 prorations" — so item-scope discounts skip it. This is not an optimisation; a discount applied to a
-proration credit would make the −667/+333 case irreproducible.
+proration credit would make the −667/+333 case irreproducible. An invoice item's line carries the
+item's own `discountable`, which defaults to false for a negative item and true otherwise
+(`spec3.json` on the create: "Defaults to false for prorations or negative invoice items, and true
+for all other invoice items").
 
 #### 3.3 Invoice-scope discounts
 
@@ -710,7 +729,13 @@ Discounts on `invoice.discounts` (inherited from `subscription.discounts` or the
 discount, or set directly) are computed against the post-item-discount subtotal and then
 **apportioned back across the discountable lines** with `apportion`, so they appear in each line's
 `discount_amounts` and aggregate correctly into `total_discount_amounts` without being
-double-counted in `subtotal`.
+double-counted in `subtotal`. Only a discountable line is a base or an apportion weight; every
+other line carries the discount at amount 0. A subscription's coupon therefore reaches a swept
+item that is discountable, never a swept proration — on the invoices that apply the coupon: the
+create (a trial create too, once it sweeps an item), trial-end, renewal and resume invoices. The
+`always_invoice` proration invoice applies no subscription coupon at all, and a conversion invoice
+nets its coupon into its own credit only, so a swept item bills its full amount on either
+(unprobed, declared).
 
 The apportionment rule is **floor-each-then-remainder-to-the-last**, not independent rounding. This
 is documented directly and is a *different* rule from proration rounding — the same page that proves
@@ -918,7 +943,11 @@ mode-independent arithmetic, declared in `allowed_differences.py`.
   the **billed** configuration (a `none`-switched item still credits the price that
   was paid — recorded), with a plainer body than an update's pair: `parent: null`,
   no `proration_details` key. The line it later sweeps onto re-acquires the full
-  subscription identity and back-links (recorded).
+  subscription identity and back-links (recorded). The row still stores the canceled
+  subscription and the credited item in `parent` — only the wire answers null — so the credit,
+  like every proration, belongs to its subscription: no other subscription's invoice sweeps it
+  (a ruling for issue #14, unprobed), a manual `include` invoice does, and its line names that
+  item.
 - **`DELETE … prorate=true&invoice_now=true`** additionally mints a
   `billing_reason: subscription_cycle` invoice carrying only that credit; a
   negative-total final invoice is created un-numbered (`auto_advance: true`) and
@@ -931,7 +960,7 @@ mode-independent arithmetic, declared in `allowed_differences.py`.
 
 | Value | What `apply_update` does |
 |---|---|
-| `create_prorations` (default) | Write the lines as pending `invoiceitems` rows with `invoice IS NULL`. **No invoice.** They ride the next invoice generated for the customer |
+| `create_prorations` (default) | Write the lines as pending `invoiceitems` rows with `invoice IS NULL`, tagged to the subscription. **No invoice.** They ride the subscription's own next invoice (§3.1's sweep; another subscription's invoices leave them pending), or a manual `include` invoice |
 | `always_invoice` | The same rows, plus immediately `create_invoice(billing_reason="subscription_update")`, finalize and pay |
 | `none` | No proration lines at all. The old price is kept for the period already billed; the new price takes over at the next boundary |
 

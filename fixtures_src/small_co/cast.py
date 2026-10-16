@@ -13,7 +13,6 @@ from fixtures_src.replay.cards import Card as TestCard
 __all__ = [
     "CAST",
     "Beat",
-    "BillPending",
     "CancelAtPeriodEnd",
     "CancelNow",
     "Card",
@@ -85,13 +84,6 @@ class InvoiceItem:
 
 
 @dataclass(frozen=True)
-class BillPending:
-    """Invoice the member's pending items now, on their own invoice, and pay it."""
-
-    at: str
-
-
-@dataclass(frozen=True)
 class OneOffPayment:
     """A payment intent confirmed on the spot: with the member's default card, or with `card`, a
     card added for this payment alone (not made the default)."""
@@ -110,7 +102,6 @@ Beat = (
     | CancelNow
     | Refund
     | InvoiceItem
-    | BillPending
     | OneOffPayment
 )
 
@@ -197,12 +188,9 @@ CAST: tuple[Member, ...] = (
        "2026-03-04T17:25", (AMEX, (4, 2028)), price="solo_monthly", coupon=_L),
     _m("anika_sharma", "Anika Sharma", "Sharma Tutoring Collective", "anika@sharmatutoring.com",
        "2026-03-04T21:29", (MASTERCARD, (12, 2027)),
-       Subscribe(t("2026-03-04T21:30"), "studio_monthly", coupon=_L),
-       # Neither subscription creation nor a renewal sweeps pending items in this world
-       # (https://github.com/Kiln-AI/stripe_world/issues/14), so the setup fee is invoiced on
-       # its own right after she subscribes.
-       InvoiceItem(t("2026-03-04T21:31"), "setup"),
-       BillPending(t("2026-03-04T21:32"))),
+       # Ordered a minute before she subscribes, so her first invoice sweeps the setup fee.
+       InvoiceItem(t("2026-03-04T21:29"), "setup"),
+       Subscribe(t("2026-03-04T21:30"), "studio_monthly", coupon=_L)),
     _m("olivia_grant", "Olivia Grant", "SAT tutor", "olivia@grantprep.com",
        "2026-03-05T14:00", (MASTERCARD, (5, 2028)),
        CancelNow(t("2026-05-20T19:00"), "switched_service"),

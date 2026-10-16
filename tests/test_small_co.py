@@ -201,14 +201,42 @@ def test_jamals_partial_refund(instance: seahaven.Instance) -> None:
     )
 
 
+def test_anikas_setup_fee_rode_her_first_invoice(instance: seahaven.Instance) -> None:
+    """Ordered a minute before she subscribed, the setup item was swept onto her first invoice,
+    where `LAUNCH` took half off both lines (the item is discountable)."""
+    customer = _customer(instance, "anika@sharmatutoring.com")["id"]
+    anika = _subscription(instance, "anika@sharmatutoring.com")
+    invoices = _read(instance, "/v1/invoices", {"subscription": anika["id"], "limit": 100})["data"]
+    first = next(i for i in invoices if i["billing_reason"] == "subscription_create")
+    assert [(line["description"], line["amount"]) for line in first["lines"]["data"]] == [
+        ("Done-for-you setup", 4900),
+        ("1 \u00d7 Wrenfield Studio (at $29.00 / month)", 2900),
+    ]
+    assert (first["status"], first["subtotal"], first["total"]) == ("paid", 7800, 3900)
+    assert (
+        _read(instance, "/v1/invoiceitems", {"customer": customer, "pending": True})["data"] == []
+    )
+
+
 def test_elenas_pending_item(instance: seahaven.Instance) -> None:
+    """Ordered on 08-28, after her last renewal; her 09-10 renewal, after `NOW`, sweeps it."""
     elena = _subscription(instance, "elena@petrovadance.com")
     assert (elena["status"], _price(elena)["lookup_key"]) == ("active", "studio_monthly")
+    assert _period_end(elena) == _unix("2026-09-10T17:00")
     customer = _customer(instance, "elena@petrovadance.com")["id"]
     items = _read(instance, "/v1/invoiceitems", {"customer": customer, "pending": True})["data"]
     assert [(i["amount"], i["description"], i["invoice"]) for i in items] == [
         (4900, "Done-for-you setup", None)
     ]
+    from seahaven_stripe_world.billing import subscription_lifecycle
+
+    with instance.bulk() as ctx:
+        renewed = subscription_lifecycle.advance_cycle(ctx, elena["id"])
+    renewal = _read(instance, f"/v1/invoices/{renewed['latest_invoice']}")
+    assert [line["amount"] for line in renewal["lines"]["data"]] == [4900, 2900]
+    assert (
+        _read(instance, "/v1/invoiceitems", {"customer": customer, "pending": True})["data"] == []
+    )
 
 
 def test_chris_signed_up_twice(instance: seahaven.Instance) -> None:

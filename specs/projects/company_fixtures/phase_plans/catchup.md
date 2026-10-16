@@ -46,6 +46,13 @@ uses. The user kept the name (decision 5 below).
        `BillPending` beat, which is not in small_co.md §3's beat vocabulary).
      - Elena's $49 item stays pending. The spec said "for her 2026-09-10 renewal"; the guide no
        longer says it will be swept there, and declares the gap.
+     **Fixed since:** a subscription's invoices (create, trial end, renewal, resume, conversion
+     and the `always_invoice` proration invoice) sweep the customer's pending items that are
+     untagged or tagged to that subscription. The `BillPending` beat is gone: Anika's setup item
+     is created a minute before she subscribes, as small_co.md row 13 has it, and her first
+     invoice sweeps it (`LAUNCH` takes half off it too). Elena's item is still pending at `NOW`,
+     and the guide says her 2026-09-10 renewal will sweep it. Both fixtures were rebuilt, and the
+     guide no longer lists the gap.
    - **#15, `canceled_at` is null on a cancel-at-period-end request.** Declared in the guide.
      **Fixed since:** the world now stamps `canceled_at` at the request, both fixtures were
      rebuilt, and the guide no longer lists the gap.
@@ -86,7 +93,8 @@ uses. The user kept the name (decision 5 below).
 ### Corrections to `components/small_co.md`, recorded here instead of in the spec
 
 - **Row 13 (Anika):** card at 21:29, subscribe at 21:30, setup item at 21:31, billed on its own
-  invoice at 21:32 (#14).
+  invoice at 21:32 (#14). **Fixed since:** the row stands as written (setup item at 21:29,
+  subscribe at 21:30).
 - **Row 34 (Victor):** expires at 2026-06-23T15:40Z. That is 23 hours after 16:40 the day before,
   not 16:40.
 - **Row 45 (Grace):** as decision 2 above.

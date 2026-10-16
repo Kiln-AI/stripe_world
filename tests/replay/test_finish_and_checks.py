@@ -144,6 +144,13 @@ PLANTS: dict[str, tuple[str, tuple[str, ...]]] = {
         "lines sum to subtotal",
         (f"UPDATE invoices SET subtotal = subtotal + 1 WHERE id = {_first('invoices')}",),
     ),
+    "a line id used twice": (
+        "line ids are unique",
+        (
+            "UPDATE invoices SET lines = json_set(lines, '$[0].id', 'il_planted') WHERE id IN"
+            " (SELECT id FROM invoices WHERE json_array_length(lines) > 0 ORDER BY x_seq LIMIT 2)",
+        ),
+    ),
     "overlapping periods": (
         "no overlapping cycle periods",
         (
