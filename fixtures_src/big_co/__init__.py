@@ -17,7 +17,12 @@ from fixtures_src.big_co.simulate import SLA_MEMO, Catalog, Lives, business_days
 from fixtures_src.replay.checks import Expectation, check_fixture
 from fixtures_src.replay.client import Client
 from fixtures_src.replay.clock import plus
-from fixtures_src.replay.finish import refresh_balance_statuses, trim_events
+from fixtures_src.replay.finish import (
+    prune_ended_discounts,
+    refresh_balance_statuses,
+    refresh_coupon_validity,
+    trim_events,
+)
 from fixtures_src.replay.payouts import Payouts
 from fixtures_src.replay.subscriptions import Subscriptions
 from fixtures_src.replay.timeline import Timeline
@@ -115,5 +120,7 @@ def build(inst: seahaven.Instance) -> None:
         )
         tl.run()
         refresh_balance_statuses(ctx, now=NOW)
+        refresh_coupon_validity(ctx, now=NOW)
+        prune_ended_discounts(ctx, now=NOW)
         trim_events(ctx, now=NOW)
     check_fixture(inst.inspect(), now=NOW, expect=EXPECTATIONS)

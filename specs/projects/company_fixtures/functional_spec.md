@@ -179,6 +179,10 @@ Both fixtures satisfy these at build time; the build fails on the first violatio
 - No charge is refunded past its captured amount.
 - Every invoice's lines sum to its subtotal.
 - No two invoice lines share an id.
+- No invoice carries a discount past its `end`: the instant the invoice bills (where its period
+  closes) is before the end of every discount it applies.
+- Every coupon's stored `valid` agrees with the world's rule at `NOW`, and no subscription stores a
+  discount whose `end` has passed.
 - No two cycle invoices on one subscription have overlapping periods.
 - No subscription item is billed twice for one span: no two of its non-proration invoice lines
   with a non-zero amount, on invoices not voided, have overlapping periods. A $0 line, such as a

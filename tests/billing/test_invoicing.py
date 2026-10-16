@@ -30,7 +30,9 @@ def _line(amount: int = 2000, quantity: int = 1) -> invoicing.ItemLine:
     )
 
 
-TEN_PERCENT = invoicing.DiscountSpec("di_x", "coupon_x", None, Fraction(10))
+TEN_PERCENT = invoicing.DiscountSpec(
+    "di_x", "coupon_x", None, Fraction(10), start="2026-09-01T14:00:00.000Z", end=None
+)
 FIVE_PERCENT_GST = invoicing.TaxRateSpec("txr_x", Fraction(5), False)
 
 
@@ -89,7 +91,11 @@ def test_the_discount_apportions_floor_then_remainder() -> None:
     totals = invoicing.compute_totals(
         [_line(1000), _line(2000)],
         currency="usd",
-        invoice_discounts=[invoicing.DiscountSpec("di_a", "c", 500, None)],
+        invoice_discounts=[
+            invoicing.DiscountSpec(
+                "di_a", "c", 500, None, start="2026-09-01T14:00:00.000Z", end=None
+            )
+        ],
     )
     amounts = [entry["amount"] for entry in totals.lines[0]["discount_amounts"]]
     amounts += [entry["amount"] for entry in totals.lines[1]["discount_amounts"]]

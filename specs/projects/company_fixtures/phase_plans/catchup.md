@@ -41,6 +41,12 @@ uses. The user kept the name (decision 5 below).
      - `SWITCH25` is 25% off once. The spec said 25% off for 3 months.
      - Neither the guide nor the tests claim a redemption count (the spec said `LAUNCH` 10 and
        `TEACHWELL25` 5). They also make no claim about discounts having ended.
+     **Fixed since:** a repeating discount ends `duration_in_months` after it starts and bills
+     only invoices before its end, leaving the subscription once its end passes; each
+     discount minted counts a redemption, and `valid` reflects `redeem_by` and
+     `max_redemptions` at read time. `LAUNCH` and `SWITCH25` are 50% and 25% off for 3 months
+     again, both fixtures were rebuilt (`LAUNCH` redeemed 10 times, `TEACHWELL25` 5), the guide
+     shows the counts and no longer lists the gap.
    - **#14, pending invoice items are never swept.**
      - Anika's setup fee is billed on its own invoice right after she subscribes (the
        `BillPending` beat, which is not in small_co.md §3's beat vocabulary).

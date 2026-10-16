@@ -2488,3 +2488,408 @@ def test_a_swept_subscription_draft_keeps_its_line_ids_through_a_rebuild(
     )
     assert [line["id"] for line in edited["lines"]["data"]][1:] == before
     assert [source for source, _ in _line_sources(edited)][1:] == [item, None]
+
+
+# --- repeating coupons end; redemptions count (https://github.com/Kiln-AI/stripe_world/issues/13)
+
+
+def _coupon(instance: seahaven.Instance, **params) -> str:
+    return call(instance, "POST", "/v1/coupons", {"percent_off": 50, **params})["id"]
+
+
+def _months_after(iso: str, months: int) -> int:
+    from seahaven_stripe_world.billing import invoicing
+
+    return _time.to_unix(invoicing.add_interval(iso, interval="month", interval_count=months))
+
+
+def _discount_totals(invoice: dict) -> list[tuple[str, int]]:
+    """An invoice row's (discount id, amount) entries, from its stored totals."""
+    return [
+        (entry["discount"], entry["amount"])
+        for entry in json.loads(invoice["total_discount_amounts"])
+    ]
+
+
+def _stored_discounts(instance: seahaven.Instance, table: str, id_: str) -> list[dict]:
+    row = one_row(instance, f"SELECT discounts FROM {table} WHERE id = ?", id_)
+    return json.loads(row["discounts"])
+
+
+def _times_redeemed(instance: seahaven.Instance, coupon: str) -> int:
+    return call(instance, "GET", f"/v1/coupons/{coupon}")["times_redeemed"]
+
+
+def _at(ctx: seahaven.Ctx, moment: str) -> seahaven.Ctx:
+    """`ctx` reading `moment`: a call made later than the frozen instance clock."""
+    import dataclasses
+
+    return dataclasses.replace(ctx, clock=seahaven.Clock.from_iso(moment))
+
+
+def _annual_price(instance: seahaven.Instance, monthly: str) -> str:
+    return call(
+        instance,
+        "POST",
+        "/v1/prices",
+        {
+            "product": call(instance, "GET", f"/v1/prices/{monthly}")["product"],
+            "unit_amount": 20000,
+            "currency": "cad",
+            "recurring": {"interval": "year"},
+        },
+    )["id"]
+
+
+def _discounts_read_at(instance: seahaven.Instance, sub_id: str, moment: str) -> list[str]:
+    """`subscription.discounts` as a read at `moment` answers it."""
+    from seahaven_stripe_world.resources import subscriptions
+
+    with instance.bulk() as ctx:
+        row = ctx.db.one("SELECT * FROM subscriptions WHERE id = ?", sub_id)
+        assert row is not None
+        return subscriptions.serialize(_at(ctx, moment), row)["discounts"]
+
+
+def test_a_repeating_coupon_discounts_its_months_then_leaves_the_subscription(
+    instance: seahaven.Instance,
+) -> None:
+    """A 3-month coupon on a monthly plan discounts the create invoice and
+    two renewals. The renewal exactly at its `end` bills full price, and the
+    discount leaves `subscription.discounts` there while staying on the
+    invoices it discounted. A swept discountable item follows the same
+    window. Every invoice-side object keeps the discount's own start."""
+    cus, _, price = setup_catalog(instance)
+    coupon = _coupon(instance, duration="repeating", duration_in_months=3)
+    sub = call(
+        instance,
+        "POST",
+        "/v1/subscriptions",
+        {"customer": cus, "items": [{"price": price}], "discounts": [{"coupon": coupon}]},
+    )
+    (discount,) = sub["discounts"]
+    window = {"start": _time.to_unix(BLANK_NOW), "end": _months_after(BLANK_NOW, 3)}
+    (stored,) = _stored_discounts(instance, "subscriptions", sub["id"])
+    assert {key: stored[key] for key in ("id", "start", "end")} == {"id": discount, **window}
+    first = one_row(instance, "SELECT * FROM invoices WHERE id = ?", sub["latest_invoice"])
+    assert (first["total"], _discount_totals(first)) == (1000, [(discount, 1000)])
+    renewals = [_renew(instance, sub["id"])]
+    _pending_item(instance, cus)  # swept by the second renewal, inside the window
+    renewals.append(_renew(instance, sub["id"]))
+    _pending_item(instance, cus)  # swept by the third, at the window's end
+    renewals.append(_renew(instance, sub["id"]))
+    assert [renewal["total"] for renewal in renewals] == [1000, 3450, 6900]
+    assert [_discount_totals(renewal) for renewal in renewals] == [
+        [(discount, 1000)],
+        [(discount, 3450)],
+        [],
+    ]
+    # the third renewal bills at the window's end, so the discount has left the row
+    assert renewals[2]["period_end"] == _time.from_unix(window["end"])
+    assert call(instance, "GET", f"/v1/subscriptions/{sub['id']}")["discounts"] == []
+    assert _stored_discounts(instance, "invoices", renewals[2]["id"]) == []
+    # ...and stays on every invoice it discounted, with its own window
+    for invoice in (first, *renewals[:2]):
+        (applied,) = _stored_discounts(instance, "invoices", invoice["id"])
+        assert {key: applied[key] for key in ("id", "start", "end")} == {"id": discount, **window}
+    assert _renew(instance, sub["id"])["total"] == 2000
+
+
+def test_an_annual_plan_with_a_three_month_coupon_discounts_only_its_first_invoice(
+    instance: seahaven.Instance,
+) -> None:
+    """The discount is gone from a read once its `end` passes, though no
+    invoice bills until the renewal to prune it from the row (Stripe drops
+    it at `end`; unprobed)."""
+    cus, _, monthly = setup_catalog(instance)
+    coupon = _coupon(instance, duration="repeating", duration_in_months=3)
+    sub = call(
+        instance,
+        "POST",
+        "/v1/subscriptions",
+        {
+            "customer": cus,
+            "items": [{"price": _annual_price(instance, monthly)}],
+            "discounts": [{"coupon": coupon}],
+        },
+    )
+    first = one_row(instance, "SELECT * FROM invoices WHERE id = ?", sub["latest_invoice"])
+    assert first["total"] == 10000
+    end = _months_after(BLANK_NOW, 3)
+    assert _discounts_read_at(instance, sub["id"], _time.from_unix(end - 1)) == sub["discounts"]
+    assert _discounts_read_at(instance, sub["id"], _time.from_unix(end)) == []
+    assert len(_stored_discounts(instance, "subscriptions", sub["id"])) == 1
+    renewal = _renew(instance, sub["id"])
+    assert (renewal["total"], _discount_totals(renewal)) == (20000, [])
+    assert _stored_discounts(instance, "subscriptions", sub["id"]) == []
+
+
+@pytest.mark.parametrize(
+    ("trial_days", "trial_end_total", "kept"),
+    [(14, 1000, 1), (40, 2000, 0)],
+    ids=["trial ends inside the window", "trial ends after the window"],
+)
+def test_the_trial_end_invoice_respects_the_window(
+    instance: seahaven.Instance, trial_days: int, trial_end_total: int, kept: int
+) -> None:
+    """The window runs from the create in wall time, trial included
+    (assumed): the walker bills the trial end at its boundary, not at the
+    frozen clock, so a one-month coupon has ended by a 40-day trial's end."""
+    import seahaven_stripe_world.billing.subscription_lifecycle as lifecycle
+
+    cus, _, price = setup_catalog(instance)
+    coupon = _coupon(instance, duration="repeating", duration_in_months=1)
+    sub = call(
+        instance,
+        "POST",
+        "/v1/subscriptions",
+        {
+            "customer": cus,
+            "items": [{"price": price}],
+            "trial_period_days": trial_days,
+            "discounts": [{"coupon": coupon}],
+        },
+    )
+    with instance.bulk() as ctx:
+        fresh = lifecycle.advance_cycle(ctx, sub["id"])
+    invoice = one_row(instance, "SELECT * FROM invoices WHERE id = ?", fresh["latest_invoice"])
+    assert invoice["period_end"] == _time.from_unix(_time.to_unix(BLANK_NOW) + trial_days * 86_400)
+    assert invoice["total"] == trial_end_total
+    assert len(call(instance, "GET", f"/v1/subscriptions/{sub['id']}")["discounts"]) == kept
+
+
+def test_a_conversion_after_the_window_nets_no_coupon(instance: seahaven.Instance) -> None:
+    """A future `trial_end` on an active subscription bills its conversion
+    at the request's instant: past the window, the credit carries no coupon
+    and the ended discount leaves the row."""
+    import seahaven_stripe_world.billing.subscription_lifecycle as lifecycle
+
+    cus, _, monthly = setup_catalog(instance)
+    coupon = _coupon(instance, duration="repeating", duration_in_months=1)
+    sub = call(
+        instance,
+        "POST",
+        "/v1/subscriptions",
+        {
+            "customer": cus,
+            "items": [{"price": _annual_price(instance, monthly)}],
+            "discounts": [{"coupon": coupon}],
+        },
+    )
+    later = _time.from_unix(_months_after(BLANK_NOW, 2))
+    with instance.bulk() as ctx:
+        body = lifecycle.apply_update(
+            _at(ctx, later), sub["id"], {"trial_end": _time.to_unix(later) + 7 * 86_400}
+        )
+    invoice = one_row(instance, "SELECT * FROM invoices WHERE id = ?", body["latest_invoice"])
+    assert invoice["billing_reason"] == "subscription_update"
+    credit = json.loads(invoice["lines"])[0]
+    assert (credit["amount"], credit["description"]) == (
+        -20000,
+        "Unused time on machine after 01 Nov 2026",
+    )
+    assert _stored_discounts(instance, "invoices", invoice["id"]) == []
+    assert _stored_discounts(instance, "subscriptions", sub["id"]) == []
+
+
+def test_an_update_ending_the_trial_after_the_window_bills_full_price(
+    instance: seahaven.Instance,
+) -> None:
+    """`trial_end: "now"` bills the trial end at the request's instant: a day
+    past a one-month window, the first paid invoice is undiscounted."""
+    import seahaven_stripe_world.billing.subscription_lifecycle as lifecycle
+
+    cus, _, price = setup_catalog(instance)
+    coupon = _coupon(instance, duration="repeating", duration_in_months=1)
+    sub = call(
+        instance,
+        "POST",
+        "/v1/subscriptions",
+        {
+            "customer": cus,
+            "items": [{"price": price}],
+            "trial_period_days": 60,
+            "discounts": [{"coupon": coupon}],
+        },
+    )
+    later = _time.from_unix(_months_after(BLANK_NOW, 1) + 86_400)
+    with instance.bulk() as ctx:
+        body = lifecycle.apply_update(_at(ctx, later), sub["id"], {"trial_end": "now"})
+    invoice = one_row(instance, "SELECT * FROM invoices WHERE id = ?", body["latest_invoice"])
+    assert (invoice["period_end"], invoice["total"], _discount_totals(invoice)) == (later, 2000, [])
+    assert _stored_discounts(instance, "subscriptions", sub["id"]) == []
+
+
+def test_a_draft_keeps_its_discount_through_a_rebuild_after_the_window(
+    instance: seahaven.Instance,
+) -> None:
+    """An invoice's discounts are fixed once applied: a kept-draft renewal
+    from inside the window still carries its discount when it is edited
+    after the discount has left the subscription."""
+    cus, _, price = setup_catalog(instance)
+    coupon = _coupon(instance, duration="repeating", duration_in_months=2)
+    sub = call(
+        instance,
+        "POST",
+        "/v1/subscriptions",
+        {"customer": cus, "items": [{"price": price}], "discounts": [{"coupon": coupon}]},
+    )
+    (discount,) = sub["discounts"]
+    call(
+        instance,
+        "POST",
+        f"/v1/subscriptions/{sub['id']}",
+        {"pause_collection": {"behavior": "keep_as_draft"}},
+    )
+    draft = _renew(instance, sub["id"])
+    assert (draft["status"], draft["total"]) == ("draft", 1000)
+    assert _renew(instance, sub["id"])["total"] == 2000  # at the window's end
+    assert call(instance, "GET", f"/v1/subscriptions/{sub['id']}")["discounts"] == []
+    edited = call(
+        instance,
+        "POST",
+        f"/v1/invoices/{draft['id']}/add_lines",
+        {"lines": [{"amount": 500, "description": "Onboarding"}]},
+    )
+    assert edited["discounts"] == [discount]
+    assert edited["total_discount_amounts"] == [{"amount": 1250, "discount": discount}]
+    assert edited["total"] == 1250
+    # No read-time window applies to an invoice: past the discount's end, a rebuild still nets
+    # it and a read still lists it.
+    from seahaven_stripe_world.billing import invoicing
+    from seahaven_stripe_world.resources import invoices
+
+    past_end = _time.from_unix(_months_after(BLANK_NOW, 3))
+    with instance.bulk() as ctx:
+        invoicing.rebuild_invoice_lines(_at(ctx, past_end), draft["id"])
+        row = ctx.db.one("SELECT * FROM invoices WHERE id = ?", draft["id"])
+        assert row is not None
+        body = invoices.serialize(_at(ctx, past_end), row)
+    assert (body["discounts"], body["total"]) == ([discount], 1250)
+
+
+def test_a_resume_after_the_window_bills_full_price(instance: seahaven.Instance) -> None:
+    """A resume bills at the request's instant: past the window, its cycle
+    invoice is undiscounted and the ended discount leaves the row."""
+    import seahaven_stripe_world.billing.subscription_lifecycle as lifecycle
+
+    _, _, price = setup_catalog(instance)
+    bare = call(instance, "POST", "/v1/customers", {"email": "bare@example.test"})["id"]
+    coupon = _coupon(instance, duration="repeating", duration_in_months=1)
+    sub = call(
+        instance,
+        "POST",
+        "/v1/subscriptions",
+        {
+            "customer": bare,
+            "items": [{"price": price}],
+            "trial_end": _time.to_unix(BLANK_NOW) + 14 * 86_400,
+            "trial_settings": {"end_behavior": {"missing_payment_method": "pause"}},
+            "discounts": [{"coupon": coupon}],
+        },
+    )
+    call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": "now"})
+    later = _time.from_unix(_months_after(BLANK_NOW, 2))
+    with instance.bulk() as ctx:
+        body = lifecycle.resume_subscription(_at(ctx, later), sub["id"])
+    invoice = one_row(instance, "SELECT * FROM invoices WHERE id = ?", body["latest_invoice"])
+    assert (invoice["total"], _discount_totals(invoice)) == (2000, [])
+    assert body["discounts"] == []
+
+
+def test_a_deleted_coupons_repeating_discount_bills_until_its_end(
+    instance: seahaven.Instance,
+) -> None:
+    """Deleting a coupon leaves its discounts billing (Stripe's docs), and
+    only for their own window."""
+    cus, _, price = setup_catalog(instance)
+    coupon = _coupon(instance, duration="repeating", duration_in_months=2)
+    sub = call(
+        instance,
+        "POST",
+        "/v1/subscriptions",
+        {"customer": cus, "items": [{"price": price}], "discounts": [{"coupon": coupon}]},
+    )
+    call(instance, "DELETE", f"/v1/coupons/{coupon}")
+    assert [_renew(instance, sub["id"])["total"] for _ in range(2)] == [1000, 2000]
+
+
+def test_each_minted_discount_redeems_its_coupon_once(instance: seahaven.Instance) -> None:
+    """A create counts its coupons — a once-coupon a trial parks included —
+    and an update counts only the discounts it mints: one that omits
+    `discounts` keeps the row's own uncounted."""
+    cus, _, price = setup_catalog(instance)
+    repeating = _coupon(instance, duration="repeating", duration_in_months=3)
+    once = _coupon(instance, duration="once")
+    sub = call(
+        instance,
+        "POST",
+        "/v1/subscriptions",
+        {
+            "customer": cus,
+            "items": [{"price": price}],
+            "discounts": [{"coupon": repeating}, {"coupon": once}],
+        },
+    )
+    assert (_times_redeemed(instance, repeating), _times_redeemed(instance, once)) == (1, 1)
+    call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"metadata": {"k": "v"}})
+    _renew(instance, sub["id"])
+    assert _times_redeemed(instance, repeating) == 1
+    replaced = call(
+        instance,
+        "POST",
+        f"/v1/subscriptions/{sub['id']}",
+        {"discounts": [{"coupon": repeating}]},
+    )
+    assert replaced["discounts"] != sub["discounts"]  # a new discount, minted now
+    assert _times_redeemed(instance, repeating) == 2
+    call(
+        instance,
+        "POST",
+        "/v1/subscriptions",
+        {
+            "customer": cus,
+            "items": [{"price": price}],
+            "trial_period_days": 14,
+            "discounts": [{"coupon": once}],
+        },
+    )
+    assert _times_redeemed(instance, once) == 2
+
+
+def test_max_redemptions_refuses_the_next_redemption(instance: seahaven.Instance) -> None:
+    """The last allowed redemption flips `valid` false, and the next
+    application is the `coupon_expired` refusal (unprobed message), on
+    create and update alike, counting nothing."""
+    cus, _, price = setup_catalog(instance)
+    coupon = _coupon(instance, duration="forever", max_redemptions=1)
+    assert call(instance, "GET", f"/v1/coupons/{coupon}")["valid"] is True
+    sub = call(
+        instance,
+        "POST",
+        "/v1/subscriptions",
+        {"customer": cus, "items": [{"price": price}], "discounts": [{"coupon": coupon}]},
+    )
+    body = call(instance, "GET", f"/v1/coupons/{coupon}")
+    assert (body["times_redeemed"], body["valid"]) == (1, False)
+    assert one_row(instance, "SELECT valid FROM coupons WHERE id = ?", coupon) == {"valid": 0}
+    subscriptions = one_row(instance, "SELECT count(*) AS n FROM subscriptions")["n"]
+    for method, path, params in (
+        (
+            "POST",
+            "/v1/subscriptions",
+            {"customer": cus, "items": [{"price": price}], "discounts": [{"coupon": coupon}]},
+        ),
+        ("POST", f"/v1/subscriptions/{sub['id']}", {"discounts": [{"coupon": coupon}]}),
+    ):
+        with pytest.raises(StripeToolError) as exc_info:
+            call(instance, method, path, params)
+        error = exc_info.value.stripe_body["error"]
+        assert (error["code"], error["message"]) == (
+            "coupon_expired",
+            f"Coupon {coupon} has been redeemed the maximum number of times.",
+        )
+    assert one_row(instance, "SELECT count(*) AS n FROM subscriptions")["n"] == subscriptions
+    assert _times_redeemed(instance, coupon) == 1
+    # the refused update kept the row's discount
+    assert call(instance, "GET", f"/v1/subscriptions/{sub['id']}")["discounts"] == sub["discounts"]

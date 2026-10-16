@@ -25,14 +25,10 @@ there; every other timestamp column is canonical UTC text.
 
 ## Known gaps
 
-Both companies were replayed through this world as it is, so they show one of its known
-differences from Stripe. It is filed as an issue, and the fixtures avoid it where they can:
-
-- **Repeating coupons never end, and `times_redeemed` stays 0**
-  ([#13](https://github.com/Kiln-AI/stripe_world/issues/13)). No coupon in either fixture is
-  `repeating`: the launch and switch-over codes are 50% and 25% off the first invoice
-  (`duration: once`), and the association codes are `forever`. Every coupon reports
-  `times_redeemed: 0`. To count redemptions, count the invoices that carry the coupon.
+Both companies were replayed through this world as it is. The known differences from Stripe they
+used to show ([#12](https://github.com/Kiln-AI/stripe_world/issues/12) to
+[#15](https://github.com/Kiln-AI/stripe_world/issues/15)) are fixed and both fixtures rebuilt, so
+neither shows a known gap now.
 
 Disputes in both fixtures come from one-off payments: this world opens a dispute test card's
 dispute when it confirms a PaymentIntent. A subscription's own charges are never disputed.
@@ -58,10 +54,65 @@ bank account (`STRIPE TEST BANK`, `…6789`).
 `lookup_key`: `founding_annual` ($96/yr, archived at launch), `solo_monthly` ($12),
 `solo_annual` ($120), `studio_monthly` ($29), `studio_annual` ($290), `setup` ($49 one-time).
 Each $49 setup invoice item also carries its own one-off price and product, as Stripe mints them,
-so the account holds 5 products and 8 prices. Coupons: `LAUNCH` (50% off the first invoice, for
+so the account holds 5 products and 8 prices. Coupons: `LAUNCH` (50% off for 3 months, for
 signups through 2026-03-31) and `TEACHWELL25` (25% off the first invoice). 14-day trials; a
 trial with no card pauses at its end. Cards, charged automatically. No tax rates. Payouts are
 manual, each Monday at 15:00Z, of the available balance.
+
+Each discount a subscription is given is one redemption of its coupon. `LAUNCH`'s signup window
+closed on 2026-03-31, so it reads `valid: false` at `NOW`.
+
+```sql landmark=small_co/coupons
+SELECT id, duration, duration_in_months, redeem_by, times_redeemed, valid
+FROM coupons
+ORDER BY x_seq
+```
+
+```json rows
+[
+  {"id": "LAUNCH", "duration": "repeating", "duration_in_months": 3, "redeem_by": "2026-03-31T23:59:59.000Z", "times_redeemed": 10, "valid": 0},
+  {"id": "TEACHWELL25", "duration": "once", "duration_in_months": null, "redeem_by": null, "times_redeemed": 5, "valid": 1}
+]
+```
+
+`LAUNCH` took half off a subscriber's invoices for three months from signup: the first invoice
+and two renewals on a monthly plan, then full price from the June renewal; the first invoice
+only on an annual plan. Every one of those discounts has ended, so no subscription carries
+`LAUNCH` at `NOW`.
+
+```sql landmark=small_co/launch_subscribers
+SELECT c.email, p.lookup_key, s.status,
+       sum(EXISTS (SELECT 1 FROM json_each(i.discounts) d
+                   WHERE json_extract(d.value, '$.source.coupon') = 'LAUNCH')) AS discounted,
+       sum(NOT EXISTS (SELECT 1 FROM json_each(i.discounts) d
+                       WHERE json_extract(d.value, '$.source.coupon') = 'LAUNCH')) AS full_price,
+       EXISTS (SELECT 1 FROM json_each(s.discounts) d
+               WHERE json_extract(d.value, '$.source.coupon') = 'LAUNCH') AS still_carries_it
+FROM subscriptions s
+JOIN customers c ON c.id = s.customer
+JOIN subscription_items si ON si.subscription = s.id
+JOIN prices p ON p.id = si.price
+JOIN invoices i ON i.parent_subscription = s.id
+WHERE s.id IN (SELECT inv.parent_subscription FROM invoices inv, json_each(inv.discounts) d
+               WHERE json_extract(d.value, '$.source.coupon') = 'LAUNCH')
+GROUP BY s.id
+ORDER BY s.x_seq
+```
+
+```json rows
+[
+  {"email": "amara@oseireading.com", "lookup_key": "solo_monthly", "status": "active", "discounted": 3, "full_price": 3, "still_carries_it": 0},
+  {"email": "ben@carlisleguitar.com", "lookup_key": "solo_monthly", "status": "canceled", "discounted": 3, "full_price": 1, "still_carries_it": 0},
+  {"email": "lucas@moreaucello.com", "lookup_key": "solo_monthly", "status": "active", "discounted": 3, "full_price": 3, "still_carries_it": 0},
+  {"email": "tom@riverbendmusic.org", "lookup_key": "studio_monthly", "status": "active", "discounted": 3, "full_price": 3, "still_carries_it": 0},
+  {"email": "sarah@goldberglsat.com", "lookup_key": "solo_monthly", "status": "active", "discounted": 3, "full_price": 3, "still_carries_it": 0},
+  {"email": "anika@sharmatutoring.com", "lookup_key": "studio_monthly", "status": "active", "discounted": 3, "full_price": 3, "still_carries_it": 0},
+  {"email": "olivia@grantprep.com", "lookup_key": "solo_monthly", "status": "canceled", "discounted": 3, "full_price": 0, "still_carries_it": 0},
+  {"email": "diego@herrerafutbol.com", "lookup_key": "solo_monthly", "status": "active", "discounted": 3, "full_price": 3, "still_carries_it": 0},
+  {"email": "ellen@parkyoga.studio", "lookup_key": "solo_annual", "status": "active", "discounted": 1, "full_price": 0, "still_carries_it": 0},
+  {"email": "paolo@riccivoice.com", "lookup_key": "studio_annual", "status": "active", "discounted": 1, "full_price": 0, "still_carries_it": 0}
+]
+```
 
 **Counts at `NOW`.** All 30 days of events are kept, and nothing older.
 
@@ -437,10 +488,33 @@ Reminders* (`sms_monthly` $29 flat, `sms_annual` $290). *Onboarding* packages ar
 sales on `send_invoice` terms; each invoice item also mints its own one-off price and product, as
 Stripe does. *Legacy Starter* (`legacy_starter_monthly` $29) and *Legacy Pro*
 (`legacy_pro_monthly` $59) were archived after migration week; part of the migrated cohort still
-pays them. Coupons: `SWITCH25` (25% off the first invoice, for customers leaving a competitor),
+pays them. Coupons: `SWITCH25` (25% off for 3 months, for customers leaving a competitor),
 the trade-association codes `MSPG10`, `FRHA10` and `RMEC10` (10% off forever), and one-off
 "Sales concession" amount-off coupons. Sales tax is six manual tax rates (TX 6.25%, WA 6.5%, NY 4%,
 PA 6%, OH 5.75%, TN 7%), applied by the customer's state; three public buyers are `tax_exempt`.
+
+Each discount a subscription is given is one redemption of its coupon. A sales concession is made
+for one customer and redeemed once.
+
+```sql landmark=big_co/coupons
+SELECT id, duration, duration_in_months, percent_off, amount_off, times_redeemed, valid
+FROM coupons
+ORDER BY x_seq
+```
+
+```json rows
+[
+  {"id": "SWITCH25", "duration": "repeating", "duration_in_months": 3, "percent_off": "25", "amount_off": null, "times_redeemed": 15, "valid": 1},
+  {"id": "MSPG10", "duration": "forever", "duration_in_months": null, "percent_off": "10", "amount_off": null, "times_redeemed": 0, "valid": 1},
+  {"id": "FRHA10", "duration": "forever", "duration_in_months": null, "percent_off": "10", "amount_off": null, "times_redeemed": 3, "valid": 1},
+  {"id": "RMEC10", "duration": "forever", "duration_in_months": null, "percent_off": "10", "amount_off": null, "times_redeemed": 0, "valid": 1},
+  {"id": "lwTgEUnM", "duration": "once", "duration_in_months": null, "percent_off": null, "amount_off": 30000, "times_redeemed": 1, "valid": 1},
+  {"id": "PqHesNWN", "duration": "once", "duration_in_months": null, "percent_off": null, "amount_off": 10000, "times_redeemed": 1, "valid": 1},
+  {"id": "AU6ouRVx", "duration": "once", "duration_in_months": null, "percent_off": null, "amount_off": 50000, "times_redeemed": 1, "valid": 1},
+  {"id": "qfJwMQAM", "duration": "once", "duration_in_months": null, "percent_off": null, "amount_off": 50000, "times_redeemed": 1, "valid": 1},
+  {"id": "2tMD12wx", "duration": "once", "duration_in_months": null, "percent_off": null, "amount_off": 40000, "times_redeemed": 1, "valid": 1}
+]
+```
 
 **How they pay.** Starter, Pro and Business are charged to a card automatically; self-serve
 Starter and Pro signups start a 14-day trial with a card, and Business trials set up by sales

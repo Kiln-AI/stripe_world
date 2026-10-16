@@ -1,6 +1,7 @@
 """The finishing steps, the checks, and the test cards (replay.md §4, §6, §7, §8)."""
 
 import itertools
+import json
 from collections.abc import Iterator
 
 import pytest
@@ -35,6 +36,8 @@ def _tiny(inst: seahaven.Instance) -> None:
         Payouts(story.timeline, story.client, destination=destination).schedule(mondays)
         story.timeline.run()
         finish.refresh_balance_statuses(ctx, now=NOW)
+        finish.refresh_coupon_validity(ctx, now=NOW)
+        finish.prune_ended_discounts(ctx, now=NOW)
         finish.trim_events(ctx, now=NOW)
 
 
@@ -90,6 +93,87 @@ def test_refresh_and_trim_touch_exactly_the_stale_rows() -> None:
         assert rows(inst, "SELECT min(created) AS m FROM events")[0]["m"] >= plus(NOW, days=-30)
 
 
+def test_refresh_coupon_validity_stores_the_rule_at_now() -> None:
+    """A coupon whose `redeem_by` passed with no write since reads stored-valid until the
+    finishing step stores the world's rule at NOW; one still redeemable is untouched."""
+    with blank() as inst:
+        with inst.bulk() as ctx:
+            story = Story(ctx)
+
+            def make_coupons(ctx: seahaven.Ctx) -> None:
+                for coupon_id, redeem_by in (("LAPSED", plus(START, days=1)), ("OPEN", LATER)):
+                    story.client.call(
+                        ctx,
+                        "POST",
+                        "/v1/coupons",
+                        {
+                            "id": coupon_id,
+                            "percent_off": 10,
+                            "duration": "once",
+                            "redeem_by": _time.to_unix(redeem_by),
+                        },
+                    )
+
+            story.timeline.add(START, "coupons", make_coupons)
+            story.timeline.run()
+            stale = (
+                "coupon valid agrees with is_valid at NOW: 1 rows,"
+                " e.g. [{'id': 'LAPSED', 'valid': 1}]"
+            )
+            assert stale in checks.violations(ctx.db, now=NOW)
+            assert finish.refresh_coupon_validity(ctx, now=NOW) == 1
+            assert finish.refresh_coupon_validity(ctx, now=NOW) == 0
+            assert stale not in checks.violations(ctx.db, now=NOW)
+        assert rows(inst, "SELECT id, valid FROM coupons ORDER BY id") == [
+            {"id": "LAPSED", "valid": 0},
+            {"id": "OPEN", "valid": 1},
+        ]
+
+
+def test_prune_ended_discounts_drops_exactly_the_ended_ones() -> None:
+    """A canceled subscription bills no invoice to prune its 1-month discount, so the row keeps
+    it past its end until the finishing step drops it; its `forever` discount stays."""
+    with blank() as inst:
+        with inst.bulk() as ctx:
+            story = Story(ctx)
+
+            def subscribe_then_cancel(ctx: seahaven.Ctx) -> None:
+                for coupon_id, terms in (
+                    ("MONTH", {"duration": "repeating", "duration_in_months": 1}),
+                    ("ALWAYS", {"duration": "forever"}),
+                ):
+                    story.client.call(
+                        ctx, "POST", "/v1/coupons", {"id": coupon_id, "percent_off": 10, **terms}
+                    )
+                customer = story.client.create_customer(ctx, name="Gone", email="g@gonetutor.com")
+                story.client.add_card(ctx, customer, cards.GOOD[0], exp=(4, 2029))
+                sub = story.client.call(
+                    ctx,
+                    "POST",
+                    "/v1/subscriptions",
+                    {
+                        "customer": customer,
+                        "items": [{"price": story.ids["price"]}],
+                        "discounts": [{"coupon": "MONTH"}, {"coupon": "ALWAYS"}],
+                    },
+                )
+                story.ids["gone"] = sub["id"]
+                story.client.cancel_subscription(ctx, sub["id"], feedback="unused")
+
+            story.timeline.add(START, "subscribe then cancel", subscribe_then_cancel)
+            story.timeline.run()
+            failures = checks.violations(ctx.db, now=NOW)
+            assert any(
+                f.startswith("no subscription carries a discount past its end at NOW: 1 rows")
+                for f in failures
+            ), failures
+            assert finish.prune_ended_discounts(ctx, now=NOW) == 1
+            assert finish.prune_ended_discounts(ctx, now=NOW) == 0
+        (row,) = rows(inst, "SELECT discounts FROM subscriptions WHERE id = ?", story.ids["gone"])
+        coupons = [d["source"]["coupon"] for d in json.loads(row["discounts"])]
+        assert coupons == ["ALWAYS"]
+
+
 def test_check_fixture_passes_on_a_tiny_build(tiny: seahaven.Instance) -> None:
     checks.check_fixture(
         tiny.inspect(),
@@ -133,6 +217,13 @@ PLANTS: dict[str, tuple[str, tuple[str, ...]]] = {
             f" WHERE id = {_first('balance_transactions')}",
         ),
     ),
+    "a stale coupon valid": (
+        "coupon valid agrees with is_valid at NOW",
+        (
+            "INSERT INTO coupons (id, x_seq, created, duration, percent_off, redeem_by, valid)"
+            f" VALUES ('PLANTED', 1, '{START}', 'once', '10', '{plus(START, days=1)}', 1)",
+        ),
+    ),
     "payout overdraw": (
         "no payout overdrew",
         (
@@ -149,6 +240,24 @@ PLANTS: dict[str, tuple[str, tuple[str, ...]]] = {
         (
             "UPDATE invoices SET lines = json_set(lines, '$[0].id', 'il_planted') WHERE id IN"
             " (SELECT id FROM invoices WHERE json_array_length(lines) > 0 ORDER BY x_seq LIMIT 2)",
+        ),
+    ),
+    "a subscription discount past its end": (
+        "no subscription carries a discount past its end at NOW",
+        (
+            "UPDATE subscriptions SET discounts = json_array(json_object('id', 'di_planted',"
+            " 'object', 'discount', 'source', json_object('type', 'coupon', 'coupon', 'GONE'),"
+            f" 'start', {_time.to_unix(EARLIER)}, 'end', {_time.to_unix(START)}))"
+            f" WHERE id = {_first('subscriptions')}",
+        ),
+    ),
+    "a discount past its end": (
+        "invoice discounts are inside their windows",
+        (
+            "UPDATE invoices SET discounts = json_array(json_object('id', 'di_planted',"
+            " 'object', 'discount', 'source', json_object('type', 'coupon', 'coupon', 'GONE'),"
+            f" 'start', {_time.to_unix(EARLIER)}, 'end', {_time.to_unix(START)}))"
+            f" WHERE id = {_first('invoices', "billing_reason = 'subscription_cycle'")}",
         ),
     ),
     "overlapping periods": (

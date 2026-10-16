@@ -28,7 +28,7 @@ from seahaven_stripe_world import _ids, _json, _seq, _time
 from seahaven_stripe_world.billing import invoicing, proration
 from seahaven_stripe_world.billing._money import round_half_up
 from seahaven_stripe_world.billing.invoicing import DiscountSpec, TaxRateSpec
-from seahaven_stripe_world.resources import _lookup, events, payment_intents
+from seahaven_stripe_world.resources import _lookup, coupons, events, payment_intents
 from seahaven_stripe_world.serialize.fields import instance_livemode
 from seahaven_stripe_world.stripe_errors import StripeApiError, invalid_request, resource_missing
 
@@ -43,6 +43,7 @@ __all__ = [
     "cancel_subscription",
     "clear_pending_cancel",
     "create_subscription",
+    "discount_ended",
     "expire_incomplete",
     "on_invoice_paid",
     "resume_subscription",
@@ -257,8 +258,8 @@ def _refuse_no_payment_method() -> None:
 def _resolve_discounts(
     ctx: seahaven.Ctx, discounts_param: list[dict[str, str]], *, park_once: bool = False
 ) -> tuple[list[DiscountSpec], list[dict[str, Any]]]:
-    """The create-time `discounts[]` parameter -> (invoice-scope specs,
-    persisted subscription-level discount objects).
+    """The `discounts[]` parameter -> (invoice-scope specs, persisted
+    subscription-level discount objects).
 
     A `duration=once` coupon applies to the first PAID invoice: on a
     no-trial create that is the create invoice itself, so nothing persists
@@ -269,8 +270,14 @@ def _resolve_discounts(
     pending item, whose invoice consumes it as a no-trial create's does
     (`park_once=False`; unprobed, `create_subscription`'s
     `trial_bills_items`). `forever`/`repeating` persist either way. The
-    stored object is the full inline discount
-    (`data_model.md` §6 — no discounts table), emitted as its `di_` id."""
+    stored object is the full inline discount (`_discount_object`).
+
+    Every entry mints a new discount starting now, which is one redemption
+    of its coupon (`coupons.redeem`), refused first when the coupon is no
+    longer valid. A `repeating` discount ends `duration_in_months` calendar
+    months after it starts, the day clamped as a billing month's is (Stripe's
+    docs; unprobed — no recorded body carries a discount object)
+    (https://github.com/Kiln-AI/stripe_world/issues/13)."""
     now = ctx.clock.iso()
     specs: list[DiscountSpec] = []
     persisted: list[dict[str, Any]] = []
@@ -278,30 +285,58 @@ def _resolve_discounts(
         coupon = _lookup.require_live_row(
             ctx, "coupons", "coupon", entry["coupon"], param=f"discounts[{index}][coupon]"
         )
-        if coupon["redeem_by"] is not None and coupon["redeem_by"] <= now:
-            # Code from the billing engine's error table; the exact message
-            # spelling is unrecorded (Phase 12 did not probe it).
-            raise invalid_request(f"Coupon {coupon['id']} is expired.", code="coupon_expired")
-        discount_id = _ids.stripe_id(ctx, "di_", timestamp=now)
-        percent = Fraction(coupon["percent_off"]) if coupon["percent_off"] else None
-        specs.append(
-            DiscountSpec(
-                discount_id=discount_id,
-                coupon_id=coupon["id"],
-                amount_off=coupon["amount_off"],
-                percent_off=percent,
+        _refuse_unredeemable(coupon, now)
+        coupons.redeem(ctx, coupon["id"])
+        end = (
+            invoicing.add_interval(
+                now, interval="month", interval_count=coupon["duration_in_months"]
             )
+            if coupon["duration"] == "repeating"
+            else None
         )
+        spec = DiscountSpec(
+            discount_id=_ids.stripe_id(ctx, "di_", timestamp=now),
+            coupon_id=coupon["id"],
+            amount_off=coupon["amount_off"],
+            percent_off=Fraction(coupon["percent_off"]) if coupon["percent_off"] else None,
+            start=now,
+            end=end,
+        )
+        specs.append(spec)
         if coupon["duration"] != "once" or park_once:
-            persisted.append(
-                {
-                    "id": discount_id,
-                    "object": "discount",
-                    "source": {"type": "coupon", "coupon": coupon["id"]},
-                    "start": _time.to_unix(now),
-                }
-            )
+            persisted.append(_discount_object(spec))
     return specs, persisted
+
+
+def _refuse_unredeemable(coupon: Mapping[str, Any], now: str) -> None:
+    """The `coupon_expired` refusals: a coupon past its `redeem_by`, or one
+    redeemed `max_redemptions` times (a deleted one is already missing). The
+    code is the billing engine's error table's; neither message spelling is
+    recorded (Phase 12 did not probe them), and the exhausted one is
+    unprobed outright."""
+    if coupon["redeem_by"] is not None and coupon["redeem_by"] <= now:
+        raise invalid_request(f"Coupon {coupon['id']} is expired.", code="coupon_expired")
+    if (
+        coupon["max_redemptions"] is not None
+        and coupon["times_redeemed"] >= coupon["max_redemptions"]
+    ):
+        raise invalid_request(
+            f"Coupon {coupon['id']} has been redeemed the maximum number of times.",
+            code="coupon_expired",
+        )
+
+
+def _discount_object(spec: DiscountSpec) -> dict[str, Any]:
+    """The inline discount a subscription or invoice stores (`data_model.md`
+    §6 — no discounts table; emitted as its `di_` id), its window in Unix
+    seconds as JSON holds instants (§10): `end` null for `once`/`forever`."""
+    return {
+        "id": spec.discount_id,
+        "object": "discount",
+        "source": {"type": "coupon", "coupon": spec.coupon_id},
+        "start": _time.to_unix(spec.start),
+        "end": None if spec.end is None else _time.to_unix(spec.end),
+    }
 
 
 def _tax_specs(ctx: seahaven.Ctx, tax_rate_ids: Sequence[str]) -> list[TaxRateSpec]:
@@ -535,15 +570,7 @@ def create_subscription(ctx: seahaven.Ctx, params: dict[str, Any]) -> dict[str, 
                 finalize=True,
                 trial=True,
                 discount_specs=[],
-                applied_discount_objects=[
-                    {
-                        "id": spec.discount_id,
-                        "object": "discount",
-                        "source": {"type": "coupon", "coupon": spec.coupon_id},
-                        "start": _time.to_unix(now),
-                    }
-                    for spec in discount_specs
-                ],
+                applied_discount_objects=[_discount_object(spec) for spec in discount_specs],
                 zero_total_discounts=[
                     {"amount": 0, "discount": spec.discount_id} for spec in discount_specs
                 ],
@@ -797,9 +824,11 @@ def _charge_first_invoice(
 
 
 def _persisted_discount_specs(ctx: seahaven.Ctx, sub_row: Mapping[str, Any]) -> list[DiscountSpec]:
-    """The subscription's persisted `forever`/`repeating` discounts,
-    re-resolved from their coupon rows (a `repeating` window may have
-    lapsed since it was stored — the coupon row is the authority).
+    """Every stored discount object of `sub_row` (a subscription's, or an
+    invoice's through `invoicing._invoice_discount_specs`) as a spec: the
+    amounts from its coupon row, the window (`start`, `end`) from the stored
+    object, fixed when the discount was minted. Nothing is judged against a
+    window here; `_billable_discount_specs` does that for a new invoice.
 
     The coupon lookup is deliberately tolerant of a soft-deleted row:
     Stripe documents that deleting a coupon does not affect discounts
@@ -816,15 +845,58 @@ def _persisted_discount_specs(ctx: seahaven.Ctx, sub_row: Mapping[str, Any]) -> 
         if coupon_id is None:
             continue
         coupon = _lookup.require_row(ctx, "coupons", "coupon", str(coupon_id), param="discounts")
+        end = discount.get("end")
         specs.append(
             DiscountSpec(
                 discount_id=str(discount["id"]),
                 coupon_id=coupon["id"],
                 amount_off=coupon["amount_off"],
                 percent_off=Fraction(coupon["percent_off"]) if coupon["percent_off"] else None,
+                start=_time.from_unix(int(discount["start"])),
+                end=None if end is None else _time.from_unix(int(end)),
             )
         )
     return specs
+
+
+def discount_ended(discount: object, moment: str) -> bool:
+    """Whether a stored discount object's window has closed by `moment`: an
+    `end` (Unix seconds; null for `once`/`forever`) at or before it —
+    `DiscountSpec.applies_at`'s exclusive end, on the stored form.
+
+    Stripe removes a subscription's discount at its `end`, announcing it with
+    `customer.discount.deleted` (unprobed; this world emits no discount
+    events). A frozen clock cannot write at an instant nobody calls at, so an
+    ended discount is hidden where it is read (`resources.subscriptions`),
+    pruned from the row by the next invoice (`_billable_discount_specs`),
+    and pruned at a company fixture's `NOW` (`fixtures_src/replay/finish.py`)
+    (https://github.com/Kiln-AI/stripe_world/issues/13)."""
+    if not isinstance(discount, dict) or discount.get("end") is None:
+        return False
+    return int(discount["end"]) <= _time.to_unix(moment)
+
+
+def _billable_discount_specs(
+    ctx: seahaven.Ctx, sub_row: Mapping[str, Any], *, at: str
+) -> list[DiscountSpec]:
+    """The persisted discounts a new invoice of `sub_row` applies when it
+    bills at `at`: those whose window is open then (`DiscountSpec.applies_at`),
+    so a 3-month coupon on a monthly plan discounts the create invoice and
+    two renewals. `at` is the invoice's billing instant — the boundary a
+    walker bills, the request's `now` otherwise — never the frozen clock
+    while a boundary is walked.
+
+    A discount whose window has closed by `at` leaves `subscription.discounts`
+    here, before the invoice is minted (`discount_ended`), and stays on the
+    invoices it discounted."""
+    stored = _re_read(ctx, sub_row["id"])
+    discounts = _load_list(stored["discounts"])
+    kept = [discount for discount in discounts if not discount_ended(discount, at)]
+    if len(kept) != len(discounts):
+        ctx.db.execute(
+            "UPDATE subscriptions SET discounts = ? WHERE id = ?", _json.dumps(kept), stored["id"]
+        )
+    return [spec for spec in _persisted_discount_specs(ctx, sub_row) if spec.applies_at(at)]
 
 
 def _consume_once_discounts(ctx: seahaven.Ctx, sub_id: str) -> None:
@@ -892,13 +964,18 @@ def _cycle_invoice(
 
     Callers that resolve discounts themselves (creation, which applies its
     once-coupons alongside the persisted ones) pass `discount_specs`; every
-    other flow passes none and the row's persisted state is applied — a
-    `forever`/`repeating` coupon and the `default_tax_rates` ids bill on
-    every invoice this mints, so no renewal ever claims tax rates its
-    totals never applied."""
+    other flow passes none and the row's persisted state is applied — each
+    discount still inside its window (`_billable_discount_specs`) and the
+    `default_tax_rates` ids bill on every invoice this mints, so no renewal
+    ever claims tax rates its totals never applied. The window is judged at
+    the invoice's billing instant, which is where its period closes: the
+    `period_end` a renewal or trial end passes, the creation instant
+    otherwise."""
+    now = ctx.clock.iso()
+    billed_at = period_end if period_end is not None else now
     applied_discounts = discount_specs
     if applied_discounts is None:
-        applied_discounts = _persisted_discount_specs(ctx, sub_row)
+        applied_discounts = _billable_discount_specs(ctx, sub_row, at=billed_at)
     applied_tax = tax_specs
     if applied_tax is None:
         applied_tax = _persisted_tax_specs(ctx, sub_row)
@@ -914,7 +991,6 @@ def _cycle_invoice(
     )
     if zero_total_discounts is not None:
         totals.total_discount_amounts.extend(zero_total_discounts)
-    now = ctx.clock.iso()
     invoice = invoicing.create_invoice(
         ctx,
         customer_id=sub_row["customer"],
@@ -926,22 +1002,14 @@ def _cycle_invoice(
         auto_advance=auto_advance,
         days_until_due=days_until_due if days_until_due is not None else sub_row["days_until_due"],
         period_start=period_start if period_start is not None else now,
-        period_end=period_end if period_end is not None else now,
+        period_end=billed_at,
         # The invoice's own `discounts` column carries the discount objects
         # its totals applied — persisted and once-coupons alike — or the
         # parked-shape objects a caller passes for a $0 invoice.
         discounts=(
             applied_discount_objects
             if applied_discount_objects is not None
-            else [
-                {
-                    "id": spec.discount_id,
-                    "object": "discount",
-                    "source": {"type": "coupon", "coupon": spec.coupon_id},
-                    "start": _time.to_unix(now),
-                }
-                for spec in applied_discounts
-            ]
+            else [_discount_object(spec) for spec in applied_discounts]
         ),
         tax_rate_ids=_load_list(sub_row["default_tax_rates"]),
         attach=swept_ids,
@@ -1018,7 +1086,7 @@ def _conversion_invoice(
         # credit and nothing to bill: no invoice, the trial-end branches'
         # ruling applied.
         return
-    discount_specs = _persisted_discount_specs(ctx, row)
+    discount_specs = _billable_discount_specs(ctx, row, at=now)
     lines: list[invoicing.ItemLine] = []
     after = datetime.strptime(now, "%Y-%m-%dT%H:%M:%S.%fZ").strftime("%d %b %Y")
     for item in items:
@@ -1101,15 +1169,7 @@ def _conversion_invoice(
         days_until_due=row["days_until_due"],
         period_start=now,
         period_end=now,
-        discounts=[
-            {
-                "id": spec.discount_id,
-                "object": "discount",
-                "source": {"type": "coupon", "coupon": spec.coupon_id},
-                "start": _time.to_unix(now),
-            }
-            for spec in discount_specs
-        ],
+        discounts=[_discount_object(spec) for spec in discount_specs],
         tax_rate_ids=_load_list(row["default_tax_rates"]),
         attach=swept_ids,
     )
@@ -1409,7 +1469,9 @@ def apply_update(ctx: seahaven.Ctx, sub_id: str, params: dict[str, Any]) -> dict
     if "discounts" in params:
         # Probed (Phase 12 CR round 5): an update parks the discount on the
         # row — once-coupons included, on both active and trialing rows; the
-        # once ones are consumed by the next invoice that pays.
+        # once ones are consumed by the next invoice that pays. The list is
+        # replaced, each entry a new discount and so a new redemption; an
+        # update that omits `discounts` keeps the row's own, uncounted.
         _, persisted = _resolve_discounts(ctx, params["discounts"], park_once=True)
         sets["discounts"] = _json.dumps(persisted)
     if "pause_collection" in params:
@@ -2159,7 +2221,7 @@ def resume_subscription(
     totals = invoicing.compute_totals(
         [*swept, *rolled],
         currency=row["currency"],
-        invoice_discounts=_persisted_discount_specs(ctx, row),
+        invoice_discounts=_billable_discount_specs(ctx, row, at=now),
         tax_rates=_persisted_tax_specs(ctx, row),
         livemode=instance_livemode(ctx),
     )

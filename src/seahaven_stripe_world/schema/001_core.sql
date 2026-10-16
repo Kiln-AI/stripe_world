@@ -129,10 +129,14 @@ CREATE TABLE coupons (
 CREATE UNIQUE INDEX coupons_by_seq ON coupons (x_seq DESC);
 
 -- `valid` is computed by Stripe from redeem_by vs now and times_redeemed vs
--- max_redemptions. It is a stored column rather than a generated one because the
--- redeem_by half needs `now`, and SH103 forbids a clock expression in a generated
--- column. resources/coupons.py recomputes it on every write that can change it; the
--- clock is frozen, so a row written once stays correct for the instance's life.
+-- max_redemptions, and is false once deleted. It is a stored column rather than a
+-- generated one because the redeem_by half needs `now`, and SH103 forbids a clock
+-- expression in a generated column. The column is that rule as of the row's last
+-- write that can change it (the create, each redemption, the soft delete); redeem_by
+-- can pass with no write at all, so the API never reads the column:
+-- resources/coupons.py's `is_valid` answers `valid` from these columns against the
+-- reading call's clock. A company fixture refreshes the column at its NOW
+-- (fixtures_src/replay/finish.py).
 
 CREATE TABLE promotion_codes (
     id              TEXT PRIMARY KEY,

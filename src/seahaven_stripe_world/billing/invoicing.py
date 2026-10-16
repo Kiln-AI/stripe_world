@@ -165,12 +165,26 @@ def describe_interval(interval: str, interval_count: int = 1) -> str:
 
 @dataclass(frozen=True)
 class DiscountSpec:
-    """A resolved coupon: `percent_off` is the exact TEXT-decimal Fraction."""
+    """A resolved coupon: `percent_off` is the exact TEXT-decimal Fraction.
+
+    `start` and `end` are the discount's own window, canonical UTC text, fixed
+    when the discount is minted: `end` is `start` plus a `repeating` coupon's
+    `duration_in_months`, and None for `once` and `forever`. An invoice-side
+    discount object carries them as they are, never the invoice's own
+    instant."""
 
     discount_id: str
     coupon_id: str
     amount_off: int | None
     percent_off: Fraction | None
+    start: str
+    end: str | None
+
+    def applies_at(self, moment: str) -> bool:
+        """Whether an invoice billed at `moment` is inside the window: until
+        `end`, exclusive (the invoice billed exactly at `end` is not
+        discounted; unprobed)."""
+        return self.end is None or moment < self.end
 
 
 @dataclass(frozen=True)
@@ -911,7 +925,9 @@ def _line_inputs_for(ctx: seahaven.Ctx, row: Mapping[str, Any]) -> list[ItemLine
 def _invoice_discount_specs(ctx: seahaven.Ctx, row: Mapping[str, Any]) -> list[DiscountSpec]:
     """The invoice's stored inline discount objects resolved into specs
     (the same re-resolution `_persisted_discount_specs` applies to a
-    subscription's, coupon rows the authority)."""
+    subscription's, coupon rows the authority). Never judged against their
+    windows: an invoice's discounts are fixed once applied, so a draft
+    rebuilt after a repeating discount's `end` still carries it."""
     from seahaven_stripe_world.billing import subscription_lifecycle
 
     specs: list[DiscountSpec] = []

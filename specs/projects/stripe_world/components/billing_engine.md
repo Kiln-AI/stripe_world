@@ -214,6 +214,8 @@ class DiscountSpec:      # a resolved coupon, item- or invoice-scope
     amount_off: Money | None
     percent_off: Rat | None   # e.g. Fraction(25) for 25%
     currency: str | None
+    start: str                # the discount's window, fixed when it is minted (issue #13)
+    end: str | None           # start + duration_in_months for `repeating`; None otherwise
 
 @dataclass(frozen=True)
 class TaxRateSpec:
@@ -381,7 +383,7 @@ nothing here invents one.
 | `payment_behavior=error_if_incomplete` and the first payment needs action | 402 | `card_error` | `subscription_payment_intent_requires_action` (recorded, Phase 12); **no subscription row is written** |
 | Update a `canceled` / `incomplete_expired` subscription beyond `metadata` / `cancellation_details` | 400 | `invalid_request_error` | `invalid_canceled_subscription_fields` — "A canceled subscription can only update its cancellation_details and metadata." (recorded, Phase 12; corrects this row's earlier `status_transition_invalid`. `metadata` itself succeeds on a canceled row) |
 | Update anything but `metadata` / `default_source` / `default_payment_method` / `description` on an `incomplete` subscription | 400 | `invalid_request_error` | `status_transition_invalid` (code from this table; `metadata` and `description` succeed — recorded, Phase 12 — and `default_payment_method` accepts both a set and the `""` clear — probed live on an incomplete 3DS subscription, Phase 12 CR round 2; the natural rescue-by-reattach move. The refusal's message spelling is unprobed, declared) |
-| Expired coupon applied | 400 | `invalid_request_error` | `coupon_expired` |
+| Expired coupon applied | 400 | `invalid_request_error` | `coupon_expired` — past `redeem_by` ("Coupon X is expired."), or redeemed `max_redemptions` times ("Coupon X has been redeemed the maximum number of times."); both messages unrecorded, the second unprobed (issue #13) |
 | Payout exceeding the available balance | 400 | `invalid_request_error` | `balance_insufficient` |
 | Refund a charge with an open dispute | 400 | `invalid_request_error` | `charge_disputed` |
 | Refund beyond the remaining amount on a partially refunded charge | 400 | `invalid_request_error` | *(none)* — `param: "amount"`, `Refund amount ($40.00) is greater than unrefunded amount on charge ($30.00)` (probed, Phase 9; this table's `charge_already_refunded` was the fully-refunded case only) |
@@ -736,6 +738,24 @@ create (a trial create too, once it sweeps an item), trial-end, renewal and resu
 `always_invoice` proration invoice applies no subscription coupon at all, and a conversion invoice
 nets its coupon into its own credit only, so a swept item bills its full amount on either
 (unprobed, declared).
+
+A subscription's discount has a window (issue #13; Stripe's docs, unprobed). It starts when the
+discount is minted, and a `repeating` coupon's ends `duration_in_months` calendar months later
+(`add_interval`, the day clamped), trial time included; `once` and `forever` have no end. A new
+subscription invoice applies a persisted discount only while its billing instant — the boundary a
+renewal or trial end bills, the request's instant otherwise — is before `end`, so a 3-month coupon
+on a monthly plan discounts the create invoice and two renewals, and the renewal exactly at `end`
+bills full price. Stripe removes an ended discount at its `end`, with `customer.discount.deleted`
+(unprobed); a frozen clock cannot write at an instant nobody calls at, so a read from `end` on
+omits it from `subscription.discounts`, the next subscription invoice prunes it from the row
+before it is minted, and a company fixture prunes it at its `NOW`. The invoices the discount
+reached keep it, a draft's rebuild included, and no `customer.discount.*` event fires. Renewals
+chain each period from the previous boundary rather than from `billing_cycle_anchor`, so on a day
+29–31 anchor (the 31st drifting to the 28th) a 3-month window can cover a fourth renewal; the
+anchoring is a separate fix. Each discount minted from a coupon — at create, or by an update
+passing `discounts` — counts one redemption on the coupon; an update that omits `discounts` keeps
+the row's own. `coupon.valid` is false once the coupon is deleted, past `redeem_by` or at
+`max_redemptions`, answered at read time.
 
 The apportionment rule is **floor-each-then-remainder-to-the-last**, not independent rounding. This
 is documented directly and is a *different* rule from proration rounding — the same page that proves
