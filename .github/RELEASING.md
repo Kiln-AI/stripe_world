@@ -25,12 +25,12 @@ The version is written in four places, and all four must agree. Seahaven treats 
 `version` as its contract: it appears in every state document, in the OpenEnv metadata and in
 every fixture frozen from then on.
 
-| File | Field |
-|---|---|
-| `pyproject.toml` | `[project] version`, the version PyPI publishes |
-| `uv.lock` | `version` of the `seahaven-stripe-world` package |
-| `src/seahaven_stripe_world/world.py` | `version=` in `seahaven.World(...)` |
-| `openenv.yaml` | `version:` |
+| File | Field | Written by |
+|---|---|---|
+| `pyproject.toml` | `[project] version`, the version PyPI publishes | `uv version` |
+| `uv.lock` | `version` of the `seahaven-stripe-world` package | `uv version`, never by hand |
+| `src/seahaven_stripe_world/world.py` | `version=` in `seahaven.World(...)` | hand |
+| `openenv.yaml` | `version:` | hand |
 
 On a branch off `main`:
 
@@ -39,10 +39,12 @@ uv version X.Y.Z           # rewrites pyproject.toml and re-locks uv.lock
 ```
 
 `uv version --bump patch`, `minor` or `major` works out the next version instead of taking one.
-Then set the same version in `world.py` and `openenv.yaml` by hand. `git diff --stat` now lists
-exactly those four files. Run the check list in `AGENTS.md` ("Commands"), commit, and merge the
-bump into `main` through a pull request once CI is green. CI syncs with `uv sync --locked`, so a
-`pyproject.toml` bumped without its `uv.lock` fails there.
+`uv.lock` is never edited by hand: uv writes it, with `uv version` here and with `uv lock` or
+`uv sync` after any other change to `pyproject.toml`. Then set the same version in `world.py` and
+`openenv.yaml` by hand. `git diff --stat` now lists exactly those four files. Run the check list in
+`AGENTS.md` ("Commands"), where `tests/test_package.py` fails unless all four agree, commit, and
+merge the bump into `main` through a pull request once CI is green. CI syncs with
+`uv sync --locked`, so a `pyproject.toml` bumped without its `uv.lock` fails there.
 
 Leave the `world_version` in each `fixtures/*/fixture.yaml` alone. It records the version that
 fixture was frozen from, and fixtures are never edited. Seahaven loads a fixture frozen at an
@@ -76,12 +78,19 @@ the clone rather than into it.
 ```sh
 git clone --branch vX.Y.Z https://github.com/Kiln-AI/stripe_world.git stripe_world-vX.Y.Z
 cd stripe_world-vX.Y.Z
-uv sync --extra serve      # Python 3.14 final; provides the openenv and hf commands
-uv run openenv validate .  # the only failure is "openenv.yaml has no `validation:` block"
+uv run --extra serve openenv validate .  # only failure: "openenv.yaml has no `validation:` block"
 uv build --out-dir ../stripe_world-vX.Y.Z-dist
 ```
 
 A Seahaven world has no reward to declare, so the missing `validation:` block is expected.
+
+`openenv`, `hf` and `huggingface_hub` come only from the `serve` extra, so every command in this
+document that runs one of them passes `--extra serve`, and `uv run` installs the extra before it
+runs the command. Without the flag, the command works only if the environment was last synced with
+the extra. A plain `uv sync` is exact and removes it, and `uv run` then stops with
+`` Failed to spawn: `openenv` `` or `ModuleNotFoundError: No module named 'huggingface_hub'`. The
+first of these commands also creates the clone's environment, on Python 3.14 final: the extra's
+`beartype` does not import on a 3.14 release candidate.
 
 List what will be uploaded to PyPI:
 
@@ -152,8 +161,8 @@ with world.instance() as inst:
 From the release clone:
 
 ```sh
-uv run hf auth login       # once per machine; openenv push also asks if you are not logged in
-uv run openenv push --repo-id scosman/stripe_world
+uv run --extra serve hf auth login  # once per machine; openenv push also asks when logged out
+uv run --extra serve openenv push --repo-id scosman/stripe_world
 ```
 
 Keep the web interface on, which is the default, and do not pass `--base-image`.
@@ -167,7 +176,7 @@ has none. Without front matter, `openenv push` writes its own defaults, which se
 `/web` and replace the title and card. This command replaces them on the Space only:
 
 ```sh
-uv run python -c '
+uv run --extra serve python -c '
 from huggingface_hub import metadata_update
 metadata_update("scosman/stripe_world", {
     "title": "Stripe World", "emoji": "💳", "colorFrom": "indigo", "colorTo": "purple",
@@ -183,7 +192,7 @@ to the Space and restarts it.
 
 Wait for the build in the Space's logs, then open
 https://huggingface.co/spaces/scosman/stripe_world. It opens on the web console. Then drive it from
-any Python with `openenv` installed:
+any Python with `openenv` installed, such as `uv run --extra serve python` in the release clone:
 
 ```py
 from openenv import AutoEnv
