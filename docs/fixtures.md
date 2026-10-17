@@ -25,29 +25,10 @@ there; every other timestamp column is canonical UTC text.
 
 ## Known gaps
 
-Both companies were replayed through this world as it is, so they show four of its known
-differences from Stripe. Each is filed as an issue. The fixtures avoid it where they can and live
-with it where they cannot:
-
-- **A renewal bills the period that just ended**
-  ([#12](https://github.com/Kiln-AI/stripe_world/issues/12)). Each renewal invoice's line
-  repeats the service period the previous invoice billed, so the current period is on no line.
-  The invoice a trial's end creates is stamped with the new period, so the renewal after it has
-  the same span. The fixtures' consistency check allows that one pair, an identical span on a
-  trial-end invoice and the renewal right after it, and no other overlap.
-- **Repeating coupons never end, and `times_redeemed` stays 0**
-  ([#13](https://github.com/Kiln-AI/stripe_world/issues/13)). No coupon in either fixture is
-  `repeating`: the launch and switch-over codes are 50% and 25% off the first invoice
-  (`duration: once`), and the association codes are `forever`. Every coupon reports
-  `times_redeemed: 0`. To count redemptions, count the invoices that carry the coupon.
-- **Pending invoice items are never swept into a subscription invoice**
-  ([#14](https://github.com/Kiln-AI/stripe_world/issues/14)). A one-time fee is invoiced on its
-  own invoice, as `small_co`'s first setup fee was. An item left pending stays pending: nothing
-  bills it at the customer's next renewal.
-- **`canceled_at` is null on a cancel-at-period-end request**
-  ([#15](https://github.com/Kiln-AI/stripe_world/issues/15)). A subscription set to cancel at
-  period end shows `canceled_at: null` until it ends. One that has ended is stamped with its
-  period end, not the instant the customer asked.
+Both companies were replayed through this world as it is. The known differences from Stripe they
+used to show ([#12](https://github.com/Kiln-AI/stripe_world/issues/12) to
+[#15](https://github.com/Kiln-AI/stripe_world/issues/15)) are fixed and both fixtures rebuilt, so
+neither shows a known gap now.
 
 Disputes in both fixtures come from one-off payments: this world opens a dispute test card's
 dispute when it confirms a PaymentIntent. A subscription's own charges are never disputed.
@@ -73,10 +54,65 @@ bank account (`STRIPE TEST BANK`, `…6789`).
 `lookup_key`: `founding_annual` ($96/yr, archived at launch), `solo_monthly` ($12),
 `solo_annual` ($120), `studio_monthly` ($29), `studio_annual` ($290), `setup` ($49 one-time).
 Each $49 setup invoice item also carries its own one-off price and product, as Stripe mints them,
-so the account holds 5 products and 8 prices. Coupons: `LAUNCH` (50% off the first invoice, for
+so the account holds 5 products and 8 prices. Coupons: `LAUNCH` (50% off for 3 months, for
 signups through 2026-03-31) and `TEACHWELL25` (25% off the first invoice). 14-day trials; a
 trial with no card pauses at its end. Cards, charged automatically. No tax rates. Payouts are
 manual, each Monday at 15:00Z, of the available balance.
+
+Each discount a subscription is given is one redemption of its coupon. `LAUNCH`'s signup window
+closed on 2026-03-31, so it reads `valid: false` at `NOW`.
+
+```sql landmark=small_co/coupons
+SELECT id, duration, duration_in_months, redeem_by, times_redeemed, valid
+FROM coupons
+ORDER BY x_seq
+```
+
+```json rows
+[
+  {"id": "LAUNCH", "duration": "repeating", "duration_in_months": 3, "redeem_by": "2026-03-31T23:59:59.000Z", "times_redeemed": 10, "valid": 0},
+  {"id": "TEACHWELL25", "duration": "once", "duration_in_months": null, "redeem_by": null, "times_redeemed": 5, "valid": 1}
+]
+```
+
+`LAUNCH` took half off a subscriber's invoices for three months from signup: the first invoice
+and two renewals on a monthly plan, then full price from the June renewal; the first invoice
+only on an annual plan. Every one of those discounts has ended, so no subscription carries
+`LAUNCH` at `NOW`.
+
+```sql landmark=small_co/launch_subscribers
+SELECT c.email, p.lookup_key, s.status,
+       sum(EXISTS (SELECT 1 FROM json_each(i.discounts) d
+                   WHERE json_extract(d.value, '$.source.coupon') = 'LAUNCH')) AS discounted,
+       sum(NOT EXISTS (SELECT 1 FROM json_each(i.discounts) d
+                       WHERE json_extract(d.value, '$.source.coupon') = 'LAUNCH')) AS full_price,
+       EXISTS (SELECT 1 FROM json_each(s.discounts) d
+               WHERE json_extract(d.value, '$.source.coupon') = 'LAUNCH') AS still_carries_it
+FROM subscriptions s
+JOIN customers c ON c.id = s.customer
+JOIN subscription_items si ON si.subscription = s.id
+JOIN prices p ON p.id = si.price
+JOIN invoices i ON i.parent_subscription = s.id
+WHERE s.id IN (SELECT inv.parent_subscription FROM invoices inv, json_each(inv.discounts) d
+               WHERE json_extract(d.value, '$.source.coupon') = 'LAUNCH')
+GROUP BY s.id
+ORDER BY s.x_seq
+```
+
+```json rows
+[
+  {"email": "amara@oseireading.com", "lookup_key": "solo_monthly", "status": "active", "discounted": 3, "full_price": 3, "still_carries_it": 0},
+  {"email": "ben@carlisleguitar.com", "lookup_key": "solo_monthly", "status": "canceled", "discounted": 3, "full_price": 1, "still_carries_it": 0},
+  {"email": "lucas@moreaucello.com", "lookup_key": "solo_monthly", "status": "active", "discounted": 3, "full_price": 3, "still_carries_it": 0},
+  {"email": "tom@riverbendmusic.org", "lookup_key": "studio_monthly", "status": "active", "discounted": 3, "full_price": 3, "still_carries_it": 0},
+  {"email": "sarah@goldberglsat.com", "lookup_key": "solo_monthly", "status": "active", "discounted": 3, "full_price": 3, "still_carries_it": 0},
+  {"email": "anika@sharmatutoring.com", "lookup_key": "studio_monthly", "status": "active", "discounted": 3, "full_price": 3, "still_carries_it": 0},
+  {"email": "olivia@grantprep.com", "lookup_key": "solo_monthly", "status": "canceled", "discounted": 3, "full_price": 0, "still_carries_it": 0},
+  {"email": "diego@herrerafutbol.com", "lookup_key": "solo_monthly", "status": "active", "discounted": 3, "full_price": 3, "still_carries_it": 0},
+  {"email": "ellen@parkyoga.studio", "lookup_key": "solo_annual", "status": "active", "discounted": 1, "full_price": 0, "still_carries_it": 0},
+  {"email": "paolo@riccivoice.com", "lookup_key": "studio_annual", "status": "active", "discounted": 1, "full_price": 0, "still_carries_it": 0}
+]
+```
 
 **Counts at `NOW`.** All 30 days of events are kept, and nothing older.
 
@@ -105,8 +141,8 @@ SELECT what, n FROM (
   {"what": "customers", "n": 45},
   {"what": "customers with no subscription", "n": 3},
   {"what": "subscriptions", "n": 42},
-  {"what": "invoices", "n": 119},
-  {"what": "charges", "n": 110},
+  {"what": "invoices", "n": 118},
+  {"what": "charges", "n": 109},
   {"what": "failed charges", "n": 2},
   {"what": "refunds", "n": 2},
   {"what": "disputes", "n": 1},
@@ -150,7 +186,7 @@ Each is one query away; the customer's email is the stable handle.
 | Cancel at period end | Priya Natarajan (`priya@natarajanpiano.com`) | Founding plan ends 2026-09-05 ("Retiring from teaching") |
 | Credit balance | Nadia Haddad (`nadia@haddadfrench.com`) | Downgraded Studio to Solo on 2026-08-20, invoiced at once; balance -$12.60 |
 | Partial refund | Jamal Carter (`jamal@carterdrums.com`) | $170 of his $290 Studio annual charge refunded when he moved to Solo annual |
-| Pending invoice item | Elena Petrova, Petrova Dance Academy (`elena@petrovadance.com`) | A $49 setup item ordered 2026-08-28, not yet on an invoice ([#14](https://github.com/Kiln-AI/stripe_world/issues/14): her renewal will not pick it up) |
+| Pending invoice item | Elena Petrova, Petrova Dance Academy (`elena@petrovadance.com`) | A $49 setup item ordered 2026-08-28, not yet on an invoice; her 2026-09-10 renewal will sweep it |
 | Duplicate customer | Chris Nguyen (`chris@nguyentutoring.com`, `chris.nguyen@cnlessons.com`) | Two records; the second trial canceled on day three |
 | Founder test | Test (do not bill) (`test+launch@wrenfield.app`) | A $1.00 payment on launch morning, refunded in full |
 
@@ -168,7 +204,7 @@ ORDER BY d.id
 
 ```json rows
 [
-  {"name": "Grace Adeyemi", "email": "grace@brightsidemusic.studio", "id": "du_3x0hP2nFd3kT9mZaZMA5AmXz", "reason": "fraudulent", "amount": 4900, "disputed_payment": "Done-for-you setup", "due_by": "2026-09-07T23:59:59.000Z"}
+  {"name": "Grace Adeyemi", "email": "grace@brightsidemusic.studio", "id": "du_3x0hP2nFd3kT9mZa7DUKqBme", "reason": "fraudulent", "amount": 4900, "disputed_payment": "Done-for-you setup", "due_by": "2026-09-07T23:59:59.000Z"}
 ]
 ```
 
@@ -185,7 +221,7 @@ ORDER BY s.id
 
 ```json rows
 [
-  {"name": "Leo Marchetti", "email": "leo@marchettichem.com", "number": "I2VA3RTL-0005", "amount_due": 1200, "attempt_count": 2, "next_payment_attempt": "2026-09-02T22:00:00.000Z"}
+  {"name": "Leo Marchetti", "email": "leo@marchettichem.com", "number": "LXTXU83B-0005", "amount_due": 1200, "attempt_count": 2, "next_payment_attempt": "2026-09-02T22:00:00.000Z"}
 ]
 ```
 
@@ -250,8 +286,8 @@ ORDER BY si.current_period_end, s.id
 ]
 ```
 
-A subscription set to end at its period end (`canceled_at` stays null until then:
-[#15](https://github.com/Kiln-AI/stripe_world/issues/15)).
+A subscription set to end at its period end. `canceled_at` is the instant the customer asked, as
+on Stripe; `cancel_at` is when it ends.
 
 ```sql landmark=small_co/cancel_at_period_end
 SELECT c.name, c.email, s.cancel_at, s.canceled_at,
@@ -265,7 +301,7 @@ ORDER BY s.id
 
 ```json rows
 [
-  {"name": "Priya Natarajan", "email": "priya@natarajanpiano.com", "cancel_at": "2026-09-05T18:40:00.000Z", "canceled_at": null, "feedback": "other", "comment": "Retiring from teaching"}
+  {"name": "Priya Natarajan", "email": "priya@natarajanpiano.com", "cancel_at": "2026-09-05T18:40:00.000Z", "canceled_at": "2026-08-11T20:15:00.000Z", "feedback": "other", "comment": "Retiring from teaching"}
 ]
 ```
 
@@ -314,7 +350,7 @@ ORDER BY ii.id
 
 ```json rows
 [
-  {"name": "Elena Petrova", "email": "elena@petrovadance.com", "id": "ii_1wzxainFd3kT9mZaX0wJyYpy", "amount": 4900, "description": "Done-for-you setup", "date": "2026-08-28T14:30:00.000Z"}
+  {"name": "Elena Petrova", "email": "elena@petrovadance.com", "id": "ii_1wzxainFd3kT9mZamjAUE4RQ", "amount": 4900, "description": "Done-for-you setup", "date": "2026-08-28T14:30:00.000Z"}
 ]
 ```
 
@@ -452,10 +488,33 @@ Reminders* (`sms_monthly` $29 flat, `sms_annual` $290). *Onboarding* packages ar
 sales on `send_invoice` terms; each invoice item also mints its own one-off price and product, as
 Stripe does. *Legacy Starter* (`legacy_starter_monthly` $29) and *Legacy Pro*
 (`legacy_pro_monthly` $59) were archived after migration week; part of the migrated cohort still
-pays them. Coupons: `SWITCH25` (25% off the first invoice, for customers leaving a competitor),
+pays them. Coupons: `SWITCH25` (25% off for 3 months, for customers leaving a competitor),
 the trade-association codes `MSPG10`, `FRHA10` and `RMEC10` (10% off forever), and one-off
 "Sales concession" amount-off coupons. Sales tax is six manual tax rates (TX 6.25%, WA 6.5%, NY 4%,
 PA 6%, OH 5.75%, TN 7%), applied by the customer's state; three public buyers are `tax_exempt`.
+
+Each discount a subscription is given is one redemption of its coupon. A sales concession is made
+for one customer and redeemed once.
+
+```sql landmark=big_co/coupons
+SELECT id, duration, duration_in_months, percent_off, amount_off, times_redeemed, valid
+FROM coupons
+ORDER BY x_seq
+```
+
+```json rows
+[
+  {"id": "SWITCH25", "duration": "repeating", "duration_in_months": 3, "percent_off": "25", "amount_off": null, "times_redeemed": 15, "valid": 1},
+  {"id": "MSPG10", "duration": "forever", "duration_in_months": null, "percent_off": "10", "amount_off": null, "times_redeemed": 0, "valid": 1},
+  {"id": "FRHA10", "duration": "forever", "duration_in_months": null, "percent_off": "10", "amount_off": null, "times_redeemed": 3, "valid": 1},
+  {"id": "RMEC10", "duration": "forever", "duration_in_months": null, "percent_off": "10", "amount_off": null, "times_redeemed": 0, "valid": 1},
+  {"id": "lwTgEUnM", "duration": "once", "duration_in_months": null, "percent_off": null, "amount_off": 30000, "times_redeemed": 1, "valid": 1},
+  {"id": "PqHesNWN", "duration": "once", "duration_in_months": null, "percent_off": null, "amount_off": 10000, "times_redeemed": 1, "valid": 1},
+  {"id": "AU6ouRVx", "duration": "once", "duration_in_months": null, "percent_off": null, "amount_off": 50000, "times_redeemed": 1, "valid": 1},
+  {"id": "qfJwMQAM", "duration": "once", "duration_in_months": null, "percent_off": null, "amount_off": 50000, "times_redeemed": 1, "valid": 1},
+  {"id": "2tMD12wx", "duration": "once", "duration_in_months": null, "percent_off": null, "amount_off": 40000, "times_redeemed": 1, "valid": 1}
+]
+```
 
 **How they pay.** Starter, Pro and Business are charged to a card automatically; self-serve
 Starter and Pro signups start a 14-day trial with a card, and Business trials set up by sales
@@ -510,18 +569,18 @@ SELECT what, n FROM (
   {"what": "migrated customers", "n": 167},
   {"what": "subscriptions", "n": 378},
   {"what": "subscription schedules", "n": 6},
-  {"what": "invoices", "n": 3024},
-  {"what": "open invoices", "n": 43},
-  {"what": "charges", "n": 2821},
-  {"what": "failed charges", "n": 163},
-  {"what": "refunds", "n": 71},
-  {"what": "disputes", "n": 20},
+  {"what": "invoices", "n": 3023},
+  {"what": "open invoices", "n": 47},
+  {"what": "charges", "n": 2820},
+  {"what": "failed charges", "n": 168},
+  {"what": "refunds", "n": 78},
+  {"what": "disputes", "n": 21},
   {"what": "credit notes", "n": 78},
-  {"what": "payouts", "n": 376},
+  {"what": "payouts", "n": 375},
   {"what": "products", "n": 79},
   {"what": "prices", "n": 100},
   {"what": "coupons", "n": 9},
-  {"what": "events", "n": 1208}
+  {"what": "events", "n": 1236}
 ]
 ```
 
@@ -534,7 +593,7 @@ SELECT what, n FROM (
 | Overdue contract | Halvorsen Mechanical Group | 60 seats at $85/tech/month: the $61,200 renewal of 2026-06-18 is open, due 2026-07-18, 45 days past due |
 | Ramp about to step | Cascade Comfort Systems | Ramp schedule in its first phase: 80 seats until 2026-09-04, then 120, then 160 from 2026-12-04 to 2027-06-04 |
 | Churn risk | Copperline Mechanical | Business annual, 48 technicians, set to cancel at period end on 2026-09-13 (`switched_service`) |
-| Every status | Bristlecone Electric (`incomplete`, signed up three hours ago, payment needs authentication); Juniper Flats Plumbing, Kettle Creek Electric, Mesquite Drain & Sewer (`incomplete_expired`); Bellwether Climate Services, Northgate Electrical Contractors, Pinyon Ridge Mechanical (`paused`, card-less sales trials); Foxglove Plumbing, Driftwood Heating & Air, Yellowjacket Electric (`unpaid`); Saltgrass Mechanical, Quillback Plumbing, Harrowgate Electric (`past_due`) | Plus the simulated `trialing`, `active` and `canceled` |
+| Every status | Bristlecone Electric (`incomplete`, signed up three hours ago, payment needs authentication); Juniper Flats Plumbing, Kettle Creek Electric, Mesquite Drain & Sewer (`incomplete_expired`); Bellwether Climate Services, Northgate Electrical Contractors, Pinyon Ridge Mechanical (`paused`, card-less sales trials); Foxglove Plumbing, Driftwood Heating & Air, Yellowjacket Electric (`unpaid`); Saltgrass Mechanical, Quillback Plumbing, Harrowgate Electric (`past_due`) | Plus the simulated `trialing`, `active`, `past_due` and `canceled` |
 | Drafts waiting to finalize | Thornfield Air Systems, Wolf Creek Plumbing & Heating, Lodestar Electrical Services, Ironbark Mechanical, Bluestem Comfort Co. | $1,499 onboarding invoices created this morning, `automatically_finalizes_at` after `NOW` |
 | Payout in flight | | The 2026-08-31 payout arrives 2026-09-02 |
 
@@ -555,10 +614,10 @@ ORDER BY json_extract(d.evidence_details, '$.due_by'), d.id
 
 ```json rows
 [
-  {"name": "Arroyo Air & Heat", "id": "du_3wzG2indXq8NvK2eYEkF4hwL", "reason": "fraudulent", "amount": 89900, "disputed_payment": "On-site crew training day", "due_by": "2026-09-03T23:59:59.000Z"},
-  {"name": "Tamarack Plumbing", "id": "du_3wzerQndXq8NvK2eoW3vdJHR", "reason": "product_not_received", "amount": 49900, "disputed_payment": "Legacy data import", "due_by": "2026-09-04T23:59:59.000Z"},
-  {"name": "Gridline Electric Co.", "id": "du_3wzyIGndXq8NvK2eljGswQjM", "reason": "fraudulent", "amount": 89900, "disputed_payment": "On-site crew training day", "due_by": "2026-09-05T23:59:59.000Z"},
-  {"name": "Sandstone Mechanical", "id": "du_3x0PvAndXq8NvK2eyolfeGjX", "reason": "product_not_received", "amount": 24900, "disputed_payment": "Technician app rollout session", "due_by": "2026-09-06T23:59:59.000Z"}
+  {"name": "Arroyo Air & Heat", "id": "du_3wzG2indXq8NvK2eWeGfbKGO", "reason": "fraudulent", "amount": 89900, "disputed_payment": "On-site crew training day", "due_by": "2026-09-03T23:59:59.000Z"},
+  {"name": "Tamarack Plumbing", "id": "du_3wzerQndXq8NvK2eIanuqekr", "reason": "product_not_received", "amount": 49900, "disputed_payment": "Legacy data import", "due_by": "2026-09-04T23:59:59.000Z"},
+  {"name": "Gridline Electric Co.", "id": "du_3wzyIGndXq8NvK2eoTcRssrO", "reason": "fraudulent", "amount": 89900, "disputed_payment": "On-site crew training day", "due_by": "2026-09-05T23:59:59.000Z"},
+  {"name": "Sandstone Mechanical", "id": "du_3x0PvAndXq8NvK2eQpboAnER", "reason": "product_not_received", "amount": 24900, "disputed_payment": "Technician app rollout session", "due_by": "2026-09-06T23:59:59.000Z"}
 ]
 ```
 
@@ -570,12 +629,12 @@ SELECT status, count(*) AS n FROM disputes GROUP BY status ORDER BY status
 
 ```json rows
 [
-  {"status": "lost", "n": 9},
+  {"status": "lost", "n": 8},
   {"status": "needs_response", "n": 4},
-  {"status": "under_review", "n": 1},
+  {"status": "under_review", "n": 2},
   {"status": "warning_needs_response", "n": 1},
   {"status": "warning_under_review", "n": 1},
-  {"status": "won", "n": 4}
+  {"status": "won", "n": 5}
 ]
 ```
 
@@ -592,7 +651,7 @@ ORDER BY i.due_date, i.id
 
 ```json rows
 [
-  {"name": "Halvorsen Mechanical Group", "number": "37JR1KWW-0002", "total": 6120000, "due_date": "2026-07-18T17:00:00.000Z"}
+  {"name": "Halvorsen Mechanical Group", "number": "HOS3E4DZ-0002", "total": 6120000, "due_date": "2026-07-18T17:00:00.000Z"}
 ]
 ```
 
@@ -611,10 +670,10 @@ ORDER BY json_extract(s.current_phase, '$.end_date'), s.id
 
 ```json rows
 [
-  {"name": "Cascade Comfort Systems", "id": "sub_sched_1wVAUCndXq8NvK2eVtGeVLWU", "steps_at": "2026-09-04T16:00:00.000Z", "seats_now": 80, "seats_next": 120},
-  {"name": "Becerra Mechanical", "id": "sub_sched_1wizasndXq8NvK2eLLOifL8G", "steps_at": "2026-10-12T19:12:02.000Z", "seats_now": 51, "seats_next": 76},
-  {"name": "Fitzpatrick & Sons Comfort Systems", "id": "sub_sched_1wncGFndXq8NvK2exqluBYUt", "steps_at": "2026-10-25T13:17:51.000Z", "seats_now": 44, "seats_next": 66},
-  {"name": "Wagner Brothers Plumbing", "id": "sub_sched_1wxm7ondXq8NvK2e4pgenpqf", "steps_at": "2026-11-22T13:51:08.000Z", "seats_now": 54, "seats_next": 81}
+  {"name": "Cascade Comfort Systems", "id": "sub_sched_1wVAUCndXq8NvK2eC4YTEPsC", "steps_at": "2026-09-04T16:00:00.000Z", "seats_now": 80, "seats_next": 120},
+  {"name": "Becerra Mechanical", "id": "sub_sched_1wizasndXq8NvK2eaEsZGbpZ", "steps_at": "2026-10-12T19:12:02.000Z", "seats_now": 51, "seats_next": 76},
+  {"name": "Fitzpatrick & Sons Comfort Systems", "id": "sub_sched_1wncGFndXq8NvK2ellc87e5a", "steps_at": "2026-10-25T13:17:51.000Z", "seats_now": 44, "seats_next": 66},
+  {"name": "Wagner Brothers Plumbing", "id": "sub_sched_1wxm7ondXq8NvK2exZAYvsnD", "steps_at": "2026-11-22T13:51:08.000Z", "seats_now": 54, "seats_next": 81}
 ]
 ```
 
@@ -634,7 +693,8 @@ ORDER BY si.quantity DESC, s.id
 
 ```json rows
 [
-  {"name": "Copperline Mechanical", "id": "sub_1uxRjMndXq8NvK2eADYbyp7z", "technicians": 48, "lookup_key": "business_annual", "cancel_at": "2026-09-13T15:00:00.000Z"}
+  {"name": "Copperline Mechanical", "id": "sub_1uxRjMndXq8NvK2eLwR3wzff", "technicians": 48, "lookup_key": "business_annual", "cancel_at": "2026-09-13T15:00:00.000Z"},
+  {"name": "Summit Drain & Sewer", "id": "sub_1tpfXZndXq8NvK2eLFbeNPLX", "technicians": 13, "lookup_key": "business_monthly", "cancel_at": "2026-09-02T03:35:25.000Z"}
 ]
 ```
 
@@ -646,13 +706,13 @@ SELECT status, count(*) AS n FROM subscriptions GROUP BY status ORDER BY status
 
 ```json rows
 [
-  {"status": "active", "n": 220},
-  {"status": "canceled", "n": 134},
+  {"status": "active", "n": 216},
+  {"status": "canceled", "n": 132},
   {"status": "incomplete", "n": 1},
   {"status": "incomplete_expired", "n": 3},
-  {"status": "past_due", "n": 4},
+  {"status": "past_due", "n": 8},
   {"status": "paused", "n": 8},
-  {"status": "trialing", "n": 5},
+  {"status": "trialing", "n": 7},
   {"status": "unpaid", "n": 3}
 ]
 ```
@@ -669,11 +729,11 @@ ORDER BY i.created, i.id
 
 ```json rows
 [
-  {"name": "Thornfield Air Systems", "id": "in_1x1OAendXq8NvK2eIjGn36yC", "total": 149900, "created": "2026-09-01T13:05:00.000Z", "automatically_finalizes_at": "2026-09-01T14:05:01.000Z"},
-  {"name": "Wolf Creek Plumbing & Heating", "id": "in_1x1OKKndXq8NvK2eCZJcRNNe", "total": 149900, "created": "2026-09-01T13:15:00.000Z", "automatically_finalizes_at": "2026-09-01T14:15:01.000Z"},
-  {"name": "Lodestar Electrical Services", "id": "in_1x1OU0ndXq8NvK2egQ2S9gHp", "total": 149900, "created": "2026-09-01T13:25:00.000Z", "automatically_finalizes_at": "2026-09-01T14:25:01.000Z"},
-  {"name": "Ironbark Mechanical", "id": "in_1x1OdgndXq8NvK2eMBoGZwQl", "total": 149900, "created": "2026-09-01T13:35:00.000Z", "automatically_finalizes_at": "2026-09-01T14:35:01.000Z"},
-  {"name": "Bluestem Comfort Co.", "id": "in_1x1OnMndXq8NvK2exXGkU8Qq", "total": 149900, "created": "2026-09-01T13:45:00.000Z", "automatically_finalizes_at": "2026-09-01T14:45:01.000Z"}
+  {"name": "Thornfield Air Systems", "id": "in_1x1OAendXq8NvK2evFz4R4sz", "total": 149900, "created": "2026-09-01T13:05:00.000Z", "automatically_finalizes_at": "2026-09-01T14:05:01.000Z"},
+  {"name": "Wolf Creek Plumbing & Heating", "id": "in_1x1OKKndXq8NvK2eiNYiLYTp", "total": 149900, "created": "2026-09-01T13:15:00.000Z", "automatically_finalizes_at": "2026-09-01T14:15:01.000Z"},
+  {"name": "Lodestar Electrical Services", "id": "in_1x1OU0ndXq8NvK2eRT7u3fWo", "total": 149900, "created": "2026-09-01T13:25:00.000Z", "automatically_finalizes_at": "2026-09-01T14:25:01.000Z"},
+  {"name": "Ironbark Mechanical", "id": "in_1x1OdgndXq8NvK2eDrSDM0VG", "total": 149900, "created": "2026-09-01T13:35:00.000Z", "automatically_finalizes_at": "2026-09-01T14:35:01.000Z"},
+  {"name": "Bluestem Comfort Co.", "id": "in_1x1OnMndXq8NvK2e1SBkUkNM", "total": 149900, "created": "2026-09-01T13:45:00.000Z", "automatically_finalizes_at": "2026-09-01T14:45:01.000Z"}
 ]
 ```
 
@@ -687,7 +747,7 @@ ORDER BY created, id
 
 ```json rows
 [
-  {"id": "po_1x13UOndXq8NvK2eSpXYQuzh", "amount": 6610105, "created": "2026-08-31T15:00:00.000Z", "arrival_date": "2026-09-02T00:00:00.000Z"}
+  {"id": "po_1x13UOndXq8NvK2eADkfh57U", "amount": 6028185, "created": "2026-08-31T15:00:00.000Z", "arrival_date": "2026-09-02T00:00:00.000Z"}
 ]
 ```
 
@@ -706,8 +766,8 @@ ORDER BY renews_at, s.id
 
 ```json rows
 [
-  {"name": "Benjamin Zamora Comfort Systems", "id": "sub_sched_1wvQ6lndXq8NvK2emROEywCl", "plan_now": "pro_monthly", "plan_at_renewal": "starter_monthly", "renews_at": "2026-09-09T20:53:29.000Z"},
-  {"name": "Nwosu Brothers HVAC", "id": "sub_sched_1x0gWIndXq8NvK2ejRNDsVo5", "plan_now": "pro_monthly", "plan_at_renewal": "starter_monthly", "renews_at": "2026-09-17T21:07:57.000Z"}
+  {"name": "Benjamin Zamora Comfort Systems", "id": "sub_sched_1wwuiFndXq8NvK2epf4ZDSc8", "plan_now": "pro_monthly", "plan_at_renewal": "starter_monthly", "renews_at": "2026-09-09T20:53:29.000Z"},
+  {"name": "Fenwick & Sons Drain & Sewer", "id": "sub_sched_1wsrBGndXq8NvK2es2YOELyh", "plan_now": "pro_annual", "plan_at_renewal": "starter_annual", "renews_at": "2027-07-31T17:18:03.000Z"}
 ]
 ```
 
@@ -763,6 +823,6 @@ ORDER BY n
 
 ```json rows
 [
-  {"n": 71, "total": 18634292, "first": "2026-04-20T15:00:00.000Z", "last": "2026-04-24T22:27:00.000Z"}
+  {"n": 71, "total": 18657017, "first": "2026-04-20T15:00:00.000Z", "last": "2026-04-24T22:27:00.000Z"}
 ]
 ```

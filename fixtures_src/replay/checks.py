@@ -11,8 +11,9 @@ import seahaven
 from fixtures_src.replay.cards import ALL
 from fixtures_src.replay.clock import plus
 
-from seahaven_stripe_world import _time
-from seahaven_stripe_world.billing import ledger, magic_cards
+from seahaven_stripe_world import _json, _time
+from seahaven_stripe_world.billing import ledger, magic_cards, subscription_lifecycle
+from seahaven_stripe_world.resources import coupons
 
 __all__ = [
     "DENIED_EMAIL_DOMAINS",
@@ -90,6 +91,26 @@ def _bt_status(db: seahaven.Db, now: str) -> Rows:
         for row in db.rows("SELECT id, available_on, status FROM balance_transactions ORDER BY id")
         if row["status"] != ledger.bt_status(row["available_on"], now)
     ]
+
+
+def _coupon_valid(db: seahaven.Db, now: str) -> Rows:
+    return [
+        {"id": row["id"], "valid": row["valid"]}
+        for row in db.rows("SELECT * FROM coupons ORDER BY id")
+        if row["valid"] != int(coupons.is_valid(row, now))
+    ]
+
+
+def _ended_discounts(db: seahaven.Db, now: str) -> Rows:
+    bad: Rows = []
+    for row in db.rows("SELECT id, discounts FROM subscriptions ORDER BY id"):
+        stored: object = _json.loads(row["discounts"])
+        bad.extend(
+            {"id": row["id"], "discount": discount["id"]}
+            for discount in (stored if isinstance(stored, list) else [])
+            if subscription_lifecycle.discount_ended(discount, now)
+        )
+    return bad
 
 
 def _payouts_overdrew(db: seahaven.Db, _now: str) -> Rows:
@@ -230,6 +251,8 @@ INVARIANTS: tuple[tuple[str, Check], ...] = (
         _sql("SELECT id FROM balance_transactions WHERE net <> amount - fee ORDER BY id"),
     ),
     ("balance status agrees with bt_status at NOW", _bt_status),
+    ("coupon valid agrees with is_valid at NOW", _coupon_valid),
+    ("no subscription carries a discount past its end at NOW", _ended_discounts),
     ("no payout overdrew", _payouts_overdrew),
     (
         "no over-refund",
@@ -247,6 +270,26 @@ INVARIANTS: tuple[tuple[str, Check], ...] = (
         ),
     ),
     (
+        # Every line's `il_` is its own. A draft rebuild keys a line by its source; keying a
+        # proration line by its item and period start instead of its `ii_` gave a credit/debit
+        # pair one id between them.
+        "line ids are unique",
+        _sql(
+            "SELECT json_extract(l.value, '$.id') AS line FROM invoices i, json_each(i.lines) l"
+            " GROUP BY 1 HAVING count(*) > 1 ORDER BY 1"
+        ),
+    ),
+    (
+        # A discount bills an invoice only while the invoice's billing instant, where its period
+        # closes, is before the discount's `end` (issue #13: a repeating coupon never ended).
+        "invoice discounts are inside their windows",
+        _sql(
+            "SELECT i.id, json_extract(d.value, '$.id') AS discount FROM invoices i,"
+            " json_each(i.discounts) d WHERE json_extract(d.value, '$.end') IS NOT NULL"
+            " AND unixepoch(i.period_end) >= json_extract(d.value, '$.end') ORDER BY i.id, 2"
+        ),
+    ),
+    (
         "no overlapping cycle periods",
         _sql(
             "SELECT a.id AS a, b.id AS b FROM invoices a JOIN invoices b"
@@ -255,19 +298,30 @@ INVARIANTS: tuple[tuple[str, Check], ...] = (
             " AND b.billing_reason = 'subscription_cycle'"
             " AND a.status <> 'void' AND b.status <> 'void'"
             " AND a.period_start < b.period_end AND b.period_start < a.period_end"
-            # A declared world gap (https://github.com/Kiln-AI/stripe_world/issues/12): a
-            # renewal bills the period that just ended, but the invoice a trial's end makes is
-            # stamped with the new period, so the renewal after it repeats that span exactly.
-            # That one pair is allowed, and nothing else: an identical span, the trial-end
-            # invoice first, the very next live cycle invoice second.
-            " AND NOT (a.created = (SELECT trial_end FROM subscriptions s"
-            " WHERE s.id = a.parent_subscription)"
-            " AND b.period_start = a.period_start AND b.period_end = a.period_end"
-            " AND b.x_seq = (SELECT MIN(n.x_seq) FROM invoices n"
-            " WHERE n.parent_subscription = a.parent_subscription"
-            " AND n.billing_reason = 'subscription_cycle' AND n.status <> 'void'"
-            " AND n.x_seq > a.x_seq))"
             " ORDER BY a.id, b.id"
+        ),
+    ),
+    (
+        # An invoice's own period looks back while its lines bill ahead, so only the lines show
+        # a subscription item billed twice for one span: two of its non-proration lines that bill
+        # something, on invoices not voided, whose periods overlap. A $0 line bills nothing: a
+        # trial's `Free trial` line may overlap the first paid period when the trial ends early.
+        "no overlapping item line periods",
+        _sql(
+            "WITH billed AS MATERIALIZED (SELECT i.id AS invoice, i.x_seq AS seq, l.key AS idx,"
+            " json_extract(l.value, '$.parent.subscription_item_details.subscription_item')"
+            " AS item, json_extract(l.value, '$.period.start') AS start_at,"
+            " json_extract(l.value, '$.period.end') AS end_at"
+            " FROM invoices i, json_each(i.lines) l WHERE i.status <> 'void'"
+            " AND json_extract(l.value, '$.parent.subscription_item_details.subscription_item')"
+            " IS NOT NULL"
+            " AND COALESCE(json_extract(l.value,"
+            " '$.parent.subscription_item_details.proration'), 0) = 0"
+            " AND json_extract(l.value, '$.amount') <> 0)"
+            " SELECT a.invoice AS a, b.invoice AS b, a.item AS item FROM billed a JOIN billed b"
+            " ON b.item = a.item AND (b.seq > a.seq OR (b.seq = a.seq AND b.idx > a.idx))"
+            " WHERE a.start_at < b.end_at AND b.start_at < a.end_at"
+            " ORDER BY a.invoice, b.invoice, a.item"
         ),
     ),
     (

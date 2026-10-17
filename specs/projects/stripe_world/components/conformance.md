@@ -455,7 +455,7 @@ unrelated regression in every other scenario. The representative global entries:
 | Path | Reason |
 |---|---|
 | `**.id` | Ids are freshly minted per world instance (architecture §4.4); never equal the recorded real-Stripe id by construction. |
-| `**.created`, `**.*_at` (timestamp fields) | The fixture clock and the record-time wall clock are different instants; equality was never meaningful. |
+| `**.created`, `**.*_at` (timestamp fields) | The fixture clock and the record-time wall clock are different instants; equality was never meaningful. `**.*_at` is predicated to two instants or two nulls: a stamp on one side only is a real difference, not a clock one. |
 | `body.request_log_url` | Stripe-dashboard-specific, tied to the recording account; this world does not model a dashboard. |
 | `body.customer`, `body.payment_method`, `body.*` (any field holding a cross-reference by id) | Covered by `**.id` already where the value *is* an id string; listed here only where the field name itself differs in shape from a plain nested `id` (documented per-field as each is added, not a blanket rule). |
 

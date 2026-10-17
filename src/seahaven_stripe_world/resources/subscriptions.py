@@ -355,10 +355,17 @@ def _default_tax_rate_bodies(ctx: seahaven.Ctx, row: Mapping[str, Any]) -> list[
 
 def _discount_ids(ctx: seahaven.Ctx, row: Mapping[str, Any]) -> list[str]:
     # Stored as full inline discount objects (data_model §6 — no discounts
-    # table); emitted as the bare `di_` ids unless expanded.
+    # table); emitted as the bare `di_` ids unless expanded. A discount whose
+    # `end` has passed by the reading call's clock is gone, though the row
+    # keeps it until its next invoice (`subscription_lifecycle.discount_ended`).
     loaded: object = _json.loads(row["discounts"])
     discounts = loaded if isinstance(loaded, list) else []
-    return [dict(discount)["id"] for discount in discounts]
+    now = ctx.clock.iso()
+    return [
+        dict(discount)["id"]
+        for discount in discounts
+        if not subscription_lifecycle.discount_ended(discount, now)
+    ]
 
 
 def _items_envelope(ctx: seahaven.Ctx, row: Mapping[str, Any]) -> dict[str, Any]:

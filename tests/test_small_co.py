@@ -139,6 +139,7 @@ def test_priya_cancels_at_period_end(instance: seahaven.Instance) -> None:
     priya = _subscription(instance, "priya@natarajanpiano.com")
     assert (priya["status"], priya["cancel_at_period_end"]) == ("active", True)
     assert priya["cancel_at"] == _period_end(priya) == _unix("2026-09-05T18:40")
+    assert priya["canceled_at"] == _unix("2026-08-11T20:15")  # when she asked
     assert priya["cancellation_details"]["comment"] == "Retiring from teaching"
 
 
@@ -200,14 +201,62 @@ def test_jamals_partial_refund(instance: seahaven.Instance) -> None:
     )
 
 
+def test_anikas_setup_fee_rode_her_first_invoice(instance: seahaven.Instance) -> None:
+    """Ordered a minute before she subscribed, the setup item was swept onto her first invoice,
+    where `LAUNCH` took half off both lines (the item is discountable)."""
+    customer = _customer(instance, "anika@sharmatutoring.com")["id"]
+    anika = _subscription(instance, "anika@sharmatutoring.com")
+    invoices = _read(instance, "/v1/invoices", {"subscription": anika["id"], "limit": 100})["data"]
+    first = next(i for i in invoices if i["billing_reason"] == "subscription_create")
+    assert [(line["description"], line["amount"]) for line in first["lines"]["data"]] == [
+        ("Done-for-you setup", 4900),
+        ("1 \u00d7 Wrenfield Studio (at $29.00 / month)", 2900),
+    ]
+    assert (first["status"], first["subtotal"], first["total"]) == ("paid", 7800, 3900)
+    assert (
+        _read(instance, "/v1/invoiceitems", {"customer": customer, "pending": True})["data"] == []
+    )
+
+
+def test_launch_ran_three_months_and_has_closed(instance: seahaven.Instance) -> None:
+    """`LAUNCH` (small_co.md §2) is 50% off for 3 months, redeemed by the ten launch subscribers,
+    and past its 2026-03-31 signup window, so not valid at `NOW`. A monthly subscriber's first
+    three invoices are halved, the June renewal on bills full price, and the ended discount has
+    left the subscription."""
+    launch = _read(instance, "/v1/coupons/LAUNCH")
+    assert (launch["duration"], launch["duration_in_months"], launch["name"]) == (
+        "repeating",
+        3,
+        "Launch: 50% off for 3 months",
+    )
+    assert (launch["times_redeemed"], launch["valid"]) == (10, False)
+    teachwell = _read(instance, "/v1/coupons/TEACHWELL25")
+    assert (teachwell["times_redeemed"], teachwell["valid"]) == (5, True)
+    amara = _subscription(instance, "amara@oseireading.com")
+    invoices = _read(instance, "/v1/invoices", {"subscription": amara["id"], "limit": 100})["data"]
+    assert [i["total"] for i in reversed(invoices)] == [600, 600, 600, 1200, 1200, 1200]
+    assert amara["discounts"] == []
+
+
 def test_elenas_pending_item(instance: seahaven.Instance) -> None:
+    """Ordered on 08-28, after her last renewal; her 09-10 renewal, after `NOW`, sweeps it."""
     elena = _subscription(instance, "elena@petrovadance.com")
     assert (elena["status"], _price(elena)["lookup_key"]) == ("active", "studio_monthly")
+    assert _period_end(elena) == _unix("2026-09-10T17:00")
     customer = _customer(instance, "elena@petrovadance.com")["id"]
     items = _read(instance, "/v1/invoiceitems", {"customer": customer, "pending": True})["data"]
     assert [(i["amount"], i["description"], i["invoice"]) for i in items] == [
         (4900, "Done-for-you setup", None)
     ]
+    from seahaven_stripe_world.billing import subscription_lifecycle
+
+    with instance.bulk() as ctx:
+        renewed = subscription_lifecycle.advance_cycle(ctx, elena["id"])
+    renewal = _read(instance, f"/v1/invoices/{renewed['latest_invoice']}")
+    assert [line["amount"] for line in renewal["lines"]["data"]] == [4900, 2900]
+    assert (
+        _read(instance, "/v1/invoiceitems", {"customer": customer, "pending": True})["data"] == []
+    )
 
 
 def test_chris_signed_up_twice(instance: seahaven.Instance) -> None:

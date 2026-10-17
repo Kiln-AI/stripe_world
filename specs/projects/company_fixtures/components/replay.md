@@ -235,12 +235,23 @@ def refresh_balance_statuses(ctx: seahaven.Ctx, *, now: str) -> int:
     """For every balance transaction stored `pending`, set status = ledger.bt_status(available_on, now)
     where that differs. Returns the number changed."""
 
+def refresh_coupon_validity(ctx: seahaven.Ctx, *, now: str) -> int:
+    """For every coupon, set valid = coupons.is_valid(row, now) where that differs (a redeem_by
+    that passed with no write since). Returns the number changed."""
+
+def prune_ended_discounts(ctx: seahaven.Ctx, *, now: str) -> int:
+    """For every subscription, drop the stored discounts subscription_lifecycle.discount_ended
+    says have ended by now (no invoice has billed since to prune them). Returns the number of
+    subscriptions changed."""
+
 def trim_events(ctx: seahaven.Ctx, *, now: str) -> int:
     """DELETE FROM events WHERE created < now − 30 days (computed with plus()). Returns the count."""
 ```
 
-Both run inside the builder's `bulk()` after `timeline.run()`. They are the only writes this package
-makes to rows the world wrote.
+All four run inside the builder's `bulk()` after `timeline.run()`. They are the only writes this
+package makes to rows the world wrote. The coupon refresh and the discount prune were added with
+the fix for issue #13: the API answers a coupon's `valid` and a subscription's `discounts` at read
+time, and these make the stored columns agree with it at `NOW`.
 
 ## 7. `checks.py`
 
@@ -263,10 +274,15 @@ writing module first (`billing/invoicing.py` for invoice lines).
 |---|---|
 | net is amount − fee | `SELECT id FROM balance_transactions WHERE net <> amount - fee` |
 | status agrees with `bt_status` at `NOW` | Python over `SELECT id, available_on, status FROM balance_transactions` |
+| coupon `valid` agrees with `coupons.is_valid` at `NOW` | Python over `SELECT * FROM coupons` (added with the fix for issue #13) |
+| no subscription carries a discount past its end at `NOW` | Python over `SELECT id, discounts FROM subscriptions`, by `subscription_lifecycle.discount_ended` (added with the fix for issue #13) |
 | no payout overdrew | for each payout bt in `x_seq` order: `SELECT SUM(net) FROM balance_transactions WHERE balance_type = 'payments' AND x_seq <= :seq AND available_on <= :created` must be ≥ 0 |
 | no over-refund | `SELECT c.id FROM charges c WHERE (SELECT COALESCE(SUM(amount), 0) FROM refunds r WHERE r.charge = c.id AND r.status = 'succeeded') > c.amount_captured` |
 | lines sum to subtotal | `SELECT id FROM invoices WHERE subtotal <> (SELECT COALESCE(SUM(json_extract(l.value, '$.amount')), 0) FROM json_each(invoices.lines) l)` |
+| invoice discounts are inside their windows | over every `invoices i, json_each(i.discounts) d` with a non-null `end`: `unixepoch(i.period_end) >= end` (added with the fix for issue #13: a repeating coupon never ended) |
+| line ids are unique | over every `invoices i, json_each(i.lines)`: a line `id` that appears more than once (added with the fix for issue #14: a draft rebuild keyed a proration line by its item and period start, so a credit/debit pair shared one id) |
 | no overlapping cycle periods | `invoices a JOIN invoices b ON a.parent_subscription = b.parent_subscription AND a.id < b.id WHERE both billing_reason = 'subscription_cycle' AND neither void AND a.period_start < b.period_end AND b.period_start < a.period_end` |
+| no overlapping item line periods | over `invoices i, json_each(i.lines)` on invoices not void: two lines with the same `parent.subscription_item_details.subscription_item`, neither a proration (a missing `proration` flag counts as false) and neither `amount = 0`, whose `period`s overlap. A $0 line bills nothing, so a trial's `Free trial` line may overlap the first paid period of a trial ended early (added with the fix for issue #12, which the invoice-level check could not see) |
 | causality | charge before its payment intent; refund or dispute before its charge; balance transaction before the charge, refund, dispute or payout in its `source` |
 | customer balance | `customers.balance <> COALESCE((latest cbt by x_seq).ending_balance, 0)` |
 | invoice sequence | per customer, `next_invoice_sequence <> 1 + MAX(CAST(substr(number, instr(number, '-') + 1) AS INTEGER))` over numbered invoices (or `<> 1` with none) |
@@ -295,6 +311,8 @@ Realism guards: as `architecture.md` §3.1.
 | `test_incomplete_expires` | `AUTH_REQUIRED` signup: `incomplete`, then `incomplete_expired` 23 hours later |
 | `test_payouts_arrive_or_stay_pending` | a payout whose arrival is before `NOW` is `paid`, after is `pending`; amounts never exceed the available balance |
 | `test_refresh_and_trim` | the finishing steps change exactly the stale statuses and old events |
+| `test_refresh_coupon_validity` | a coupon whose `redeem_by` passed is stored invalid at `NOW`, once; one still redeemable is untouched |
+| `test_prune_ended_discounts` | a canceled subscription's ended discount is dropped at `NOW`, once; its `forever` discount stays |
 | `test_cards_match_the_world` | §4 |
 | `test_each_check_catches_its_violation` | each invariant and guard, against a throwaway instance with one planted violation |
 | `test_benchmark` | Phase 2's measurement (not an assertion): 200 customers over 12 months; records build seconds and file bytes, and writes the projection for `big_co` into the phase plan |

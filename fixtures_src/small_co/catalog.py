@@ -87,8 +87,6 @@ class Catalog:
                 )["id"]
 
         def launch_coupon(ctx: seahaven.Ctx) -> None:
-            # 50% off the first invoice, not small_co.md §2's 3 repeating months: this world
-            # never ends a repeating discount (https://github.com/Kiln-AI/stripe_world/issues/13).
             client.call(
                 ctx,
                 "POST",
@@ -96,9 +94,10 @@ class Catalog:
                 {
                     "id": "LAUNCH",
                     "percent_off": 50,
-                    "duration": "once",
+                    "duration": "repeating",
+                    "duration_in_months": 3,
                     "redeem_by": _time.to_unix("2026-03-31T23:59:59.000Z"),
-                    "name": "Launch: 50% off your first invoice",
+                    "name": "Launch: 50% off for 3 months",
                 },
             )
 

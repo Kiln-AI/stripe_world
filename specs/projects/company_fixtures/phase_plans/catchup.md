@@ -30,18 +30,38 @@ uses. The user kept the name (decision 5 below).
      two cycle invoices on a subscription overlap. The check now allows exactly one exception:
      an identical span between a trial-end invoice and the cycle invoice right after it. Any
      other overlap fails. The gap is declared in the guide and in a comment at the exclusion.
+     **Fixed since:** a renewal now rolls the item periods before it invoices, so its lines bill
+     the period that starts at the boundary, and a natural trial end's invoice period looks back
+     over the trial. Both fixtures were rebuilt, the exclusion is gone (no cycle overlap passes),
+     a line-level check fails any two overlapping non-proration, non-zero lines of one item, and
+     the guide no longer lists the gap.
    - **#13, repeating coupons never end and `times_redeemed` stays 0.** No coupon uses
      `duration: repeating`.
      - `LAUNCH` is 50% off once: the first invoice. The spec said 50% off for 3 months.
      - `SWITCH25` is 25% off once. The spec said 25% off for 3 months.
      - Neither the guide nor the tests claim a redemption count (the spec said `LAUNCH` 10 and
        `TEACHWELL25` 5). They also make no claim about discounts having ended.
+     **Fixed since:** a repeating discount ends `duration_in_months` after it starts and bills
+     only invoices before its end, leaving the subscription once its end passes; each
+     discount minted counts a redemption, and `valid` reflects `redeem_by` and
+     `max_redemptions` at read time. `LAUNCH` and `SWITCH25` are 50% and 25% off for 3 months
+     again, both fixtures were rebuilt (`LAUNCH` redeemed 10 times, `TEACHWELL25` 5), the guide
+     shows the counts and no longer lists the gap.
    - **#14, pending invoice items are never swept.**
      - Anika's setup fee is billed on its own invoice right after she subscribes (the
        `BillPending` beat, which is not in small_co.md §3's beat vocabulary).
      - Elena's $49 item stays pending. The spec said "for her 2026-09-10 renewal"; the guide no
        longer says it will be swept there, and declares the gap.
+     **Fixed since:** a subscription's invoices (create, trial end, renewal, resume, conversion
+     and the `always_invoice` proration invoice) sweep the customer's pending items that are
+     untagged or tagged to that subscription. The `BillPending` beat is gone: Anika's setup item
+     is created a minute before she subscribes, as small_co.md row 13 has it, and her first
+     invoice sweeps it (`LAUNCH` takes half off it too). Elena's item is still pending at `NOW`,
+     and the guide says her 2026-09-10 renewal will sweep it. Both fixtures were rebuilt, and the
+     guide no longer lists the gap.
    - **#15, `canceled_at` is null on a cancel-at-period-end request.** Declared in the guide.
+     **Fixed since:** the world now stamps `canceled_at` at the request, both fixtures were
+     rebuilt, and the guide no longer lists the gap.
 2. **Disputes come only from one-off payments** confirmed through `POST /v1/payment_intents` on
    a dispute test card. `big_co` already worked this way.
    - small_co.md row 45 had Grace buy Studio annual on the dispute card. Now she buys it with a
@@ -79,7 +99,8 @@ uses. The user kept the name (decision 5 below).
 ### Corrections to `components/small_co.md`, recorded here instead of in the spec
 
 - **Row 13 (Anika):** card at 21:29, subscribe at 21:30, setup item at 21:31, billed on its own
-  invoice at 21:32 (#14).
+  invoice at 21:32 (#14). **Fixed since:** the row stands as written (setup item at 21:29,
+  subscribe at 21:30).
 - **Row 34 (Victor):** expires at 2026-06-23T15:40Z. That is 23 hours after 16:40 the day before,
   not 16:40.
 - **Row 45 (Grace):** as decision 2 above.

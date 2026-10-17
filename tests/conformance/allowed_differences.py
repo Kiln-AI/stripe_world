@@ -73,6 +73,18 @@ def _both_boolean(recorded: Any, replayed: Any) -> bool:
     return isinstance(recorded, bool) and isinstance(replayed, bool)
 
 
+def _is_unix_seconds(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _same_stamp_shape(recorded: Any, replayed: Any) -> bool:
+    """A timestamp pair whose values differ only by clock: both instants, or
+    both null. A null against an instant is a stamp one side never wrote."""
+    if recorded is None and replayed is None:
+        return True
+    return _is_unix_seconds(recorded) and _is_unix_seconds(replayed)
+
+
 def _both_cus_ids(recorded: Any, replayed: Any) -> bool:
     """A `customer`-shaped reference field: both sides are freshly minted ids
     of the same shape, never equal — the `**.id` rule on the field it lands
@@ -590,7 +602,10 @@ ALLOWED_DIFFERENCES: list[AllowedDifference] = [
         "**.*_at",
         "Every `*_at` timestamp field (`canceled_at`, `available_on`-shaped "
         "windows, …) differs for the same clock reason as `created`. Suffix-"
-        "matched per field so a blanket `**` cannot hide a non-timestamp.",
+        "matched per field so a blanket `**` cannot hide a non-timestamp, and "
+        "predicated to two instants or two nulls: a stamp on one side only is "
+        "a real difference, never a clock one.",
+        predicate=_same_stamp_shape,
     ),
     AllowedDifference(
         "**.invoice_prefix",
@@ -1476,9 +1491,10 @@ ALLOWED_DIFFERENCES: list[AllowedDifference] = [
     ),
     AllowedDifference(
         "**.billing_cycle_anchor",
-        "The anchor is the creation clock (or a caller timestamp, which "
-        "then compares equal); predicated to integer pairs so only the "
-        "clock-derived case is admitted.",
+        "The anchor is the clock of the call that set it (a create, or an "
+        "update-driven trial end: cassette 12 seq 29 and seq 39) or a "
+        "caller timestamp, which then compares equal; predicated to "
+        "integer pairs so only the clock-derived case is admitted.",
         predicate=lambda recorded, replayed: (
             isinstance(recorded, int) and isinstance(replayed, int)
         ),
@@ -1792,6 +1808,15 @@ ALLOWED_DIFFERENCES: list[AllowedDifference] = [
         predicate=lambda recorded, replayed: (
             recorded in ("draft", "uncollectible") and replayed == "uncollectible"
         ),
+    ),
+    AllowedDifference(
+        "body.status_transitions.marked_uncollectible_at",
+        "The same invoice_now cancel collapse, on its stamp: the still-draft "
+        "final invoice live answers has not been marked yet (null), while "
+        "this world's collapsed invoice already carries the instant it was "
+        "marked uncollectible.",
+        scenario="01_proration_half_cent",
+        predicate=lambda recorded, replayed: recorded is None and _is_unix_seconds(replayed),
     ),
 ]
 
@@ -2142,6 +2167,58 @@ STRUCTURAL_DIFFERENCES: list[str] = [
     "the outstanding amount, and an empty invoice marked uncollectible "
     "would be a stretch of the credit-only recording, not an application "
     "of it (unprobed; declared here).",
+    "A subscription's own invoices sweep pending invoice items (issue "
+    "#14): create, trial end, renewal, resume, conversion and the "
+    "always_invoice proration invoice take the customer's pending items in "
+    "the invoice's currency that are untagged or tagged to that "
+    "subscription. Recorded: another subscription's prorations stay "
+    "pending (cassette 01, probe_proration). Probed via the Stripe MCP "
+    "(2026-10-16): a paid create's swept lines go newest-first ahead of "
+    "the plan line; a trial create bills a swept item on the trial's first "
+    "invoice, ahead of its $0 trial line, with the create's coupons applied "
+    "as on a paid create's first invoice (a once-coupon consumed there "
+    "instead of parked for the trial end; with nothing swept the recorded "
+    "$0 invoice and parked once-coupon stand), charged while the status "
+    "stays trialing; a natural trial end sweeps too; and the coupon "
+    "discounts a discountable swept item, not a `discountable: false` one "
+    "(a negative item's default). Unprobed and declared: the currency "
+    "bound, the swept lines' place on the other subscription invoices, a "
+    "send_invoice trial create's invoice left open, a trial create's "
+    "failed charge never answering per `payment_behavior` (no 402 under "
+    "error_if_incomplete), no subscription coupon reaching a swept item on "
+    "the always_invoice proration invoice (as before the sweep was "
+    "tag-aware) or on a conversion invoice (whose coupon nets into its own "
+    "credit), and the "
+    "prorate-only cancel credit belonging to the canceled subscription: "
+    "its stored parent keeps the subscription and item while the wire "
+    "answers the recorded `parent: null`, so no other subscription's "
+    "invoice sweeps it.",
+    "Coupon durations and redemptions (issue #13). Probed via the Stripe "
+    "MCP (2026-10-16): a `repeating` discount's `end` is its `start` plus "
+    "`duration_in_months` calendar months; each discount minted counts one "
+    "redemption, and `valid` turns false at `max_redemptions` and past "
+    "`redeem_by`, where applying the coupon is refused 'Coupon X is used "
+    "up and cannot be applied.' or 'Coupon X is expired and cannot be "
+    "applied.' (the MCP answers only the message, so the error's type, HTTP "
+    "status, `param` and `coupon_expired` code are unprobed); and an update "
+    "re-sending a coupon the subscription "
+    "carries keeps that discount (same id, `start` and `end`), counting "
+    "nothing and accepted even when the coupon is used up. Unprobed: the "
+    "same re-send accepted past `redeem_by`, the day clamp, trial time "
+    "counting toward the window, a coupon listed "
+    "twice in one update keeping its discount and minting another, and a "
+    "discount billing a subscription invoice only while its billing "
+    "instant is before `end` — so the renewal exactly at `end` bills full "
+    "price. Live "
+    "removes the discount at `end` with `customer.discount.deleted`; here "
+    "a read from `end` on omits it from `subscription.discounts`, the row "
+    "keeps it until the next subscription invoice prunes it (a company "
+    "fixture prunes it at its NOW), it stays on the invoices it "
+    "discounted, and no `customer.discount.*` event is emitted. Renewals "
+    "chain each period from the previous boundary rather than from "
+    "`billing_cycle_anchor`, so on a day 29-31 anchor (the 31st drifting "
+    "to the 28th) a 3-month window can cover a fourth renewal. `valid` is "
+    "also false once the coupon is deleted.",
     "The classic-mode `billing_cycle_anchor: now` update shape is "
     "unrecordable: the recording account is dashboard-flexible and answers "
     "a stub-debit shape instead (probe_proration_invoices.json carries it "

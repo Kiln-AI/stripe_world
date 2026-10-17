@@ -10,8 +10,15 @@ redeem_by-in-the-past refusal, the 0.01 floor on `percent_off`, and the
 response body carries either. The soft delete zeroes `valid` (the
 `coupon.deleted` snapshot shows `valid: false`) and a later retrieve is a
 404, both probed.
+
+`valid` is answered by `is_valid` at read time, against the reading call's
+clock (the schema comment on `coupons` says why the column alone cannot be
+the answer). Each discount minted from a coupon is one redemption (`redeem`):
+`times_redeemed` counts it and the stored `valid` is recomputed with it
+(https://github.com/Kiln-AI/stripe_world/issues/13).
 """
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 import seahaven
@@ -31,7 +38,7 @@ from seahaven_stripe_world.stripe_errors import invalid_request
 if TYPE_CHECKING:
     from seahaven_stripe_world.dispatch.response import Request
 
-__all__ = ["FIELDS", "SPEC"]
+__all__ = ["FIELDS", "SPEC", "is_valid", "redeem"]
 
 _DURATIONS = ("forever", "once", "repeating")
 
@@ -90,6 +97,29 @@ COUPON_DELETE = ParamSpec(op_id="DeleteCouponsCoupon", path=("coupon",), expand=
 
 always_present, omit_when_none = presence_sets("coupon")
 
+
+def is_valid(row: Mapping[str, Any], now: str) -> bool:
+    """Stripe's `valid` at `now` (spec3: "Taking account of the above
+    properties, whether this coupon can still be applied to a customer"):
+    not deleted, `redeem_by` not yet reached, and `times_redeemed` under
+    `max_redemptions`. The TEXT timestamps compare in canonical form."""
+    return (
+        not row["deleted"]
+        and (row["redeem_by"] is None or now < row["redeem_by"])
+        and (row["max_redemptions"] is None or row["times_redeemed"] < row["max_redemptions"])
+    )
+
+
+def redeem(ctx: seahaven.Ctx, coupon_id: str) -> None:
+    """Count one redemption of `coupon_id`, and store `valid` as it now
+    stands, so the column agrees with the API as of this write."""
+    ctx.db.execute("UPDATE coupons SET times_redeemed = times_redeemed + 1 WHERE id = ?", coupon_id)
+    row = _lookup.require_row(ctx, "coupons", "coupon", coupon_id, param="coupon")
+    ctx.db.execute(
+        "UPDATE coupons SET valid = ? WHERE id = ?", int(is_valid(row, ctx.clock.iso())), coupon_id
+    )
+
+
 FIELDS = FieldMap(
     object="coupon",
     table="coupons",
@@ -106,16 +136,15 @@ FIELDS = FieldMap(
         "percent_off": "percent_off",
         "redeem_by": "redeem_by",
         "times_redeemed": "times_redeemed",
-        "valid": "valid",
     },
     timestamps=frozenset({"created", "redeem_by"}),
     json_columns=frozenset({"metadata"}),
-    booleans=frozenset({"valid"}),
     decimals=frozenset({"percent_off"}),
     constants={
         "applies_to": None,
         "currency_options": None,
     },
+    derived={"valid": lambda ctx, row: is_valid(row, ctx.clock.iso())},
     always_present=always_present,
     omit_when_none=omit_when_none,
 )

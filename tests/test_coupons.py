@@ -4,11 +4,15 @@ never-serialized `applies_to`/`currency_options`, and the tombstone that
 zeroes `valid` — all pinned by the Phase 7 live probes at
 `2026-08-26.dahlia`."""
 
+import dataclasses
+
 import pytest
 import seahaven
 
 from conftest import BLANK_NOW, api_read, api_write
+from seahaven_stripe_world import _time
 from seahaven_stripe_world.errors import StripeToolError
+from seahaven_stripe_world.stripe_errors import StripeApiError
 
 pytestmark = pytest.mark.seahaven(fixture=None, now=BLANK_NOW, clock_mode="fixed")
 
@@ -251,3 +255,28 @@ def test_delete_zeroes_valid_and_404s_the_retrieve(instance: seahaven.Instance) 
     )
     assert snapshot is not None
     assert snapshot["v"] == 0
+
+
+def test_valid_turns_false_once_redeem_by_passes(instance: seahaven.Instance) -> None:
+    """No write marks a coupon's `redeem_by` passing, so `valid` is judged
+    at read time against the reading call's clock, and applying the coupon
+    then is refused with the probed expired message (code `coupon_expired`,
+    unprobed) (https://github.com/Kiln-AI/stripe_world/issues/13)."""
+    from seahaven_stripe_world.billing import subscription_lifecycle
+    from seahaven_stripe_world.resources import coupons
+
+    redeem_by = _time.to_unix(BLANK_NOW) + 86_400
+    body = create(instance, id="EARLYBIRD", percent_off=10, duration="once", redeem_by=redeem_by)
+    assert body["valid"] is True
+    row = instance.inspect().one("SELECT * FROM coupons WHERE id = 'EARLYBIRD'")
+    assert row is not None
+    with instance.bulk() as ctx:
+        later = dataclasses.replace(ctx, clock=seahaven.Clock.from_iso(_time.from_unix(redeem_by)))
+        assert coupons.SPEC.serializer(later, row)["valid"] is False
+        with pytest.raises(StripeApiError) as exc_info:
+            subscription_lifecycle._resolve_discounts(later, [{"coupon": "EARLYBIRD"}])
+    assert (exc_info.value.code, exc_info.value.message) == (
+        "coupon_expired",
+        "Coupon EARLYBIRD is expired and cannot be applied.",
+    )
+    assert call(instance, "GET", "/v1/coupons/EARLYBIRD")["times_redeemed"] == 0

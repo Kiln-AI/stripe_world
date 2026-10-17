@@ -51,6 +51,7 @@ __all__ = [
     "SPEC",
     "apply_line_edit",
     "create",
+    "default_discountable",
     "delete",
     "insert_invoice_item",
     "insert_proration_item",
@@ -252,6 +253,16 @@ def _tax_rate_bodies(ctx: seahaven.Ctx, row: Mapping[str, Any]) -> list[dict[str
     return bodies
 
 
+def _wire_parent(ctx: seahaven.Ctx, row: Mapping[str, Any]) -> object:
+    """The stored `parent`, except the plain cancel credit's — a proration
+    with no `proration_details` — whose recorded wire parent is null
+    (cassette 01) though the row keeps its owning subscription and item
+    (`insert_proration_item`)."""
+    if row["proration"] and row["proration_details"] is None:
+        return None
+    return _json.loads(row["parent"])
+
+
 always_present, omit_when_none = presence_sets("invoiceitem")
 
 FIELDS = FieldMap(
@@ -270,19 +281,17 @@ FIELDS = FieldMap(
         "invoice": "invoice",
         "metadata": "metadata",
         "net_amount": "net_amount",
-        "parent": "parent",
         "proration": "proration",
         "proration_details": "proration_details",
         "quantity": "quantity",
         "quantity_decimal": "quantity_decimal",
-        # derived below: period, pricing, tax_rates
+        # derived below: parent, period, pricing, tax_rates
     },
     timestamps=frozenset({"date"}),
-    json_columns=frozenset(
-        {"discounts", "frozen_fields", "metadata", "parent", "proration_details"}
-    ),
+    json_columns=frozenset({"discounts", "frozen_fields", "metadata", "proration_details"}),
     booleans=frozenset({"discountable", "proration"}),
     derived={
+        "parent": _wire_parent,
         "period": lambda ctx, row: {
             "start": _time.to_unix(row["period_start"]),
             "end": _time.to_unix(row["period_end"]),
@@ -306,6 +315,15 @@ def serialize(ctx: seahaven.Ctx, row: Mapping[str, Any]) -> dict[str, Any]:
 
 
 # --- the row writer the invoice routes share ------------------------------------------
+
+
+def default_discountable(amount: int) -> bool:
+    """An item's `discountable` when the caller names none (spec3: "Defaults
+    to false for prorations or negative invoice items, and true for all
+    other invoice items"; prorations are written non-discountable by
+    `insert_proration_item`). The negative default is probed via the Stripe
+    MCP (2026-10-16)."""
+    return amount >= 0
 
 
 def insert_invoice_item(
@@ -375,6 +393,7 @@ def insert_proration_item(
     quantity: int,
     credited_invoice: str | None = None,
     credited_line_ids: Sequence[str] = (),
+    plain: bool = False,
 ) -> dict[str, Any]:
     """Write one PENDING proration invoiceitem (Phase 14) — the recorded
     wire body verbatim (cassette 01): `parent` names the subscription and
@@ -386,12 +405,18 @@ def insert_proration_item(
     invoice_line_item_details: {invoice, invoice_line_items}}` — the LINE
     spells them flat; the item wraps them). Emits `invoiceitem.created`.
 
-    The CANCEL credit's plainer shape is recorded too (cassette 01, the
-    prorate-only DELETE): `parent: null` and no `proration_details` at all
-    — pass `subscription_item_id=None` and no credited ids to write it."""
+    `plain=True` writes the CANCEL credit's plainer recorded shape
+    (cassette 01, the prorate-only DELETE): no `proration_details` at all
+    and a wire `parent` of null. The stored `parent` still names the
+    canceled subscription and the credited item, as every proration's does:
+    a proration belongs to the subscription that generated it, so the
+    credit rides no other subscription's invoice (the declared ruling of
+    https://github.com/Kiln-AI/stripe_world/issues/14, unprobed — no
+    recording sweeps a plain credit), and the line it later sweeps onto
+    names that item (recorded: the swept line carries the full subscription
+    identity). The serializer (`_wire_parent`) answers the recorded null."""
     now = ctx.clock.iso()
     item_id = _ids.stripe_id(ctx, "ii_", timestamp=now)
-    linked = subscription_item_id is not None
     credited = (
         {
             "type": "invoice_line_items",
@@ -400,7 +425,7 @@ def insert_proration_item(
                 "invoice_line_items": list(credited_line_ids),
             },
         }
-        if credited_line_ids
+        if credited_line_ids and not plain
         else None
     )
     ctx.db.execute(
@@ -419,18 +444,14 @@ def insert_proration_item(
         description,
         _json.dumps(["pricing", "quantity", "discounts"]),
         amount,
-        (
-            _json.dumps(
-                {
-                    "subscription_details": {
-                        "subscription": subscription_id,
-                        "subscription_item": subscription_item_id,
-                    },
-                    "type": "subscription_details",
-                }
-            )
-            if linked
-            else None
+        _json.dumps(
+            {
+                "subscription_details": {
+                    "subscription": subscription_id,
+                    "subscription_item": subscription_item_id,
+                },
+                "type": "subscription_details",
+            }
         ),
         period_end,
         period_start,
@@ -441,11 +462,7 @@ def insert_proration_item(
                 "unit_amount_decimal": None,
             }
         ),
-        (
-            _json.dumps({"credited_items": credited, "discount_amounts": []})
-            if linked or credited is not None
-            else None
-        ),
+        None if plain else _json.dumps({"credited_items": credited, "discount_amounts": []}),
         quantity,
         str(quantity),
     )
@@ -550,7 +567,7 @@ def create(ctx: seahaven.Ctx, req: Request) -> dict[str, Any]:
         amount=params["amount"],
         currency=params["currency"],
         description=params.get("description"),
-        discountable=params.get("discountable", True),
+        discountable=params.get("discountable", default_discountable(params["amount"])),
         invoice_id=invoice_id,
         period_start=period.get("start") or now,
         period_end=period.get("end") or now,

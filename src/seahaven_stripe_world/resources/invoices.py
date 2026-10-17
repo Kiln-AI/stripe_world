@@ -821,7 +821,7 @@ def _mint_line_item(
         amount=line["amount"],
         currency=invoice_row["currency"],
         description=line.get("description"),
-        discountable=line.get("discountable", True),
+        discountable=line.get("discountable", invoiceitems.default_discountable(line["amount"])),
         invoice_id=invoice_row["id"],
         period_start=period.get("start") or now,
         period_end=period.get("end") or now,

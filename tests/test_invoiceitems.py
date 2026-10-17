@@ -78,6 +78,34 @@ def test_create_mints_the_one_off_price_behind_pricing(instance, customer) -> No
     assert body["period"]["start"] == body["date"] == body["period"]["end"]
 
 
+def test_a_negative_item_defaults_non_discountable(instance, customer) -> None:
+    """spec3: `discountable` "Defaults to false for prorations or negative
+    invoice items, and true for all other invoice items" — on the item
+    create and on an `add_lines` line, which is an invoice item too; an
+    explicit value wins."""
+
+    def created(amount: int, **params) -> bool:
+        body = call(
+            instance,
+            "POST",
+            "/v1/invoiceitems",
+            {"customer": customer, "amount": amount, "currency": "usd", **params},
+        )
+        return body["discountable"]
+
+    assert (created(-500), created(0), created(500)) == (False, True, True)
+    assert (created(-500, discountable=True), created(500, discountable=False)) == (True, False)
+    invoice = call(instance, "POST", "/v1/invoices", {"customer": customer})
+    added = call(
+        instance,
+        "POST",
+        f"/v1/invoices/{invoice['id']}/add_lines",
+        {"lines": [{"amount": -300, "description": "Credit"}, {"amount": 300}]},
+    )
+    by_amount = {line["amount"]: line["discountable"] for line in added["lines"]["data"]}
+    assert by_amount == {-300: False, 300: True}
+
+
 def test_quantity_multiplies_on_create_and_the_sweep(instance, customer) -> None:
     """The row's `amount` is the unit amount; the swept line bills unit x
     quantity (the manager-confirmed arithmetic for the quantity parameter)."""
