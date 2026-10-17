@@ -1,6 +1,12 @@
 """The package's public surface: one import, one `World`."""
 
+import re
+import tomllib
+from pathlib import Path
+
 import seahaven_stripe_world
+
+REPO = Path(__file__).resolve().parents[1]
 
 
 def test_importing_the_package_builds_the_world() -> None:
@@ -57,3 +63,24 @@ def test_the_stripe_tools_are_registered() -> None:
         "manage_stripe_accounts",
         "controller_run_sql",
     }
+
+
+def test_the_version_agrees_in_all_four_places() -> None:
+    """`.github/RELEASING.md` section 1 lists four places that carry the version.
+
+    `uv version` rewrites only `pyproject.toml` and `uv.lock`; `world.py` and
+    `openenv.yaml` are bumped by hand, and the v0.3.0 bump missed both.
+    """
+    pyproject = tomllib.loads((REPO / "pyproject.toml").read_text())["project"]["version"]
+    lock = tomllib.loads((REPO / "uv.lock").read_text())
+    (locked,) = (p["version"] for p in lock["package"] if p["name"] == "seahaven-stripe-world")
+    openenv = re.search(r"^version: (\S+)$", (REPO / "openenv.yaml").read_text(), re.MULTILINE)
+    assert openenv is not None
+
+    versions = {
+        "pyproject.toml": pyproject,
+        "uv.lock": locked,
+        "world.py": seahaven_stripe_world.world.version,
+        "openenv.yaml": openenv.group(1),
+    }
+    assert versions == dict.fromkeys(versions, pyproject)

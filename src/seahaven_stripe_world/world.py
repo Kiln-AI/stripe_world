@@ -26,7 +26,7 @@ world = seahaven.World(
     # illegal as the alias, forcing an explicit `name=` at every `add_world`.
     # One name, two spellings, same normalisation the CLI already does.
     name="seahaven_stripe_world",
-    version="0.2.0",
+    version="0.3.0",
     schema=seahaven.sql_files(__package__, "schema"),
     untracked_tables=("counters", "idempotency_keys"),
     # What the MCP handshake publishes, and the only name here the tool-calling
