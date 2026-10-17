@@ -321,7 +321,8 @@ def default_discountable(amount: int) -> bool:
     """An item's `discountable` when the caller names none (spec3: "Defaults
     to false for prorations or negative invoice items, and true for all
     other invoice items"; prorations are written non-discountable by
-    `insert_proration_item`)."""
+    `insert_proration_item`). The negative default is probed via the Stripe
+    MCP (2026-10-16)."""
     return amount >= 0
 
 

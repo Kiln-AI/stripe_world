@@ -268,61 +268,122 @@ def _resolve_discounts(
     parks on the row and is consumed at the trial-end invoice
     (probed, Phase 12 CR round 4's trail) — unless the create sweeps a
     pending item, whose invoice consumes it as a no-trial create's does
-    (`park_once=False`; unprobed, `create_subscription`'s
-    `trial_bills_items`). `forever`/`repeating` persist either way. The
-    stored object is the full inline discount (`_discount_object`).
+    (`park_once=False`, `create_subscription`'s `trial_bills_items`; probed
+    via the Stripe MCP, 2026-10-16). `forever`/`repeating` persist either
+    way. The stored object is the full inline discount (`_discount_object`).
 
-    Every entry mints a new discount starting now, which is one redemption
-    of its coupon (`coupons.redeem`), refused first when the coupon is no
-    longer valid. A `repeating` discount ends `duration_in_months` calendar
-    months after it starts, the day clamped as a billing month's is (Stripe's
-    docs; unprobed — no recorded body carries a discount object)
-    (https://github.com/Kiln-AI/stripe_world/issues/13)."""
+    Every entry mints a new discount (`_mint_discount`); an update re-sending
+    a coupon the subscription already carries does not (`_updated_discounts`)."""
     now = ctx.clock.iso()
     specs: list[DiscountSpec] = []
     persisted: list[dict[str, Any]] = []
     for index, entry in enumerate(discounts_param):
-        coupon = _lookup.require_live_row(
-            ctx, "coupons", "coupon", entry["coupon"], param=f"discounts[{index}][coupon]"
-        )
-        _refuse_unredeemable(coupon, now)
-        coupons.redeem(ctx, coupon["id"])
-        end = (
-            invoicing.add_interval(
-                now, interval="month", interval_count=coupon["duration_in_months"]
-            )
-            if coupon["duration"] == "repeating"
-            else None
-        )
-        spec = DiscountSpec(
-            discount_id=_ids.stripe_id(ctx, "di_", timestamp=now),
-            coupon_id=coupon["id"],
-            amount_off=coupon["amount_off"],
-            percent_off=Fraction(coupon["percent_off"]) if coupon["percent_off"] else None,
-            start=now,
-            end=end,
-        )
+        coupon = _entry_coupon(ctx, entry, index)
+        spec = _mint_discount(ctx, coupon, now)
         specs.append(spec)
         if coupon["duration"] != "once" or park_once:
             persisted.append(_discount_object(spec))
     return specs, persisted
 
 
+def _updated_discounts(
+    ctx: seahaven.Ctx, row: Mapping[str, Any], discounts_param: list[dict[str, str]]
+) -> list[dict[str, Any]]:
+    """An update's `discounts[]` -> the subscription's new stored discount
+    objects, the list replaced in the parameter's order (an omitted coupon's
+    discount is dropped).
+
+    An entry for a coupon the subscription already carries a live discount
+    from keeps that stored object unchanged — same `di_`, `start` and `end` —
+    counts no redemption and is not refused, even when the coupon is now used
+    up (probed via the Stripe MCP, 2026-10-16) or past its `redeem_by`
+    (unprobed); a deleted coupon still answers "No such coupon" (unprobed).
+    Only a coupon the subscription does not carry mints a new discount
+    (`_mint_discount`). Each entry keeps at most one carried discount, so a
+    coupon listed twice keeps its discount and mints a second, as a create
+    mints one per entry (unprobed). Every minted discount parks on the row,
+    once-coupons included (probed, Phase 12 CR round 5): the next invoice
+    that pays consumes the once ones."""
+    now = ctx.clock.iso()
+    unclaimed = [
+        discount for discount in _load_list(row["discounts"]) if not discount_ended(discount, now)
+    ]
+    updated: list[dict[str, Any]] = []
+    for index, entry in enumerate(discounts_param):
+        coupon = _entry_coupon(ctx, entry, index)
+        kept = _claim_carried(unclaimed, coupon["id"])
+        updated.append(
+            kept if kept is not None else _discount_object(_mint_discount(ctx, coupon, now))
+        )
+    return updated
+
+
+def _claim_carried(unclaimed: list[Any], coupon_id: str) -> dict[str, Any] | None:
+    """Take the first of `unclaimed` minted from `coupon_id` off the list."""
+    for position, discount in enumerate(unclaimed):
+        if _coupon_of(discount) == coupon_id:
+            return unclaimed.pop(position)
+    return None
+
+
+def _entry_coupon(ctx: seahaven.Ctx, entry: Mapping[str, str], index: int) -> dict[str, Any]:
+    """The live coupon the `discounts[index]` entry names."""
+    return _lookup.require_live_row(
+        ctx, "coupons", "coupon", entry["coupon"], param=f"discounts[{index}][coupon]"
+    )
+
+
+def _coupon_of(discount: object) -> str | None:
+    """The coupon a stored discount object was minted from."""
+    if not isinstance(discount, dict):
+        return None
+    source = discount.get("source")
+    source = source if isinstance(source, dict) else _load_dict(source)
+    coupon_id = source.get("coupon")
+    return None if coupon_id is None else str(coupon_id)
+
+
+def _mint_discount(ctx: seahaven.Ctx, coupon: Mapping[str, Any], now: str) -> DiscountSpec:
+    """A new discount from `coupon` starting `now`, which is one redemption
+    of it (`coupons.redeem`), refused first when the coupon is no longer
+    valid. A `repeating` discount ends `duration_in_months` calendar months
+    after it starts (probed via the Stripe MCP, 2026-10-16), the day clamped
+    as a billing month's is (unprobed;
+    https://github.com/Kiln-AI/stripe_world/issues/13)."""
+    _refuse_unredeemable(coupon, now)
+    coupons.redeem(ctx, coupon["id"])
+    end = (
+        invoicing.add_interval(now, interval="month", interval_count=coupon["duration_in_months"])
+        if coupon["duration"] == "repeating"
+        else None
+    )
+    return DiscountSpec(
+        discount_id=_ids.stripe_id(ctx, "di_", timestamp=now),
+        coupon_id=coupon["id"],
+        amount_off=coupon["amount_off"],
+        percent_off=Fraction(coupon["percent_off"]) if coupon["percent_off"] else None,
+        start=now,
+        end=end,
+    )
+
+
 def _refuse_unredeemable(coupon: Mapping[str, Any], now: str) -> None:
-    """The `coupon_expired` refusals: a coupon past its `redeem_by`, or one
-    redeemed `max_redemptions` times (a deleted one is already missing). The
-    code is the billing engine's error table's; neither message spelling is
-    recorded (Phase 12 did not probe them), and the exhausted one is
-    unprobed outright."""
+    """The refusals of a coupon past its `redeem_by` or redeemed
+    `max_redemptions` times (a deleted one is already missing). Both message
+    spellings are probed via the Stripe MCP (2026-10-16), which answers the
+    message alone, so the error's type, HTTP status, `param` and its
+    `coupon_expired` code (from the billing engine's error table) are
+    unprobed."""
     if coupon["redeem_by"] is not None and coupon["redeem_by"] <= now:
-        raise invalid_request(f"Coupon {coupon['id']} is expired.", code="coupon_expired")
+        raise invalid_request(
+            f"Coupon {coupon['id']} is expired and cannot be applied.", code="coupon_expired"
+        )
     if (
         coupon["max_redemptions"] is not None
         and coupon["times_redeemed"] >= coupon["max_redemptions"]
     ):
         raise invalid_request(
-            f"Coupon {coupon['id']} has been redeemed the maximum number of times.",
-            code="coupon_expired",
+            f"Coupon {coupon['id']} is used up and cannot be applied.", code="coupon_expired"
         )
 
 
@@ -442,7 +503,8 @@ def create_subscription(ctx: seahaven.Ctx, params: dict[str, Any]) -> dict[str, 
     # A trial create that sweeps a pending item bills it on a paid first
     # invoice, so its coupons apply there exactly as on a paid create's
     # first invoice, a once-coupon consumed with it rather than parked for
-    # the trial end (unprobed; https://github.com/Kiln-AI/stripe_world/issues/14).
+    # the trial end (probed via the Stripe MCP, 2026-10-16;
+    # https://github.com/Kiln-AI/stripe_world/issues/14).
     trial_bills_items = trial_end is not None and bool(
         invoicing.subscription_pending_items(
             ctx, customer_id=customer["id"], subscription_id=None, currency=currency
@@ -467,7 +529,9 @@ def create_subscription(ctx: seahaven.Ctx, params: dict[str, Any]) -> dict[str, 
         "cancel_at": params.get("cancel_at"),
         "cancel_at_period_end": int(params.get("cancel_at_period_end", False)),
         # A cancel scheduled at creation carries the update's shape: the
-        # request's instant and reason (unprobed at create).
+        # request's instant and reason (probed via the Stripe MCP,
+        # 2026-10-17, for `cancel_at_period_end: true`; a `cancel_at`
+        # instant at create is unprobed).
         "canceled_at": now if cancel_requested else None,
         "cancellation_details": _json.dumps(
             {
@@ -529,9 +593,9 @@ def create_subscription(ctx: seahaven.Ctx, params: dict[str, Any]) -> dict[str, 
             },
         )
     if params.get("cancel_at_period_end") and "cancel_at" not in params:
-        # The flag's instant is the first period's end, as on update (where
-        # an explicit `cancel_at` wins too); the period exists only once the
-        # items do.
+        # The flag's instant is the first period's end, as on update (probed
+        # via the Stripe MCP, 2026-10-17; where an explicit `cancel_at` wins
+        # too); the period exists only once the items do.
         ctx.db.execute(
             "UPDATE subscriptions SET cancel_at = ? WHERE id = ?", _period_end(ctx, sub_id), sub_id
         )
@@ -541,7 +605,8 @@ def create_subscription(ctx: seahaven.Ctx, params: dict[str, Any]) -> dict[str, 
         if trial_bills_items:
             # The swept items bill on the trial's first invoice beside its
             # $0 trial lines, discounted as a paid create's first invoice is
-            # (unprobed; see `trial_bills_items` above).
+            # (probed via the Stripe MCP, 2026-10-16; see `trial_bills_items`
+            # above).
             invoice = _cycle_invoice(
                 ctx,
                 sub_row,
@@ -558,10 +623,13 @@ def create_subscription(ctx: seahaven.Ctx, params: dict[str, Any]) -> dict[str, 
             # line is `Free trial for 1 x <product>` over `[start,
             # trial_end)`. The $0 trial invoice bills nothing to discount: a
             # parked once-coupon waits for the first PAID invoice (probed,
-            # round 4's trail), so no specs are applied — not even the row's
-            # own persisted ones. The stored SHAPE still carries the parked
-            # discount (probed, round 5's trail invoice): the `discounts`
-            # column lists it and `total_discount_amounts` marks it at 0.
+            # round 4's trail), and every coupon nets 0 on the $0 lines. The
+            # invoice still carries the discount (probed, round 5's trail
+            # invoice): the `discounts` column lists it and
+            # `total_discount_amounts` marks it at 0, and so does every
+            # line's `discount_amounts` and `pretax_credit_amounts` (probed
+            # via the Stripe MCP, 2026-10-16, on the trial line of a create
+            # that sweeps an item).
             invoice = _cycle_invoice(
                 ctx,
                 sub_row,
@@ -569,18 +637,19 @@ def create_subscription(ctx: seahaven.Ctx, params: dict[str, Any]) -> dict[str, 
                 auto_advance=False,
                 finalize=True,
                 trial=True,
-                discount_specs=[],
-                applied_discount_objects=[_discount_object(spec) for spec in discount_specs],
+                discount_specs=discount_specs,
                 zero_total_discounts=[
                     {"amount": 0, "discount": spec.discount_id} for spec in discount_specs
                 ],
             )
         # The invoice is collected like a paid create's first invoice —
         # charged automatically, or left open for a send_invoice customer to
-        # pay — while the trial stands either way (unprobed). Unlike a paid
-        # create, a failed charge never answers per `payment_behavior`: the
-        # trial is the subscription's state, not the charge (declared in
-        # `allowed_differences.py`). The $0 invoice pays at once, as recorded.
+        # pay — while the trial stands either way (probed via the Stripe MCP,
+        # 2026-10-16, charged; the send_invoice case is unprobed). Unlike a
+        # paid create, a failed charge (unprobed) never answers per
+        # `payment_behavior`: the trial is the subscription's state, not the
+        # charge (declared in `allowed_differences.py`). The $0 invoice pays
+        # at once, as recorded.
         if collection_method != "send_invoice" or invoice["amount_due"] == 0:
             invoicing.pay_invoice(ctx, invoice["id"], sub_row=sub_row)
         _set_latest_invoice(ctx, sub_id, invoice["id"])
@@ -837,14 +906,10 @@ def _persisted_discount_specs(ctx: seahaven.Ctx, sub_row: Mapping[str, Any]) -> 
     (`_consume_once_discounts` reads it the same tolerant way)."""
     specs: list[DiscountSpec] = []
     for discount in _load_list(sub_row["discounts"]):
-        if not isinstance(discount, dict):
-            continue
-        source = discount.get("source")
-        source = source if isinstance(source, dict) else _load_dict(source)
-        coupon_id = source.get("coupon")
+        coupon_id = _coupon_of(discount)
         if coupon_id is None:
             continue
-        coupon = _lookup.require_row(ctx, "coupons", "coupon", str(coupon_id), param="discounts")
+        coupon = _lookup.require_row(ctx, "coupons", "coupon", coupon_id, param="discounts")
         end = discount.get("end")
         specs.append(
             DiscountSpec(
@@ -909,11 +974,9 @@ def _consume_once_discounts(ctx: seahaven.Ctx, sub_id: str) -> None:
     for discount in _load_list(_re_read(ctx, sub_id)["discounts"]):
         if not isinstance(discount, dict):
             continue
-        source = discount.get("source")
-        source = source if isinstance(source, dict) else _load_dict(source)
-        coupon_id = source.get("coupon")
+        coupon_id = _coupon_of(discount)
         coupon = (
-            _lookup.require_row(ctx, "coupons", "coupon", str(coupon_id), param="discounts")
+            _lookup.require_row(ctx, "coupons", "coupon", coupon_id, param="discounts")
             if coupon_id is not None
             else None
         )
@@ -952,15 +1015,15 @@ def _cycle_invoice(
     trial: bool = False,
     period_start: str | None = None,
     period_end: str | None = None,
-    applied_discount_objects: list[dict[str, Any]] | None = None,
     zero_total_discounts: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Create (and optionally finalize) one invoice over the subscription's
     current item periods plus the pending items it sweeps (`_pending_sweep`),
     with the coupon and tax arithmetic applied. The invoice's own `period_*`
     columns default to the creation instant (the recorded
-    `subscription_create` shape); a renewal or a trial end passes the window
-    it looks back over, which closes where its lines' period opens.
+    `subscription_create` shape); a renewal or a natural trial end passes the
+    window it looks back over, which closes where its lines' period opens,
+    and an update-driven trial end passes its instant as both ends.
 
     Callers that resolve discounts themselves (creation, which applies its
     once-coupons alongside the persisted ones) pass `discount_specs`; every
@@ -1004,13 +1067,8 @@ def _cycle_invoice(
         period_start=period_start if period_start is not None else now,
         period_end=billed_at,
         # The invoice's own `discounts` column carries the discount objects
-        # its totals applied — persisted and once-coupons alike — or the
-        # parked-shape objects a caller passes for a $0 invoice.
-        discounts=(
-            applied_discount_objects
-            if applied_discount_objects is not None
-            else [_discount_object(spec) for spec in applied_discounts]
-        ),
+        # its totals applied — persisted and once-coupons alike.
+        discounts=[_discount_object(spec) for spec in applied_discounts],
         tax_rate_ids=_load_list(sub_row["default_tax_rates"]),
         attach=swept_ids,
     )
@@ -1028,11 +1086,13 @@ def _pending_sweep(
     `attach`. Every subscription invoice but the cancel's final one sweeps
     (https://github.com/Kiln-AI/stripe_world/issues/14). The lines go
     newest-first AHEAD of the plan lines — the order the manual `include`
-    sweep answers (recorded, cassette 13), unprobed on a subscription
-    invoice. The plan lines stay as each path builds them (a trial's $0
-    lines, a resume's parked-anchor periods), which is why no path sweeps
-    through `rebuild_invoice_lines`; the invoice's discounts reach a swept
-    line only when it is `discountable` (`compute_totals`)."""
+    sweep answers (recorded, cassette 13), probed via the Stripe MCP
+    (2026-10-16) on a paid create and, for a single swept item, a trial create,
+    and unprobed on the other subscription invoices. The plan lines stay as
+    each path builds them (a trial's $0 lines, a resume's parked-anchor
+    periods), which is why no path sweeps through `rebuild_invoice_lines`;
+    the invoice's discounts reach a swept line only when it is
+    `discountable` (`compute_totals`)."""
     rows = invoicing.subscription_pending_items(
         ctx,
         customer_id=sub_row["customer"],
@@ -1189,13 +1249,34 @@ def _conversion_invoice(
 # --- the trial-end path ---------------------------------------------------------------
 
 
+def _activate_from_trial(
+    ctx: seahaven.Ctx, sub_id: str, now: str, *, update_driven: bool
+) -> str | None:
+    """End the trial into its first paid period at `now`: the status turns
+    `active` and the items roll to `[now, now + interval)` — roll first,
+    invoice after (probed) — and an update-driven end moves
+    `billing_cycle_anchor` to `now` (recorded, cassette 12 seq 29, charged;
+    probed via the Stripe MCP, 2026-10-16, charged; the natural end's anchor
+    already is its boundary). Answers the trial period's start, None on an
+    itemless subscription."""
+    trial_start = _period_start(ctx, sub_id)
+    _set_status(ctx, sub_id, "active")
+    _roll_periods_to(ctx, sub_id, now)
+    if update_driven:
+        _set_anchor(ctx, sub_id, now)
+    return trial_start
+
+
+def _set_anchor(ctx: seahaven.Ctx, sub_id: str, anchor: str) -> None:
+    ctx.db.execute("UPDATE subscriptions SET billing_cycle_anchor = ? WHERE id = ?", anchor, sub_id)
+
+
 def trial_end_now(
     ctx: seahaven.Ctx,
     row: Mapping[str, Any],
     *,
     old_body: Mapping[str, Any] | None = None,
-    billing_reason: str = "subscription_update",
-    moment: str | None = None,
+    boundary: str | None = None,
 ) -> None:
     """`trial_end = "now"`: the recorded outcomes.
 
@@ -1204,14 +1285,19 @@ def trial_end_now(
     serialization stands in, which loses co-supplied fields' deltas — the
     row an update path passes has often already absorbed the `sets` UPDATE.
 
-    `billing_reason` follows the trigger (probed in both billing modes,
-    Phase 12 CR round 4's sandbox trail): the update-driven end bills
-    `subscription_update`; `advance_cycle`'s natural-boundary walker passes
-    `subscription_cycle` (unprobed — nothing routed reaches it).
-
-    `moment` overrides the instant the end happens at — the walker passes
-    the boundary, which a frozen clock cannot reach on its own."""
-    now = moment if moment is not None else ctx.clock.iso()
+    `boundary` is the natural trial end `advance_cycle`'s walker reaches,
+    which a frozen clock cannot reach on its own; None is the update-driven
+    end at the request's instant. The first paid invoice follows the
+    trigger: the update-driven end bills `subscription_update` (probed in
+    both billing modes, Phase 12 CR round 4's sandbox trail) with its own
+    period stamped `[now, now]`, as a create's is (probed via the Stripe MCP,
+    2026-10-16); the natural end bills `subscription_cycle` with its period
+    looking back over the trial, `[trial start, trial end]` (probed via the
+    Stripe MCP, 2026-10-16;
+    https://github.com/Kiln-AI/stripe_world/issues/12). Either way the
+    line bills the new period."""
+    now = boundary if boundary is not None else ctx.clock.iso()
+    billing_reason = "subscription_update" if boundary is None else "subscription_cycle"
     captured = _serialize(ctx, row) if old_body is None else old_body
     if row["collection_method"] == "send_invoice":
         # Probed (Phase 12 CR round 5): a send_invoice trial end answers
@@ -1221,9 +1307,9 @@ def trial_end_now(
         # because activation never waits on payment for send_invoice. Roll
         # first, invoice after, exactly as the PM branch: the line bills the
         # NEW period, never the trial span the $0 invoice already covered.
-        trial_start = _period_start(ctx, row["id"])
-        _set_status(ctx, row["id"], "active")
-        _roll_periods_to(ctx, row["id"], now)
+        # The update-driven end moves the anchor as the charged one does
+        # (unprobed for send_invoice).
+        trial_start = _activate_from_trial(ctx, row["id"], now, update_driven=boundary is None)
         if trial_start is not None:
             invoice = _cycle_invoice(
                 ctx,
@@ -1231,8 +1317,8 @@ def trial_end_now(
                 billing_reason=billing_reason,
                 auto_advance=True,
                 finalize=False,
-                # the trial it closes, as the PM branch's below (unprobed)
-                period_start=trial_start,
+                # the PM branch's invoice period below (unprobed for send_invoice)
+                period_start=now if boundary is None else trial_start,
                 period_end=now,
             )
             _set_latest_invoice(ctx, row["id"], invoice["id"])
@@ -1253,9 +1339,7 @@ def trial_end_now(
         # spans the NEW period `[now, now + interval)`, and the row's
         # persisted discounts — including a once-coupon the trial parked —
         # apply to it and are consumed here.
-        trial_start = _period_start(ctx, row["id"])
-        _set_status(ctx, row["id"], "active")
-        _roll_periods_to(ctx, row["id"], now)
+        trial_start = _activate_from_trial(ctx, row["id"], now, update_driven=boundary is None)
         if trial_start is None:
             # An itemless subscription (spec-blessed) has nothing to bill
             # and nothing to roll: the status moves and no invoice is
@@ -1274,12 +1358,10 @@ def trial_end_now(
             billing_reason=billing_reason,
             auto_advance=False,
             finalize=True,
-            # The invoice's own period looks back over the trial it closes,
-            # `[trial period start, now]` — the recorded subscription
-            # invoice rule (window start to the invoice moment), never the
-            # new period its line bills (unprobed: no trial-end invoice body
-            # is recorded; https://github.com/Kiln-AI/stripe_world/issues/12).
-            period_start=trial_start,
+            # The invoice's own period, never the new period its line bills:
+            # `[now, now]` on the update-driven end, the trial it closes on
+            # the natural one (both probed via the Stripe MCP, 2026-10-16).
+            period_start=now if boundary is None else trial_start,
             period_end=now,
         )
         # Latest before pay: `on_invoice_paid` keys on the subscription's
@@ -1307,13 +1389,21 @@ def trial_end_now(
         # `current_period_start < current_period_end` CHECK forbids a
         # zero-length period — the items' existing `[start, trial_end)`
         # periods already say everything a frozen clock can say, so they
-        # stand. Declared divergence, not an oversight.
+        # stand. Declared divergence, not an oversight. The update-driven
+        # pause still moves the anchor to its instant (recorded, cassette 12
+        # seq 39), which a later `billing_cycle_anchor: unchanged` resume
+        # parks.
         _set_status(ctx, row["id"], "paused")
+        if boundary is None:
+            _set_anchor(ctx, row["id"], now)
         events.emit_event(
             ctx, type="customer.subscription.paused", obj=_serialize(ctx, _re_read(ctx, row["id"]))
         )
         return
     if behavior == "cancel":
+        # The anchor stays at the trial end (unprobed: no recording covers
+        # an update-driven cancel end, while the charged and pause ends move
+        # it to their instant, cassette 12 seq 29 and seq 39).
         stamp = {
             "comment": None,
             "feedback": None,
@@ -1443,13 +1533,16 @@ def apply_update(ctx: seahaven.Ctx, sub_id: str, params: dict[str, Any]) -> dict
         # `canceled_at` with the request's instant; un-scheduling nulls it.
         # Only a request naming the cancel fields stamps — a metadata or
         # items update while the cancel is pending leaves the stamp as it
-        # was (unprobed: the docs' "most recent update request" is read as
-        # the most recent cancel request).
+        # was (probed via the Stripe MCP, 2026-10-17, for a metadata-only
+        # update: the docs' "most recent update request" is the most recent
+        # cancel request).
         sets["canceled_at"] = now if cancel_requested else None
         if not cancel_requested:
             # `cancel_at: ""` alone clears the flag too, so a cleared
-            # cancel can never still fire at the boundary (unprobed; the
-            # schedule release clears both the same way).
+            # cancel can never still fire at the boundary (probed via the
+            # Stripe MCP, 2026-10-17: `cancel_at`, the flag, `canceled_at`
+            # and the reason all clear; the schedule release clears both the
+            # same way).
             sets["cancel_at_period_end"] = 0
     if "collection_method" in params:
         sets["collection_method"] = params["collection_method"]
@@ -1470,10 +1563,10 @@ def apply_update(ctx: seahaven.Ctx, sub_id: str, params: dict[str, Any]) -> dict
         # Probed (Phase 12 CR round 5): an update parks the discount on the
         # row — once-coupons included, on both active and trialing rows; the
         # once ones are consumed by the next invoice that pays. The list is
-        # replaced, each entry a new discount and so a new redemption; an
-        # update that omits `discounts` keeps the row's own, uncounted.
-        _, persisted = _resolve_discounts(ctx, params["discounts"], park_once=True)
-        sets["discounts"] = _json.dumps(persisted)
+        # replaced; a re-sent coupon keeps its discount uncounted, a new one
+        # mints and counts (`_updated_discounts`), and an update that omits
+        # `discounts` keeps the row's own, uncounted.
+        sets["discounts"] = _json.dumps(_updated_discounts(ctx, row, params["discounts"]))
     if "pause_collection" in params:
         pause = params["pause_collection"]
         sets["pause_collection"] = (
@@ -1510,8 +1603,8 @@ def apply_update(ctx: seahaven.Ctx, sub_id: str, params: dict[str, Any]) -> dict
         # un-scheduling clears the stamp; a simultaneously supplied
         # `cancellation_details` merges over the stamp (its own `reason`
         # key, if any, wins). A `cancel_at` timestamp schedules the same
-        # cancel by another spelling, so it stamps the same reason
-        # (unprobed).
+        # cancel by another spelling, so it stamps the same instant and
+        # reason, the flag left false (probed via the Stripe MCP, 2026-10-16).
         current = _load_dict(row["cancellation_details"])
         details = dict(params.get("cancellation_details") or {})
         if cancel_requested is not None and "reason" not in details:
@@ -1562,11 +1655,7 @@ def apply_update(ctx: seahaven.Ctx, sub_id: str, params: dict[str, Any]) -> dict
                 proration_date=params.get("proration_date"),
             )
         _roll_periods_to(ctx, sub_id, now)
-        ctx.db.execute(
-            "UPDATE subscriptions SET billing_cycle_anchor = ? WHERE id = ?",
-            now,
-            sub_id,
-        )
+        _set_anchor(ctx, sub_id, now)
     if "trial_end" in params and params["trial_end"] == "now":
         fresh = _re_read(ctx, sub_id)
         if fresh["status"] == "trialing":
@@ -2235,12 +2324,12 @@ def resume_subscription(
         subscription_id=sub_id,
         auto_advance=False,
         days_until_due=row["days_until_due"],
-        # The invoice's own period looks back — `[current item period start,
-        # now]`, the recorded subscription invoice rule — rather than
-        # stamping the parked period its lines bill, which the next renewal
-        # would then share (unprobed;
+        # The invoice's own period is the resume's instant, `[now, now]`,
+        # never the parked period its lines bill, which the next renewal
+        # would then share (unprobed, by analogy with the probed
+        # `trial_end: "now"`, another call that restarts the cycle;
         # https://github.com/Kiln-AI/stripe_world/issues/12).
-        period_start=_period_start(ctx, sub_id) or now,
+        period_start=now,
         period_end=now,
         attach=swept_ids,
     )
@@ -2405,19 +2494,21 @@ def advance_cycle(ctx: seahaven.Ctx, sub_id: str) -> dict[str, Any]:
             ctx,
             _re_read(ctx, sub_id),
             old_body=_serialize(ctx, row),
-            # The natural boundary bills the cycle; the update-driven end
-            # bills `subscription_update` (probed, round 4's trail). This
-            # walker's spelling is unprobed — nothing routed reaches it —
-            # and the boundary, not the frozen `now`, is the instant.
-            billing_reason="subscription_cycle",
-            moment=boundary,
+            # The natural boundary bills the cycle, looking back over the
+            # trial (probed via the Stripe MCP, 2026-10-16), and the
+            # boundary, not the frozen `now`, is the instant.
+            boundary=boundary,
         )
         return _re_read(ctx, sub_id)
     if row["cancel_at_period_end"]:
         # The deferred cancel fires: no renewal invoice is generated. The
         # stored `canceled_at` is the request's instant and stands (spec3:
         # it reflects "the time of the most recent update request, not the
-        # end of the subscription period"); only `ended_at` is the boundary.
+        # end of the subscription period"); only `ended_at` is the boundary
+        # (probed via the Stripe MCP, 2026-10-16, on a `cancel_at` cancel
+        # firing: `canceled_at` stays and `ended_at` is the `cancel_at`).
+        # Only the flag's cancel fires here: a `cancel_at` instant without
+        # the flag is not walked.
         ctx.db.execute(
             "UPDATE subscriptions SET status = 'canceled', ended_at = ? WHERE id = ?",
             boundary,
@@ -2462,8 +2553,9 @@ def advance_cycle(ctx: seahaven.Ctx, sub_id: str) -> dict[str, Any]:
         # The invoice's own period looks back over the interval that just
         # closed (the recorded rule: current window start to the invoice
         # moment; Stripe's docs: a subscription invoice's period "looks back
-        # one period"), not the instant it was generated at — the create
-        # invoice's recorded degenerate period is creation-specific.
+        # one period"), not the instant it was generated at — the degenerate
+        # period of an invoice a call mints (a create, an update-driven
+        # trial end, a resume) is not a boundary's.
         period_start=previous_start,
         period_end=boundary,
     )

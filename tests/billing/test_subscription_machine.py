@@ -409,7 +409,10 @@ def test_resume_parks_a_pending_update_and_the_confirm_applies_it(
 def test_resume_unchanged_anchor_restarts_at_the_stored_anchor(instance: seahaven.Instance) -> None:
     """`billing_cycle_anchor=unchanged` parks the stored anchor, and the
     confirming SetupIntent restarts the periods there — not at the confirm
-    moment (the frozen clock makes the two coincide only when they do)."""
+    moment. The trial pauses at its natural end, whose anchor is the trial
+    end, so the stored anchor differs from the frozen clock's instant."""
+    import seahaven_stripe_world.billing.subscription_lifecycle as lifecycle
+
     _, _, price = setup_catalog(instance)
     bare = call(instance, "POST", "/v1/customers", {"email": "bare2@example.test"})["id"]
     sub = call(
@@ -424,7 +427,10 @@ def test_resume_unchanged_anchor_restarts_at_the_stored_anchor(instance: seahave
         },
     )
     stored_anchor = sub["billing_cycle_anchor"]
-    call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": "now"})
+    with instance.bulk() as ctx:
+        lifecycle.advance_cycle(ctx, sub["id"])
+    paused = call(instance, "GET", f"/v1/subscriptions/{sub['id']}")
+    assert (paused["status"], paused["billing_cycle_anchor"]) == ("paused", stored_anchor)
     body = call(
         instance,
         "POST",
@@ -448,6 +454,38 @@ def test_resume_unchanged_anchor_restarts_at_the_stored_anchor(instance: seahave
     assert fresh["billing_cycle_anchor"] == stored_anchor
     item = fresh["items"]["data"][0]
     assert item["current_period_start"] == stored_anchor
+
+
+def test_an_update_driven_pause_moves_the_anchor_to_its_instant(
+    instance: seahaven.Instance,
+) -> None:
+    """Recorded (cassette 12 seq 39): `trial_end: "now"` on a no-method trial
+    set to pause moves `billing_cycle_anchor` to the update instant, so an
+    `unchanged` resume parks that instant, not the old trial end."""
+    _, _, price = setup_catalog(instance)
+    bare = call(instance, "POST", "/v1/customers", {"email": "bare3@example.test"})["id"]
+    sub = call(
+        instance,
+        "POST",
+        "/v1/subscriptions",
+        {
+            "customer": bare,
+            "items": [{"price": price}],
+            "trial_end": 1798761600,
+            "trial_settings": {"end_behavior": {"missing_payment_method": "pause"}},
+        },
+    )
+    assert sub["billing_cycle_anchor"] == 1798761600
+    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": "now"})
+    assert body["status"] == "paused"
+    assert body["billing_cycle_anchor"] == body["created"] == _time.to_unix(BLANK_NOW)
+    resumed = call(
+        instance,
+        "POST",
+        f"/v1/subscriptions/{sub['id']}/resume",
+        {"billing_cycle_anchor": "unchanged"},
+    )
+    assert resumed["pending_update"]["billing_cycle_anchor"] == _time.to_unix(BLANK_NOW)
 
 
 def test_resume_refuses_a_non_paused_subscription(instance: seahaven.Instance) -> None:
@@ -1420,7 +1458,8 @@ def test_advance_cycles_trial_at_the_boundary(instance: seahaven.Instance) -> No
     invoice = one_row(instance, "SELECT * FROM invoices WHERE id = ?", fresh["latest_invoice"])
     assert invoice["billing_reason"] == "subscription_cycle"
     # its line bills the new period; its own period looks back over the
-    # trial (issue #12), so the renewal after it cannot share that span
+    # trial (issue #12; probed via the Stripe MCP, 2026-10-16), so the
+    # renewal after it cannot share that span
     (line,) = json.loads(invoice["lines"])
     assert line["period"] == {
         "end": item["current_period_end"],
@@ -1467,8 +1506,9 @@ def test_keep_as_draft_pause_leaves_the_renewal_in_draft(instance: seahaven.Inst
 def test_send_invoice_trial_end_bills_the_new_period(instance: seahaven.Instance) -> None:
     """Roll-then-invoice, exactly as the PM branch: the draft's line spans
     the NEW period, never the trial span the $0 invoice already covered —
-    while the invoice's own period looks back over the trial it closes
-    (issue #12; unprobed, declared in the code)."""
+    while the invoice's own period is the update's instant, `[now, now]`,
+    never the trial it closes (the PM branch's probed rule; unprobed for
+    send_invoice)."""
     import json
 
     cus, _pm, price = setup_catalog(instance)
@@ -1485,7 +1525,7 @@ def test_send_invoice_trial_end_bills_the_new_period(instance: seahaven.Instance
         },
     )
     # Backdate the trial's period: under the frozen clock it would start at
-    # the very `now` it ends at, and the look-back span would be degenerate.
+    # the very `now` it ends at, so a look-back would be indistinguishable.
     trial_began = "2026-08-20T14:00:00.000Z"
     with instance.bulk() as ctx:
         ctx.db.execute(
@@ -1503,16 +1543,53 @@ def test_send_invoice_trial_end_bills_the_new_period(instance: seahaven.Instance
     assert (
         line["period"]["end"] - line["period"]["start"] == 30 * 86_400
     )  # one month, not the trial
-    # the period columns are ISO in storage: the trial's start to the end
-    # moment, where the new period opens
-    assert (invoice["period_start"], invoice["period_end"]) == (trial_began, BLANK_NOW)
+    # the period columns are ISO in storage: the end moment at both ends
+    assert (invoice["period_start"], invoice["period_end"]) == (BLANK_NOW, BLANK_NOW)
+    # the anchor moves to the update instant, as on the charged branch
+    assert body["billing_cycle_anchor"] == _time.to_unix(BLANK_NOW)
+
+
+def test_an_update_driven_trial_end_stamps_its_instant_as_the_invoice_period(
+    instance: seahaven.Instance,
+) -> None:
+    """Probed via the Stripe MCP (2026-10-16): `trial_end: "now"` mints a
+    `subscription_update` invoice whose own period is `[now, now]`, as a
+    create's is — not the trial it closes — while its line bills the new
+    period, and `billing_cycle_anchor` moves from the old trial end to the
+    update instant."""
+    cus, _pm, price = setup_catalog(instance)
+    sub = call(
+        instance,
+        "POST",
+        "/v1/subscriptions",
+        {"customer": cus, "items": [{"price": price}], "trial_end": 1798761600},
+    )
+    # Backdate the trial's period, so a look-back would show.
+    with instance.bulk() as ctx:
+        ctx.db.execute(
+            "UPDATE subscription_items SET current_period_start = ? WHERE subscription = ?",
+            "2026-08-20T14:00:00.000Z",
+            sub["id"],
+        )
+    assert sub["billing_cycle_anchor"] == 1798761600
+    body = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": "now"})
+    assert body["billing_cycle_anchor"] == body["created"] == _time.to_unix(BLANK_NOW)
+    invoice = one_row(instance, "SELECT * FROM invoices WHERE id = ?", body["latest_invoice"])
+    assert (invoice["billing_reason"], invoice["status"]) == ("subscription_update", "paid")
+    assert (invoice["period_start"], invoice["period_end"]) == (BLANK_NOW, BLANK_NOW)
+    (line,) = json.loads(invoice["lines"])
+    item = body["items"]["data"][0]
+    assert line["period"] == {
+        "end": item["current_period_end"],
+        "start": item["current_period_start"],
+    }
 
 
 def test_resume_cycle_invoice_bills_the_parked_anchor_period(instance: seahaven.Instance) -> None:
     """Unprobed on live (declared in the code): the resume's open cycle
     invoice's line bills `[anchor, anchor + interval)` — not the paused
-    trial span — while its own period looks back from the paused period's
-    start to the resume moment (issue #12)."""
+    trial span — while its own period is the resume's instant, `[now, now]`,
+    as the probed `trial_end: "now"` invoice's is (issue #12)."""
     import json
 
     _, _, price = setup_catalog(instance)
@@ -1530,8 +1607,8 @@ def test_resume_cycle_invoice_bills_the_parked_anchor_period(instance: seahaven.
     )
     call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": "now"})
     # Backdate the paused period: under the frozen clock it starts at the
-    # very `now` the resume happens at, and the look-back span would be
-    # degenerate.
+    # very `now` the resume happens at, so a look-back would be
+    # indistinguishable.
     paused_since = "2026-08-20T14:00:00.000Z"
     with instance.bulk() as ctx:
         ctx.db.execute(
@@ -1545,7 +1622,7 @@ def test_resume_cycle_invoice_bills_the_parked_anchor_period(instance: seahaven.
     line = json.loads(invoice["lines"])[0]
     assert line["period"]["start"] == body["created"]  # the parked `now` anchor
     assert line["period"]["end"] - line["period"]["start"] == 30 * 86_400
-    assert (invoice["period_start"], invoice["period_end"]) == (paused_since, BLANK_NOW)
+    assert (invoice["period_start"], invoice["period_end"]) == (BLANK_NOW, BLANK_NOW)
 
 
 def test_a_deleted_coupons_parked_discount_keeps_billing(instance: seahaven.Instance) -> None:
@@ -2135,7 +2212,8 @@ def _change_price(
 def test_a_paid_create_sweeps_an_untagged_pending_item(instance: seahaven.Instance) -> None:
     """The setup fee ordered before the subscription rides its first
     invoice: its own line ahead of the plan line, charged with it, and the
-    item no longer pending."""
+    item no longer pending (probed via the Stripe MCP, 2026-10-16). Neither
+    the line nor the item is tagged with the subscription by the sweep."""
     cus, _, price = setup_catalog(instance)
     item = _pending_item(instance, cus)
     sub = call(
@@ -2144,7 +2222,9 @@ def test_a_paid_create_sweeps_an_untagged_pending_item(instance: seahaven.Instan
     invoice = call(instance, "GET", f"/v1/invoices/{sub['latest_invoice']}")
     assert _line_sources(invoice) == [(item, 4900), (None, 2000)]
     assert (invoice["status"], invoice["total"], invoice["amount_paid"]) == ("paid", 6900, 6900)
-    assert call(instance, "GET", f"/v1/invoiceitems/{item}")["invoice"] == invoice["id"]
+    assert invoice["lines"]["data"][0]["parent"]["invoice_item_details"]["subscription"] is None
+    swept = call(instance, "GET", f"/v1/invoiceitems/{item}")
+    assert (swept["invoice"], swept["parent"]) == (invoice["id"], None)
     assert _pending_ids(instance, cus) == []
     created = one_row(
         instance, "SELECT data FROM events WHERE type = 'invoice.created' ORDER BY x_seq DESC"
@@ -2156,10 +2236,11 @@ def test_a_paid_create_sweeps_an_untagged_pending_item(instance: seahaven.Instan
 def test_a_trial_create_bills_a_swept_item_and_stays_trialing(
     instance: seahaven.Instance, collection_method: str
 ) -> None:
-    """The declared ruling (unprobed): the trial's first invoice bills the
-    swept item at its amount beside the $0 trial line, and is collected like
-    a paid create's — charged, or left open for a send_invoice customer —
-    while the subscription stays `trialing`."""
+    """The trial's first invoice bills the swept item at its amount ahead of
+    the $0 trial line, over the create's instant, and is collected like a
+    paid create's — charged, or left open for a send_invoice customer —
+    while the subscription stays `trialing` (probed via the Stripe MCP,
+    2026-10-16, charged; the send_invoice case is unprobed)."""
     cus, _, price = setup_catalog(instance)
     item = _pending_item(instance, cus)
     params: dict = {"customer": cus, "items": [{"price": price}], "trial_end": 1798761600}
@@ -2170,7 +2251,9 @@ def test_a_trial_create_bills_a_swept_item_and_stays_trialing(
     invoice = call(instance, "GET", f"/v1/invoices/{sub['latest_invoice']}")
     assert _line_sources(invoice) == [(item, 4900), (None, 0)]
     assert invoice["lines"]["data"][1]["description"].startswith("Free trial for 1 ")
-    assert invoice["total"] == 4900
+    assert invoice["lines"]["data"][1]["period"] == {"start": sub["created"], "end": 1798761600}
+    assert (invoice["billing_reason"], invoice["total"]) == ("subscription_create", 4900)
+    assert (invoice["period_start"], invoice["period_end"]) == (sub["created"], sub["created"])
     if collection_method == "send_invoice":
         assert (invoice["status"], invoice["amount_remaining"]) == ("open", 4900)
         assert invoice["attempted"] is False
@@ -2344,6 +2427,12 @@ def test_the_coupon_discounts_a_discountable_swept_item_never_a_proration(
         source: (line["discountable"], line["discount_amounts"])
         for (source, _), line in zip(_line_sources(renewal), renewal["lines"]["data"], strict=True)
     }
+    # the pretax credits echo each line's entries, a non-discountable line's 0 included
+    assert all(
+        line["pretax_credit_amounts"]
+        == [{**entry, "type": "discount"} for entry in line["discount_amounts"]]
+        for line in renewal["lines"]["data"]
+    )
     assert by_source == {
         fixed: (False, [{"amount": 0, "discount": discount}]),
         item: (True, [{"amount": 490, "discount": discount}]),
@@ -2431,10 +2520,12 @@ def test_a_trial_create_that_sweeps_applies_its_coupons_like_a_paid_create(
     parked: int,
     trial_end_total: int,
 ) -> None:
-    """The declared ruling (unprobed): once a trial create sweeps an item,
-    its first invoice is discounted as a paid create's is — a once-coupon is
-    consumed there, so the trial end bills full price. With nothing swept,
-    the recorded $0 invoice parks the once-coupon for the trial end."""
+    """Once a trial create sweeps an item, its first invoice is discounted as
+    a paid create's is — a once-coupon is consumed there, so the trial end
+    bills full price (probed via the Stripe MCP, 2026-10-16). With nothing
+    swept, the recorded $0 invoice parks the once-coupon for the trial end.
+    Every line, the $0 trial line included, lists the discount, at 0 where
+    it takes nothing (probed on the swept invoice)."""
     cus, _, price = setup_catalog(instance)
     coupon = call(instance, "POST", "/v1/coupons", {"percent_off": 50, "duration": duration})["id"]
     if swept:
@@ -2454,6 +2545,14 @@ def test_a_trial_create_that_sweeps_applies_its_coupons_like_a_paid_create(
     invoice = call(instance, "GET", f"/v1/invoices/{sub['latest_invoice']}")
     assert (invoice["status"], invoice["total"]) == ("paid", trial_total)
     assert len(sub["discounts"]) == parked
+    (discount,) = invoice["discounts"]
+    taken = [2450, 0] if swept else [0]
+    assert [line["discount_amounts"] for line in invoice["lines"]["data"]] == [
+        [{"amount": amount, "discount": discount}] for amount in taken
+    ]
+    assert [line["pretax_credit_amounts"] for line in invoice["lines"]["data"]] == [
+        [{"amount": amount, "discount": discount, "type": "discount"}] for amount in taken
+    ]
     ended = call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"trial_end": "now"})
     assert call(instance, "GET", f"/v1/invoices/{ended['latest_invoice']}")["total"] == (
         trial_end_total
@@ -2816,8 +2915,8 @@ def test_a_deleted_coupons_repeating_discount_bills_until_its_end(
 
 def test_each_minted_discount_redeems_its_coupon_once(instance: seahaven.Instance) -> None:
     """A create counts its coupons — a once-coupon a trial parks included —
-    and an update counts only the discounts it mints: one that omits
-    `discounts` keeps the row's own uncounted."""
+    and neither an update that omits `discounts` nor a renewal counts the
+    row's own."""
     cus, _, price = setup_catalog(instance)
     repeating = _coupon(instance, duration="repeating", duration_in_months=3)
     once = _coupon(instance, duration="once")
@@ -2835,14 +2934,6 @@ def test_each_minted_discount_redeems_its_coupon_once(instance: seahaven.Instanc
     call(instance, "POST", f"/v1/subscriptions/{sub['id']}", {"metadata": {"k": "v"}})
     _renew(instance, sub["id"])
     assert _times_redeemed(instance, repeating) == 1
-    replaced = call(
-        instance,
-        "POST",
-        f"/v1/subscriptions/{sub['id']}",
-        {"discounts": [{"coupon": repeating}]},
-    )
-    assert replaced["discounts"] != sub["discounts"]  # a new discount, minted now
-    assert _times_redeemed(instance, repeating) == 2
     call(
         instance,
         "POST",
@@ -2859,12 +2950,13 @@ def test_each_minted_discount_redeems_its_coupon_once(instance: seahaven.Instanc
 
 def test_max_redemptions_refuses_the_next_redemption(instance: seahaven.Instance) -> None:
     """The last allowed redemption flips `valid` false, and the next
-    application is the `coupon_expired` refusal (unprobed message), on
-    create and update alike, counting nothing."""
+    application is refused with the probed used-up message (code
+    `coupon_expired`, unprobed), on create and on an update of a
+    subscription that does not carry the coupon, counting nothing."""
     cus, _, price = setup_catalog(instance)
     coupon = _coupon(instance, duration="forever", max_redemptions=1)
     assert call(instance, "GET", f"/v1/coupons/{coupon}")["valid"] is True
-    sub = call(
+    call(
         instance,
         "POST",
         "/v1/subscriptions",
@@ -2873,6 +2965,9 @@ def test_max_redemptions_refuses_the_next_redemption(instance: seahaven.Instance
     body = call(instance, "GET", f"/v1/coupons/{coupon}")
     assert (body["times_redeemed"], body["valid"]) == (1, False)
     assert one_row(instance, "SELECT valid FROM coupons WHERE id = ?", coupon) == {"valid": 0}
+    other = call(
+        instance, "POST", "/v1/subscriptions", {"customer": cus, "items": [{"price": price}]}
+    )
     subscriptions = one_row(instance, "SELECT count(*) AS n FROM subscriptions")["n"]
     for method, path, params in (
         (
@@ -2880,16 +2975,159 @@ def test_max_redemptions_refuses_the_next_redemption(instance: seahaven.Instance
             "/v1/subscriptions",
             {"customer": cus, "items": [{"price": price}], "discounts": [{"coupon": coupon}]},
         ),
-        ("POST", f"/v1/subscriptions/{sub['id']}", {"discounts": [{"coupon": coupon}]}),
+        ("POST", f"/v1/subscriptions/{other['id']}", {"discounts": [{"coupon": coupon}]}),
     ):
         with pytest.raises(StripeToolError) as exc_info:
             call(instance, method, path, params)
         error = exc_info.value.stripe_body["error"]
         assert (error["code"], error["message"]) == (
             "coupon_expired",
-            f"Coupon {coupon} has been redeemed the maximum number of times.",
+            f"Coupon {coupon} is used up and cannot be applied.",
         )
     assert one_row(instance, "SELECT count(*) AS n FROM subscriptions")["n"] == subscriptions
     assert _times_redeemed(instance, coupon) == 1
-    # the refused update kept the row's discount
-    assert call(instance, "GET", f"/v1/subscriptions/{sub['id']}")["discounts"] == sub["discounts"]
+    assert call(instance, "GET", f"/v1/subscriptions/{other['id']}")["discounts"] == []
+
+
+# --- re-sending a carried coupon keeps its discount (probed via the Stripe MCP, 2026-10-16)
+
+
+def _resend(instance: seahaven.Instance, sub_id: str, coupons: list[str], *, at: str) -> None:
+    """An update passing `discounts` for `coupons`, made at `at`, after the
+    frozen clock — so a freshly minted discount would start later than the
+    create's."""
+    import seahaven_stripe_world.billing.subscription_lifecycle as lifecycle
+
+    with instance.bulk() as ctx:
+        lifecycle.apply_update(
+            _at(ctx, at), sub_id, {"discounts": [{"coupon": coupon} for coupon in coupons]}
+        )
+
+
+def test_re_sending_a_carried_coupon_keeps_its_discount_uncounted(
+    instance: seahaven.Instance,
+) -> None:
+    """The subscription keeps the same discount object — `di_`, `start` and
+    `end` — and the coupon counts no new redemption."""
+    cus, _, price = setup_catalog(instance)
+    coupon = _coupon(instance, duration="repeating", duration_in_months=3)
+    sub = call(
+        instance,
+        "POST",
+        "/v1/subscriptions",
+        {"customer": cus, "items": [{"price": price}], "discounts": [{"coupon": coupon}]},
+    )
+    stored = _stored_discounts(instance, "subscriptions", sub["id"])
+    _resend(instance, sub["id"], [coupon], at=_time.from_unix(_months_after(BLANK_NOW, 1)))
+    assert _stored_discounts(instance, "subscriptions", sub["id"]) == stored
+    assert _times_redeemed(instance, coupon) == 1
+
+
+def test_re_sending_a_used_up_coupon_succeeds(instance: seahaven.Instance) -> None:
+    """A carried coupon is not refused for being used up: the update answers
+    200 with the subscription's discount unchanged, counting nothing."""
+    cus, _, price = setup_catalog(instance)
+    coupon = _coupon(instance, duration="forever", max_redemptions=1)
+    sub = call(
+        instance,
+        "POST",
+        "/v1/subscriptions",
+        {"customer": cus, "items": [{"price": price}], "discounts": [{"coupon": coupon}]},
+    )
+    assert call(instance, "GET", f"/v1/coupons/{coupon}")["valid"] is False
+    body = call(
+        instance, "POST", f"/v1/subscriptions/{sub['id']}", {"discounts": [{"coupon": coupon}]}
+    )
+    assert body["discounts"] == sub["discounts"]
+    assert _times_redeemed(instance, coupon) == 1
+
+
+def test_re_sending_a_carried_coupon_past_its_redeem_by_keeps_its_discount(
+    instance: seahaven.Instance,
+) -> None:
+    """The validity refusal is skipped for a carried coupon past its
+    `redeem_by` too (unprobed; only the used-up re-send is probed)."""
+    cus, _, price = setup_catalog(instance)
+    redeem_by = _time.to_unix(BLANK_NOW) + 86_400
+    coupon = _coupon(instance, duration="forever", redeem_by=redeem_by)
+    sub = call(
+        instance,
+        "POST",
+        "/v1/subscriptions",
+        {"customer": cus, "items": [{"price": price}], "discounts": [{"coupon": coupon}]},
+    )
+    stored = _stored_discounts(instance, "subscriptions", sub["id"])
+    _resend(instance, sub["id"], [coupon], at=_time.from_unix(redeem_by + 1))
+    assert _stored_discounts(instance, "subscriptions", sub["id"]) == stored
+    assert _times_redeemed(instance, coupon) == 1
+
+
+def test_a_new_coupon_beside_a_re_sent_one_mints_and_counts_alone(
+    instance: seahaven.Instance,
+) -> None:
+    """Only the coupon the subscription does not carry mints a discount
+    (starting at the update) and counts; the parameter still replaces the
+    list, so a later update that leaves a coupon out drops its discount."""
+    cus, _, price = setup_catalog(instance)
+    kept = _coupon(instance, duration="forever")
+    added = _coupon(instance, duration="repeating", duration_in_months=3)
+    sub = call(
+        instance,
+        "POST",
+        "/v1/subscriptions",
+        {"customer": cus, "items": [{"price": price}], "discounts": [{"coupon": kept}]},
+    )
+    (carried,) = _stored_discounts(instance, "subscriptions", sub["id"])
+    later = _time.from_unix(_months_after(BLANK_NOW, 1))
+    _resend(instance, sub["id"], [kept, added], at=later)
+    first, minted = _stored_discounts(instance, "subscriptions", sub["id"])
+    assert first == carried
+    assert (minted["source"]["coupon"], minted["start"]) == (added, _time.to_unix(later))
+    assert minted["end"] == _months_after(later, 3)
+    assert (_times_redeemed(instance, kept), _times_redeemed(instance, added)) == (1, 1)
+    _resend(instance, sub["id"], [added], at=later)
+    assert _stored_discounts(instance, "subscriptions", sub["id"]) == [minted]
+    assert _times_redeemed(instance, added) == 1
+
+
+def test_a_coupon_listed_twice_keeps_its_discount_and_mints_one_more(
+    instance: seahaven.Instance,
+) -> None:
+    """Each entry keeps at most one carried discount (unprobed): the second
+    entry for a carried coupon mints a new discount, as a create's would."""
+    cus, _, price = setup_catalog(instance)
+    coupon = _coupon(instance, duration="forever")
+    sub = call(
+        instance,
+        "POST",
+        "/v1/subscriptions",
+        {"customer": cus, "items": [{"price": price}], "discounts": [{"coupon": coupon}]},
+    )
+    (carried,) = _stored_discounts(instance, "subscriptions", sub["id"])
+    _resend(instance, sub["id"], [coupon, coupon], at=_time.from_unix(_months_after(BLANK_NOW, 1)))
+    first, second = _stored_discounts(instance, "subscriptions", sub["id"])
+    assert first == carried
+    assert second["id"] != carried["id"]
+    assert _times_redeemed(instance, coupon) == 2
+
+
+def test_re_sending_a_coupon_whose_discount_ended_mints_a_new_one(
+    instance: seahaven.Instance,
+) -> None:
+    """Only a live discount is kept: past a repeating discount's `end` the
+    subscription no longer carries it, so the re-sent coupon mints and counts."""
+    cus, _, price = setup_catalog(instance)
+    coupon = _coupon(instance, duration="repeating", duration_in_months=1)
+    sub = call(
+        instance,
+        "POST",
+        "/v1/subscriptions",
+        {"customer": cus, "items": [{"price": price}], "discounts": [{"coupon": coupon}]},
+    )
+    (ended,) = _stored_discounts(instance, "subscriptions", sub["id"])
+    later = _time.from_unix(ended["end"])
+    _resend(instance, sub["id"], [coupon], at=later)
+    (minted,) = _stored_discounts(instance, "subscriptions", sub["id"])
+    assert minted["id"] != ended["id"]
+    assert minted["start"] == _time.to_unix(later)
+    assert _times_redeemed(instance, coupon) == 2

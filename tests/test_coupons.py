@@ -260,8 +260,8 @@ def test_delete_zeroes_valid_and_404s_the_retrieve(instance: seahaven.Instance) 
 def test_valid_turns_false_once_redeem_by_passes(instance: seahaven.Instance) -> None:
     """No write marks a coupon's `redeem_by` passing, so `valid` is judged
     at read time against the reading call's clock, and applying the coupon
-    then is the `coupon_expired` refusal
-    (https://github.com/Kiln-AI/stripe_world/issues/13)."""
+    then is refused with the probed expired message (code `coupon_expired`,
+    unprobed) (https://github.com/Kiln-AI/stripe_world/issues/13)."""
     from seahaven_stripe_world.billing import subscription_lifecycle
     from seahaven_stripe_world.resources import coupons
 
@@ -277,6 +277,6 @@ def test_valid_turns_false_once_redeem_by_passes(instance: seahaven.Instance) ->
             subscription_lifecycle._resolve_discounts(later, [{"coupon": "EARLYBIRD"}])
     assert (exc_info.value.code, exc_info.value.message) == (
         "coupon_expired",
-        "Coupon EARLYBIRD is expired.",
+        "Coupon EARLYBIRD is expired and cannot be applied.",
     )
     assert call(instance, "GET", "/v1/coupons/EARLYBIRD")["times_redeemed"] == 0

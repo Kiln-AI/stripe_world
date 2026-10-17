@@ -31,7 +31,7 @@ uses. The user kept the name (decision 5 below).
      an identical span between a trial-end invoice and the cycle invoice right after it. Any
      other overlap fails. The gap is declared in the guide and in a comment at the exclusion.
      **Fixed since:** a renewal now rolls the item periods before it invoices, so its lines bill
-     the period that starts at the boundary, and a trial-end invoice's own period looks back
+     the period that starts at the boundary, and a natural trial end's invoice period looks back
      over the trial. Both fixtures were rebuilt, the exclusion is gone (no cycle overlap passes),
      a line-level check fails any two overlapping non-proration, non-zero lines of one item, and
      the guide no longer lists the gap.

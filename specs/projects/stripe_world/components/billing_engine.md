@@ -383,7 +383,7 @@ nothing here invents one.
 | `payment_behavior=error_if_incomplete` and the first payment needs action | 402 | `card_error` | `subscription_payment_intent_requires_action` (recorded, Phase 12); **no subscription row is written** |
 | Update a `canceled` / `incomplete_expired` subscription beyond `metadata` / `cancellation_details` | 400 | `invalid_request_error` | `invalid_canceled_subscription_fields` — "A canceled subscription can only update its cancellation_details and metadata." (recorded, Phase 12; corrects this row's earlier `status_transition_invalid`. `metadata` itself succeeds on a canceled row) |
 | Update anything but `metadata` / `default_source` / `default_payment_method` / `description` on an `incomplete` subscription | 400 | `invalid_request_error` | `status_transition_invalid` (code from this table; `metadata` and `description` succeed — recorded, Phase 12 — and `default_payment_method` accepts both a set and the `""` clear — probed live on an incomplete 3DS subscription, Phase 12 CR round 2; the natural rescue-by-reattach move. The refusal's message spelling is unprobed, declared) |
-| Expired coupon applied | 400 | `invalid_request_error` | `coupon_expired` — past `redeem_by` ("Coupon X is expired."), or redeemed `max_redemptions` times ("Coupon X has been redeemed the maximum number of times."); both messages unrecorded, the second unprobed (issue #13) |
+| Expired coupon applied | 400 | `invalid_request_error` | `coupon_expired` — past `redeem_by` ("Coupon X is expired and cannot be applied."), or redeemed `max_redemptions` times ("Coupon X is used up and cannot be applied."); both messages probed via the Stripe MCP, 2026-10-16, which answers the message alone, so the type, HTTP status, `param` and code are unprobed. An update re-sending a coupon the subscription already carries is not refused as used up (probed) or past `redeem_by` (unprobed) (§3.3); a deleted one still answers `No such coupon` (unprobed) (issue #13) |
 | Payout exceeding the available balance | 400 | `invalid_request_error` | `balance_insufficient` |
 | Refund a charge with an open dispute | 400 | `invalid_request_error` | `charge_disputed` |
 | Refund beyond the remaining amount on a partially refunded charge | 400 | `invalid_request_error` | *(none)* — `param: "amount"`, `Refund amount ($40.00) is greater than unrefunded amount on charge ($30.00)` (probed, Phase 9; this table's `charge_already_refunded` was the fully-refunded case only) |
@@ -412,7 +412,7 @@ transaction Seahaven opens for the call.
 
 | Trigger | Guard | → | Side effects | Events |
 |---|---|---|---|---|
-| `create` | `trial_end` in the future, or `trial_period_days > 0` | `trialing` | Items' periods span `[now, trial_end)`; `trial_start`/`trial_end` set; a **paid $0 `subscription_create` invoice** whose line is `Free trial for 1 × <product>` over `[start, trial_end)` (recorded, Phase 12 — corrects this row's earlier "no invoice"); `billing_cycle_anchor := trial_end`. A pending item the create sweeps (§3.1) bills on this invoice beside the $0 trial line, with the create's coupons applied as on a paid create's first invoice — a once-coupon is consumed there rather than parked for the trial end. The invoice is collected like a paid create's first invoice (charged; `send_invoice` leaves it open) while the status stays `trialing`, and a failed charge never answers per `payment_behavior` (unprobed; issue #14) | `customer.subscription.created`, `invoice.created`, `invoice.finalized`, `invoice.paid`; with a swept item: `charge.succeeded` and `invoice.payment_succeeded` before `invoice.paid` when charged, `invoice.sent` and no `invoice.paid` for `send_invoice`, `charge.failed` and `invoice.payment_failed` and no `invoice.paid` on a decline |
+| `create` | `trial_end` in the future, or `trial_period_days > 0` | `trialing` | Items' periods span `[now, trial_end)`; `trial_start`/`trial_end` set; a **paid $0 `subscription_create` invoice** whose line is `Free trial for 1 × <product>` over `[start, trial_end)` (recorded, Phase 12 — corrects this row's earlier "no invoice"); `billing_cycle_anchor := trial_end`. A pending item the create sweeps (§3.1) bills on this invoice beside the $0 trial line, with the create's coupons applied as on a paid create's first invoice — a once-coupon is consumed there rather than parked for the trial end. The invoice is collected like a paid create's first invoice (charged; `send_invoice` leaves it open) while the status stays `trialing`, and a failed charge never answers per `payment_behavior` (probed via the Stripe MCP, 2026-10-16: the swept item's line ahead of the $0 trial line, a once-coupon consumed on the invoice, charged, invoice period `[created, created]`; the `send_invoice` and failed-charge cases unprobed; issue #14) | `customer.subscription.created`, `invoice.created`, `invoice.finalized`, `invoice.paid`; with a swept item: `charge.succeeded` and `invoice.payment_succeeded` before `invoice.paid` when charged, `invoice.sent` and no `invoice.paid` for `send_invoice`, `charge.failed` and `invoice.payment_failed` and no `invoice.paid` on a decline |
 | `create` | no trial, first invoice total ≤ 0 | `active` | `subscription_create` invoice created, finalized, `paid` with `amount_due = 0` | `customer.subscription.created`, `invoice.created`, `invoice.finalized`, `invoice.paid` |
 | `create` | `collection_method = send_invoice` | `active` | Invoice created and left **`draft`** with `auto_advance = 1` and `due_date = now + days_until_due` (recorded, Phase 12 — corrects this table's earlier "created + finalized, left open"; the hour window follows). Activation does **not** depend on payment — `spec3.json` verbatim | `customer.subscription.created` |
 | `create` | `charge_automatically`, payment required, charge succeeds | `active` | Invoice created → finalized → `paid`; charge + `balance_transaction` | `customer.subscription.created`, `invoice.created`, `invoice.finalized`, `invoice.payment_succeeded`, `invoice.paid` |
@@ -440,19 +440,19 @@ otherwise-mysterious `paused` status, and it is the reason `paused` is "only rea
 
 | Trigger | Guard | → | Side effects | Events |
 |---|---|---|---|---|
-| `trial_end` | default payment method present | `active` | `subscription_cycle` invoice for the first paid period, finalized, paid: its line bills the new period, while the invoice's own `period_start`/`period_end` look back over the trial, `[trial period start, trial end]` (unprobed — no trial-end invoice body is recorded; issue #12) | `customer.subscription.updated`, `invoice.*` |
+| `trial_end` | default payment method present | `active` | `subscription_cycle` invoice for the first paid period, finalized, paid: its line bills the new period, while the invoice's own `period_start`/`period_end` look back over the trial, `[trial period start, trial end]`, and a pending item is swept onto it (probed via the Stripe MCP, 2026-10-16; issue #12) | `customer.subscription.updated`, `invoice.*` |
 | `trial_end` | **`charge_automatically`**, no PM, `missing_payment_method = create_invoice` (Stripe's default) | — | **400** `resource_missing`, the no-attached-payment-source message, nothing written (recorded, Phase 12 — corrects this table's earlier "falls into past_due"; the invoice the behavior names cannot be collected without a method. `send_invoice` never refuses here — probed, Phase 12 CR round 5: 200 `active`, the invoice left **draft** with `auto_advance: true`, `attempted: false`, `attempt_count: 0`, `due_date = now + days_until_due`, and no charge with or without a PM) | — |
-| `trial_end` | no PM, `missing_payment_method = pause` | `paused` | **No invoice is generated at all** while paused — this is what distinguishes it from `pause_collection` | `customer.subscription.paused` |
+| `trial_end` | no PM, `missing_payment_method = pause` | `paused` | **No invoice is generated at all** while paused — this is what distinguishes it from `pause_collection`. An update-driven (`trial_end = "now"`) pause moves `billing_cycle_anchor` to the update instant (recorded, cassette 12 seq 39), the anchor a `billing_cycle_anchor: unchanged` resume parks | `customer.subscription.paused` |
 | `trial_end` | no PM, `missing_payment_method = cancel` | `canceled` | `canceled_at = now`, `ended_at = now`, `cancellation_details.reason = payment_failed`… **corrected by the Phase 12 recording: the stamp is `cancellation_requested`** | `customer.subscription.deleted` |
 | `trial_will_end` | fixture/test only | unchanged | none | `customer.subscription.trial_will_end` |
-| `update trial_end = "now"` | — | `active` (or `past_due`) | Ends the trial immediately and runs the `trial_end` path above; the update-driven end's first paid invoice bills `billing_reason: subscription_update` with its line spanning the NEW period `[now, now + interval)` (probed in both billing modes, Phase 12 CR round 4's trail — correcting this row's earlier `subscription_cycle`; `advance_cycle`'s natural-boundary walker keeps `subscription_cycle`, unprobed); the invoice's own period looks back, `[trial period start, now]` (unprobed) | `customer.subscription.updated` |
+| `update trial_end = "now"` | — | `active` (or `past_due`) | Ends the trial immediately and runs the `trial_end` path above; the update-driven end's first paid invoice bills `billing_reason: subscription_update` with its line spanning the NEW period `[now, now + interval)` (probed in both billing modes, Phase 12 CR round 4's trail — correcting this row's earlier `subscription_cycle`; `advance_cycle`'s natural-boundary walker keeps `subscription_cycle`, probed via the Stripe MCP, 2026-10-16); the invoice's own period is the update's instant, `[now, now]`, as a create's is (probed via the Stripe MCP, 2026-10-16 — correcting this row's earlier look-back over the trial). `billing_cycle_anchor` moves to the update instant (recorded, cassette 12 seq 29, charged, and seq 39, the `pause` end; probed via the Stripe MCP, 2026-10-16, charged), and the `send_invoice` branch moves it alike (unprobed); `trial_end` is the instant itself, where live stamps one second before it (not modelled) | `customer.subscription.updated` |
 | `update trial_end = <future>` on `active` | — | `trialing` | The conversion edge (probed, Phase 12 CR round 3/4's trail): `trial_start = now`, the item period rebuilds to `[now, trial_end)`, the anchor moves to the trial end, and one `subscription_update` invoice is minted — a full-price `Unused time on <product> after <date>` proration credit for the abandoned remainder plus the $0 `Free trial` line, paid with no counted attempt, the credit landing as customer balance. Conversions from other statuses are unprobed and refused | `customer.subscription.updated` |
 
 #### Out of `paused`
 
 | Trigger | Guard | → | Side effects | Events |
 |---|---|---|---|---|
-| `resume` (`POST /v1/subscriptions/{id}/resume`) | any (with or without a payment method — both probed) | `paused` (unchanged) | **The recorded park (Phase 12)**: 200 with the status still `paused`; a SetupIntent is minted (at trial create for a no-PM trial, reused by `/resume`), the resume lands as `pending_update` with `expires_at = now + 23h`, the anchor target is recorded, and a `subscription_cycle` invoice is created open and unattempted — its line billing the parked-anchor period, its own period looking back, `[paused period start, now]` (both unprobed). Activation happens when the SetupIntent confirms — this world wires that hook; live's minted seti reads `canceled` within moments (an async artifact, declared) | `customer.subscription.updated` |
+| `resume` (`POST /v1/subscriptions/{id}/resume`) | any (with or without a payment method — both probed) | `paused` (unchanged) | **The recorded park (Phase 12)**: 200 with the status still `paused`; a SetupIntent is minted (at trial create for a no-PM trial, reused by `/resume`), the resume lands as `pending_update` with `expires_at = now + 23h`, the anchor target is recorded, and a `subscription_cycle` invoice is created open and unattempted — its line billing the parked-anchor period (unprobed), its own period the resume's instant, `[now, now]` (unprobed, by analogy with the probed `trial_end = "now"`, another call that restarts the cycle). Activation happens when the SetupIntent confirms — this world wires that hook; live's minted seti reads `canceled` within moments (an async artifact, declared) | `customer.subscription.updated` |
 | `resume` | the subscription is not `paused` | — | 400 "You can only resume a subscription if it is \`paused\`." (recorded); on a terminal status, the 404 `No such subscription` (recorded) | — |
 
 `paused` and `pause_collection` are unrelated and must never be conflated:
@@ -490,9 +490,9 @@ these outcomes is an honestly-declared unrecorded ruling.
 | `update` (price/quantity) | `proration_behavior = always_invoice` | `active` | Proration items created **and** an invoice with `billing_reason = subscription_update` created, finalized and paid immediately | `customer.subscription.updated`, `invoice.created`, `invoice.finalized`, `invoice.paid` |
 | `update` (price/quantity) | `proration_behavior = none` | `active` | Items changed, **no proration lines at all** | `customer.subscription.updated` |
 | `update billing_cycle_anchor = "now"` | — | `active` | Truncates the current period, prorates per `proration_behavior`, resets the anchor | `customer.subscription.updated` |
-| `update cancel_at_period_end = true` (or a `cancel_at` instant) | — | **unchanged** | `cancel_at_period_end = 1` and `cancel_at = sub_period_end` (a `cancel_at` instant sets only `cancel_at`), `canceled_at = now`, `cancellation_details.reason = cancellation_requested` (recorded, cassette 12 step 12; the `cancel_at` spelling unprobed). **No proration, no invoice, no status change** (spec3 says a `cancel_at` before the period end prorates; not modelled). Only a request naming the cancel fields stamps `canceled_at`; an unrelated update while the cancel is pending keeps it (unprobed) | `customer.subscription.updated` |
-| `update cancel_at_period_end = false` (or `cancel_at = ""`) | before the boundary | unchanged | clears `cancel_at`, the flag, `canceled_at` and the reason (recorded, cassette 12 step 13; the `cancel_at = ""` spelling, and its clearing the flag, unprobed) | `customer.subscription.updated` |
-| `cycle_boundary` | `cancel_at_period_end = 1` | `canceled` | `canceled_at` keeps the request's instant (spec3: "the time of the most recent update request, not the end of the subscription period"), `ended_at = period_end`; **no renewal invoice is generated** | `customer.subscription.deleted` |
+| `update cancel_at_period_end = true` (or a `cancel_at` instant) | — | **unchanged** | `cancel_at_period_end = 1` and `cancel_at = sub_period_end` (a `cancel_at` instant sets only `cancel_at`), `canceled_at = now`, `cancellation_details.reason = cancellation_requested` (recorded, cassette 12 step 12; the `cancel_at` spelling probed via the Stripe MCP, 2026-10-16: the same instant and reason, the flag false). **No proration, no invoice, no status change** (spec3 says a `cancel_at` before the period end prorates; not modelled). Only a request naming the cancel fields stamps `canceled_at`; an unrelated update while the cancel is pending keeps it (probed via the Stripe MCP, 2026-10-17, for a metadata-only update). A create with `cancel_at_period_end = true` writes the same shape: `cancel_at` = the first period end, `canceled_at` = the create's instant and the reason (probed via the Stripe MCP, 2026-10-17) | `customer.subscription.updated` |
+| `update cancel_at_period_end = false` (or `cancel_at = ""`) | before the boundary | unchanged | clears `cancel_at`, the flag, `canceled_at` and the reason (recorded, cassette 12 step 13; the `cancel_at = ""` spelling sent alone, and its clearing the flag, probed via the Stripe MCP, 2026-10-17) | `customer.subscription.updated` |
+| `cycle_boundary` | `cancel_at_period_end = 1` | `canceled` | `canceled_at` keeps the request's instant (spec3: "the time of the most recent update request, not the end of the subscription period"), `ended_at = period_end` (probed via the Stripe MCP, 2026-10-16, on a `cancel_at` firing: `canceled_at` stays, `ended_at = cancel_at`; this world walks only the flag's cancel, never a bare `cancel_at` instant); **no renewal invoice is generated** | `customer.subscription.deleted` |
 | `DELETE /v1/subscriptions/{id}` | — | `canceled` | Immediate. `prorate=true` (default `false`) emits a credit-only proration item for the unused remainder; `invoice_now=true` additionally creates and finalizes a final invoice. `cancellation_details.reason = cancellation_requested` | `customer.subscription.deleted` (+ `invoice.*` if `invoice_now`) |
 
 `DELETE`'s parameters were re-derived from `spec3.json` for this document, closing
@@ -663,8 +663,9 @@ third bucket folds into the first):
    subscriptions other than the specified subscription will ignore the invoice item"); so does an
    item in another currency (unprobed). The `invoice_now` final invoice sweeps nothing. The swept
    items' lines go newest-first **ahead of** the subscription's own lines — the `include` order,
-   unprobed on a subscription invoice — and the subscription lines stay as the path builds them
-   (a trial's $0 lines, a resume's parked-anchor periods), never rebuilt.
+   probed via the Stripe MCP (2026-10-16) on a paid create and, for a single swept item, a trial
+   create, and unprobed on the other subscription invoices — and the subscription lines stay as
+   the path builds them (a trial's $0 lines, a resume's parked-anchor periods), never rebuilt.
 2. **Subscription items**, in reverse chronological order — one line per row in
    `subscription_items` for the invoice's subscription, with
    `period = [item.current_period_start, item.current_period_end)` and
@@ -723,7 +724,7 @@ prorations" — so item-scope discounts skip it. This is not an optimisation; a 
 proration credit would make the −667/+333 case irreproducible. An invoice item's line carries the
 item's own `discountable`, which defaults to false for a negative item and true otherwise
 (`spec3.json` on the create: "Defaults to false for prorations or negative invoice items, and true
-for all other invoice items").
+for all other invoice items"; the negative default probed via the Stripe MCP, 2026-10-16).
 
 #### 3.3 Invoice-scope discounts
 
@@ -732,21 +733,24 @@ discount, or set directly) are computed against the post-item-discount subtotal 
 **apportioned back across the discountable lines** with `apportion`, so they appear in each line's
 `discount_amounts` and aggregate correctly into `total_discount_amounts` without being
 double-counted in `subtotal`. Only a discountable line is a base or an apportion weight; every
-other line carries the discount at amount 0. A subscription's coupon therefore reaches a swept
-item that is discountable, never a swept proration — on the invoices that apply the coupon: the
+other line carries the discount at amount 0, in `discount_amounts` and `pretax_credit_amounts`
+alike, a $0 trial line included (probed via the Stripe MCP, 2026-10-16). A subscription's coupon
+therefore reaches a swept item that is discountable, never a swept proration or a
+`discountable: false` item (probed via the Stripe MCP, 2026-10-16) — on the invoices that apply
+the coupon: the
 create (a trial create too, once it sweeps an item), trial-end, renewal and resume invoices. The
 `always_invoice` proration invoice applies no subscription coupon at all, and a conversion invoice
 nets its coupon into its own credit only, so a swept item bills its full amount on either
 (unprobed, declared).
 
-A subscription's discount has a window (issue #13; Stripe's docs, unprobed). It starts when the
-discount is minted, and a `repeating` coupon's ends `duration_in_months` calendar months later
-(`add_interval`, the day clamped), trial time included; `once` and `forever` have no end. A new
-subscription invoice applies a persisted discount only while its billing instant — the boundary a
-renewal or trial end bills, the request's instant otherwise — is before `end`, so a 3-month coupon
-on a monthly plan discounts the create invoice and two renewals, and the renewal exactly at `end`
-bills full price. Stripe removes an ended discount at its `end`, with `customer.discount.deleted`
-(unprobed); a frozen clock cannot write at an instant nobody calls at, so a read from `end` on
+A subscription's discount has a window (issue #13). It starts when the discount is minted, and a
+`repeating` coupon's ends `duration_in_months` calendar months later (probed via the Stripe MCP,
+2026-10-16), the day clamped by `add_interval` and trial time included (both unprobed); `once`
+and `forever` have no end. A new subscription invoice applies a persisted discount only while its
+billing instant — the boundary a renewal or trial end bills, the request's instant otherwise — is
+before `end`, so a 3-month coupon on a monthly plan discounts the create invoice and two renewals,
+and the renewal exactly at `end` bills full price (that boundary unprobed). Stripe removes an
+ended discount at its `end`, with `customer.discount.deleted` (unprobed); a frozen clock cannot write at an instant nobody calls at, so a read from `end` on
 omits it from `subscription.discounts`, the next subscription invoice prunes it from the row
 before it is minted, and a company fixture prunes it at its `NOW`. The invoices the discount
 reached keep it, a draft's rebuild included, and no `customer.discount.*` event fires. Renewals
@@ -754,8 +758,15 @@ chain each period from the previous boundary rather than from `billing_cycle_anc
 29–31 anchor (the 31st drifting to the 28th) a 3-month window can cover a fourth renewal; the
 anchoring is a separate fix. Each discount minted from a coupon — at create, or by an update
 passing `discounts` — counts one redemption on the coupon; an update that omits `discounts` keeps
-the row's own. `coupon.valid` is false once the coupon is deleted, past `redeem_by` or at
-`max_redemptions`, answered at read time.
+the row's own. An update's `discounts` replaces the list, but an entry for a coupon the
+subscription already carries a live discount from keeps that discount unchanged (same `di_`,
+`start` and `end`), counts no redemption and is not refused, even when the coupon is used up
+(probed via the Stripe MCP, 2026-10-16) or past its `redeem_by` (unprobed; a deleted coupon
+still answers `No such coupon`); only a coupon the subscription does not carry mints, is checked
+and counts. Each entry keeps at most one carried discount, so a coupon listed twice keeps its
+discount and mints a second (unprobed). `coupon.valid` is false once the coupon is
+deleted, past `redeem_by` or at `max_redemptions`, answered at read time (the last two, with
+`times_redeemed`, probed via the Stripe MCP, 2026-10-16).
 
 The apportionment rule is **floor-each-then-remainder-to-the-last**, not independent rounding. This
 is documented directly and is a *different* rule from proration rounding — the same page that proves
