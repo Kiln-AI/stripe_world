@@ -243,7 +243,7 @@ with seahaven_stripe_world.world.instance("empty") as inst:
 
 ## The framework
 
-`seahaven` is the PyPI release: `pyproject.toml` requires `seahaven~=0.6`, and `uv.lock` records
+`seahaven` is the PyPI release: `pyproject.toml` requires `seahaven~=0.7`, and `uv.lock` records
 the exact version. The framework's docs ship inside the installed package: `uv run seahaven docs`
 prints the directory.
 

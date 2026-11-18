@@ -81,7 +81,7 @@ the code carries a comment linking to its entry there.
   `fixtures_src/` and described, with checked queries, in `docs/fixtures.md`. The eval suite is
   deferred.
 - **This repo is the world checkout**: `pyproject.toml` and `src/seahaven_stripe_world/` at the root, beside
-  `specs/` and `research/`. The framework is not vendored here: `seahaven~=0.6` resolves to the
+  `specs/` and `research/`. The framework is not vendored here: `seahaven~=0.7` resolves to the
   PyPI release, and `uv.lock` pins the exact version, so `uv sync` installs the same core every time
   and moving it is a `uv lock` change.
   `pydantic` is pinned to 2.12.3 per `SEAHAVEN_FINDINGS.md` Entry 1; do not remove the pin without

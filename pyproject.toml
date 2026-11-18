@@ -14,7 +14,7 @@ readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE", "THIRD_PARTY_LICENSES.md"]
 requires-python = ">=3.14"
-dependencies = ["seahaven~=0.6"]
+dependencies = ["seahaven~=0.7"]
 
 # The server and its client. Left out of the default install because openenv's
 # own dependency tree is large, and a world used in process never needs it.
