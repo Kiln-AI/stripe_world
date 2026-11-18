@@ -189,8 +189,8 @@ def test_registered_tool_set_matches_expected() -> None:
     """No unintended tool registration (e.g. ``call_stripe``, which is
     deliberately unregistered per functional spec section 2.5)."""
     tools = _world_tools()
-    # controller_run_sql is a framework tool, not ours.
-    ours = {n for n in tools if n != "controller_run_sql"}
+    # The controller_* control tools are the framework's, not ours.
+    ours = {n for n in tools if n not in {"controller_run_sql", "controller_advance_clock"}}
     assert ours == _EXPECTED_NOW
 
 

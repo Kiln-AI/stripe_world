@@ -1210,7 +1210,7 @@ wheels = [
 
 [[package]]
 name = "openenv"
-version = "0.5.0"
+version = "0.13.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "fastapi" },
@@ -1218,6 +1218,7 @@ dependencies = [
     { name = "gradio" },
     { name = "httpx" },
     { name = "huggingface-hub" },
+    { name = "jsonschema" },
     { name = "openai" },
     { name = "packaging" },
     { name = "pydantic" },
@@ -1231,9 +1232,9 @@ dependencies = [
     { name = "uvicorn" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/84/42/31bda8d0968abe82ac3d01e74eab40e91aa7a52340fab163eb2e454b0fd2/openenv-0.5.0.tar.gz", hash = "sha256:8a444422f7e9c459b002ecc67bfdb92d955fd96b5713a94bf21f50807441b97b", size = 472374, upload-time = "2026-09-17T09:49:29.066Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c1/05/8b974ed3850344c6ec65d9139f9087c49f6d7ec50f5c76ef0315fb6f79a8/openenv-0.13.0.tar.gz", hash = "sha256:358cd949d5103c73f4c0dcf25f7e693edbbe2f33865b7a6ef6194bb69d709f91", size = 692221, upload-time = "2026-11-12T06:33:50.144Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f4/e7/9330a4ef253100942f26638a42e6c904e6bf0cdc3f5c512e494a3db534b9/openenv-0.5.0-py3-none-any.whl", hash = "sha256:45345cbb675aed5aafffff465c919b9ee679a124e89a58f124eb7c1386bf56ac", size = 549107, upload-time = "2026-09-17T09:49:27.141Z" },
+    { url = "https://files.pythonhosted.org/packages/02/6b/f534473eb87e2746b4ec60e94dfab51b8484528ed8a674edf4ce098ef248/openenv-0.13.0-py3-none-any.whl", hash = "sha256:d5dc26191246242d9b10bc87571de0f62350072502545f2f789fed8b3e056aa4", size = 811183, upload-time = "2026-11-12T06:33:48.294Z" },
 ]
 
 [[package]]
@@ -1805,16 +1806,16 @@ wheels = [
 
 [[package]]
 name = "seahaven"
-version = "0.6.0"
+version = "0.7.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "apsw" },
     { name = "pydantic" },
     { name = "pyyaml" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/00/35/e36f8aa5ef5bf51f87ea5bd82cfe1524c0a7a7f6a52d78e6bebca490c222/seahaven-0.6.0.tar.gz", hash = "sha256:ae30bf452f7ae9460901743a461596cc8bb664edfb3f23e0c0944e701a2b857d", size = 432700, upload-time = "2026-10-08T21:06:42.374Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/1a/c9/b9fe6460c3d67776a4afef11a528d876ffb229d1cafa35798949ec10e416/seahaven-0.7.0.tar.gz", hash = "sha256:d9a529d1e7db188bff6d9f7274c093f3944bd0b3c13ecfb739d05c7c6a345d62", size = 436405, upload-time = "2026-11-18T20:42:16.92Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/73/c3/35023ba480326800a32893e2528f919ce02a5277beec1f109e17f852305f/seahaven-0.6.0-py3-none-any.whl", hash = "sha256:30efba0aee46ea01b82fb7cc8a80d281b8b62a84b5a14326f9599ab9c036c6bc", size = 489776, upload-time = "2026-10-08T21:06:41.202Z" },
+    { url = "https://files.pythonhosted.org/packages/8f/03/4150f7c8641e252d125f88653142e4f0aaa3db27e8ea80715a12e2aaff7c/seahaven-0.7.0-py3-none-any.whl", hash = "sha256:49fa10cc8c94c7b57fb3a0ae4e36810f92b975f9631c80c5d9b5bf44c31ea4fe", size = 493767, upload-time = "2026-11-18T20:42:15.055Z" },
 ]
 
 [package.optional-dependencies]
@@ -1857,7 +1858,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "seahaven", specifier = "~=0.6" },
+    { name = "seahaven", specifier = "~=0.7" },
     { name = "seahaven", extras = ["mcp"], marker = "extra == 'mcp'" },
     { name = "seahaven", extras = ["serve"], marker = "extra == 'serve'" },
     { name = "starlette", marker = "extra == 'http'", specifier = ">=0.47" },
